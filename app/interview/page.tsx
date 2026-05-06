@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 
 const CONFIG = {
   candidateName: 'Ahmed',
@@ -34,6 +34,26 @@ export default function InterviewPage() {
   const chatRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const hasStarted = useRef(false)
+  const silenceTimer = useRef<any>(null)
+  const messagesRef = useRef<Message[]>([])
+  const isLoadingRef = useRef(false)
+  const isEndedRef = useRef(false)
+
+  useEffect(() => { messagesRef.current = messages }, [messages])
+  useEffect(() => { isLoadingRef.current = isLoading }, [isLoading])
+  useEffect(() => { isEndedRef.current = isEnded }, [isEnded])
+
+  const resetSilenceTimer = useCallback(() => {
+    if (silenceTimer.current) clearTimeout(silenceTimer.current)
+    silenceTimer.current = setTimeout(() => {
+      if (!isLoadingRef.current && !isEndedRef.current) {
+        const silenceMsg: Message = { role: 'user', content: '[Candidate is silent]' }
+        const newMsgs = [...messagesRef.current, silenceMsg]
+        setMessages(newMsgs)
+        callAdam(newMsgs)
+      }
+    }, 30000)
+  }, [])
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -66,6 +86,7 @@ export default function InterviewPage() {
 
   const callAdam = async (msgs: Message[]) => {
     setIsLoading(true)
+    if (silenceTimer.current) clearTimeout(silenceTimer.current)
     try {
       const res = await fetch('/api/interview', {
         method: 'POST',
@@ -87,14 +108,18 @@ export default function InterviewPage() {
       setMessages(prev => [...prev, newMsg])
 
       if (data.score) {
-        setOverallScore(prev => {
+        setOverallScore(() => {
           const all = [...msgs.filter(m => m.score).map(m => m.score.score), data.score.score]
           return Math.round(all.reduce((a, b) => a + b, 0) / all.length)
         })
         setQuestionCount(prev => prev + 1)
       }
 
-      if (data.isEndOfSession) setIsEnded(true)
+      if (data.isEndOfSession) {
+        setIsEnded(true)
+      } else {
+        resetSilenceTimer()
+      }
 
     } catch (err: any) {
       setMessages(prev => [...prev, {
@@ -109,6 +134,7 @@ export default function InterviewPage() {
 
   const sendMessage = async () => {
     if (!input.trim() || isLoading || isEnded) return
+    if (silenceTimer.current) clearTimeout(silenceTimer.current)
     const userMsg: Message = { role: 'user', content: input.trim() }
     const newMessages = [...messages, userMsg]
     setMessages(newMessages)
@@ -162,7 +188,9 @@ export default function InterviewPage() {
             <div style={{ fontSize: 9, fontWeight: 600, letterSpacing: 0.5, marginBottom: 4, textTransform: 'uppercase', color: msg.role === 'assistant' ? '#8B96FF' : 'rgba(255,255,255,0.5)' }}>
               {msg.role === 'assistant' ? 'Adam Reid' : CONFIG.candidateName}
             </div>
-            {msg.content}
+            {msg.content === '[Candidate is silent]' ? (
+              <span style={{ color: 'rgba(240,237,232,0.3)', fontStyle: 'italic' }}>...</span>
+            ) : msg.content}
             {msg.score && (
               <div style={{ marginTop: 6, padding: '3px 8px', background: 'rgba(42,92,255,0.1)', borderRadius: 5, fontSize: 10, color: '#8B96FF' }}>
                 Score: {msg.score.score}/100

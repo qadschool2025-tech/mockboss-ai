@@ -11,6 +11,37 @@ const TIME_LIMITS: Record<string, number> = {
   expert: 60 * 60
 }
 
+async function textToSpeech(text: string): Promise<Buffer | null> {
+  try {
+    const voiceId = process.env.ELEVENLABS_VOICE_ID!
+    const response = await fetch(
+      `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
+      {
+        method: 'POST',
+        headers: {
+          'xi-api-key': process.env.ELEVENLABS_API_KEY!,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          text,
+          model_id: 'eleven_multilingual_v2',
+          voice_settings: {
+            stability: 0.5,
+            similarity_boost: 0.75,
+            style: 0.5,
+            use_speaker_boost: true
+          }
+        })
+      }
+    )
+    if (!response.ok) return null
+    const buffer = Buffer.from(await response.arrayBuffer())
+    return buffer
+  } catch {
+    return null
+  }
+}
+
 function buildPrompt(config: any): string {
   return `You are Adam Reid, a certified professional interview evaluator at MockBoss AI.
 Your mission: conduct a real, dynamic, and realistic job interview.
@@ -28,11 +59,11 @@ SESSION DETAILS:
 ${config.jobRequirements ? `- Specific Requirements: ${config.jobRequirements}` : ''}
 ${config.isCareerSwitch ? '- Note: Career switcher. Ask how previous experience transfers.' : ''}
 
-LANGUAGE: ${config.language === 'ar' ? 'Arabic' : 'English'}
+LANGUAGE: ${config.language === 'ar' ? 'Conduct in simple Modern Standard Arabic.' : config.language === 'en' ? 'Conduct in professional English.' : 'Start Arabic, technical questions in English.'}
 
 STYLE:
 - Professional but human
-- Short: 1-2 sentences ONLY
+- Short responses: 1-2 sentences ONLY
 - No explanations, no teaching
 - Never give correct answers
 - Never say you are AI
@@ -57,8 +88,7 @@ SMART INTERACTION:
 - Silence → "Time is passing — make a decision and answer."
 
 After every professional answer append ONLY:
-<score>{"score":0,"clarity":0,"confidence":0,"relevance":0,"technical_depth":0,"notes":""}</score>
-Replace 0s with real scores 0-100.`
+<score>{"score":0,"clarity":0,"confidence":0,"relevance":0,"technical_depth":0,"notes":""}</score>`
 }
 
 export async function POST(req: NextRequest) {
@@ -110,10 +140,10 @@ export async function POST(req: NextRequest) {
       } catch {}
     }
 
-   const audioBuffer = await textToSpeech(content)
-const audioBase64 = audioBuffer ? audioBuffer.toString('base64') : null
+    const audioBuffer = await textToSpeech(content)
+    const audioBase64 = audioBuffer ? audioBuffer.toString('base64') : null
 
-return NextResponse.json({ success: true, content, score, audioBase64 })
+    return NextResponse.json({ success: true, content, score, audioBase64 })
 
   } catch (error: any) {
     return NextResponse.json(

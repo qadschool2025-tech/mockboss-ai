@@ -31,6 +31,7 @@ export default function InterviewPage() {
   const [overallScore, setOverallScore] = useState<number | null>(null)
   const [questionCount, setQuestionCount] = useState(1)
   const [isEnded, setIsEnded] = useState(false)
+  const [isMuted, setIsMuted] = useState(false)
   const chatRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const hasStarted = useRef(false)
@@ -38,10 +39,25 @@ export default function InterviewPage() {
   const messagesRef = useRef<Message[]>([])
   const isLoadingRef = useRef(false)
   const isEndedRef = useRef(false)
+  const audioRef = useRef<HTMLAudioElement | null>(null)
 
   useEffect(() => { messagesRef.current = messages }, [messages])
   useEffect(() => { isLoadingRef.current = isLoading }, [isLoading])
   useEffect(() => { isEndedRef.current = isEnded }, [isEnded])
+
+  const playAudio = useCallback((audioBase64: string) => {
+    if (isMuted) return
+    try {
+      if (audioRef.current) {
+        audioRef.current.pause()
+        audioRef.current = null
+      }
+      const audioData = `data:audio/mp3;base64,${audioBase64}`
+      const audio = new Audio(audioData)
+      audioRef.current = audio
+      audio.play().catch(() => {})
+    } catch {}
+  }, [isMuted])
 
   const resetSilenceTimer = useCallback(() => {
     if (silenceTimer.current) clearTimeout(silenceTimer.current)
@@ -91,21 +107,17 @@ export default function InterviewPage() {
       const res = await fetch('/api/interview', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          config: CONFIG,
-          messages: msgs,
-          sessionStartTime
-        })
+        body: JSON.stringify({ config: CONFIG, messages: msgs, sessionStartTime })
       })
       const data = await res.json()
       if (!data.success) throw new Error(data.error)
 
-      const newMsg: Message = {
-        role: 'assistant',
-        content: data.content,
-        score: data.score
-      }
+      const newMsg: Message = { role: 'assistant', content: data.content, score: data.score }
       setMessages(prev => [...prev, newMsg])
+
+      if (data.audioBase64) {
+        playAudio(data.audioBase64)
+      }
 
       if (data.score) {
         setOverallScore(() => {
@@ -122,10 +134,7 @@ export default function InterviewPage() {
       }
 
     } catch (err: any) {
-      setMessages(prev => [...prev, {
-        role: 'assistant',
-        content: `Error: ${err.message}`
-      }])
+      setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${err.message}` }])
     } finally {
       setIsLoading(false)
       inputRef.current?.focus()
@@ -135,6 +144,7 @@ export default function InterviewPage() {
   const sendMessage = async () => {
     if (!input.trim() || isLoading || isEnded) return
     if (silenceTimer.current) clearTimeout(silenceTimer.current)
+    if (audioRef.current) { audioRef.current.pause(); audioRef.current = null }
     const userMsg: Message = { role: 'user', content: input.trim() }
     const newMessages = [...messages, userMsg]
     setMessages(newMessages)
@@ -143,10 +153,7 @@ export default function InterviewPage() {
   }
 
   const handleKey = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      sendMessage()
-    }
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage() }
   }
 
   return (
@@ -158,6 +165,9 @@ export default function InterviewPage() {
           <div style={{ fontSize: 10, color: 'rgba(240,237,232,0.4)' }}>Based on highest hiring standards</div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <button onClick={() => setIsMuted(!isMuted)} style={{ background: 'none', border: '0.5px solid rgba(255,255,255,0.2)', borderRadius: 6, color: '#F0EDE8', padding: '3px 8px', cursor: 'pointer', fontSize: 14 }}>
+            {isMuted ? '🔇' : '🔊'}
+          </button>
           <span style={{ fontSize: 10, color: '#F87171', background: 'rgba(220,38,38,0.1)', border: '0.5px solid rgba(220,38,38,0.2)', borderRadius: 20, padding: '3px 8px' }}>● Live</span>
           <span style={{ fontWeight: 800, fontSize: 16, color: timeLeft < 180 ? '#EF4444' : '#F0EDE8' }}>{formatTime(timeLeft)}</span>
         </div>
@@ -188,14 +198,8 @@ export default function InterviewPage() {
             <div style={{ fontSize: 9, fontWeight: 600, letterSpacing: 0.5, marginBottom: 4, textTransform: 'uppercase', color: msg.role === 'assistant' ? '#8B96FF' : 'rgba(255,255,255,0.5)' }}>
               {msg.role === 'assistant' ? 'Adam Reid' : CONFIG.candidateName}
             </div>
-            {msg.content === '[Candidate is silent]' ? (
-              <span style={{ color: 'rgba(240,237,232,0.3)', fontStyle: 'italic' }}>...</span>
-            ) : msg.content}
-            {msg.score && (
-              <div style={{ marginTop: 6, padding: '3px 8px', background: 'rgba(42,92,255,0.1)', borderRadius: 5, fontSize: 10, color: '#8B96FF' }}>
-                Score: {msg.score.score}/100
-              </div>
-            )}
+            {msg.content === '[Candidate is silent]' ? <span style={{ color: 'rgba(240,237,232,0.3)', fontStyle: 'italic' }}>...</span> : msg.content}
+            {msg.score && <div style={{ marginTop: 6, padding: '3px 8px', background: 'rgba(42,92,255,0.1)', borderRadius: 5, fontSize: 10, color: '#8B96FF' }}>Score: {msg.score.score}/100</div>}
           </div>
         ))}
         {isLoading && (

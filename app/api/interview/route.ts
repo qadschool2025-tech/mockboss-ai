@@ -110,7 +110,10 @@ export async function POST(req: NextRequest) {
       } catch {}
     }
 
-    return NextResponse.json({ success: true, content, score })
+   const audioBuffer = await textToSpeech(content)
+const audioBase64 = audioBuffer ? audioBuffer.toString('base64') : null
+
+return NextResponse.json({ success: true, content, score, audioBase64 })
 
   } catch (error: any) {
     return NextResponse.json(

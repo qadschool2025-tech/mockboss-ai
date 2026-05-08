@@ -16,10 +16,19 @@ const CONFIG = {
   plan: 'free'
 }
 
+interface VoiceAnalysis {
+  wordsPerMinute: number
+  duration: number
+  wordCount: number
+  confidence: 'high' | 'medium' | 'low'
+  hesitation: 'high' | 'medium' | 'low'
+}
+
 interface Message {
   role: 'user' | 'assistant'
   content: string
   score?: any
+  voiceAnalysis?: VoiceAnalysis
 }
 
 export default function InterviewPage() {
@@ -32,8 +41,11 @@ export default function InterviewPage() {
   const [questionCount, setQuestionCount] = useState(1)
   const [isEnded, setIsEnded] = useState(false)
   const [isMuted, setIsMuted] = useState(false)
+  const [isRecording, setIsRecording] = useState(false)
+  const [isTranscribing, setIsTranscribing] = useState(false)
   const [audioReady, setAudioReady] = useState(false)
   const [pendingAudio, setPendingAudio] = useState<string | null>(null)
+  const [micError, setMicError] = useState<string | null>(null)
 
   const chatRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
@@ -45,12 +57,13 @@ export default function InterviewPage() {
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const isMutedRef = useRef(false)
   const audioReadyRef = useRef(false)
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const audioChunksRef = useRef<Blob[]>([])
 
   useEffect(() => { messagesRef.current = messages }, [messages])
   useEffect(() => { isLoadingRef.current = isLoading }, [isLoading])
   useEffect(() => { isEndedRef.current = isEnded }, [isEnded])
 
-  // تشغيل الصوت المعلق بعد أول interaction
   useEffect(() => {
     if (audioReady && pendingAudio) {
       playAudioDirect(pendingAudio)
@@ -68,9 +81,7 @@ export default function InterviewPage() {
       }
       const audio = new Audio(`data:audio/mpeg;base64,${audioBase64}`)
       audioRef.current = audio
-      audio.play().catch((err) => {
-        console.warn('Audio play failed:', err)
-      })
+      audio.play().catch(err => console.warn('Audio play failed:', err))
     } catch (err) {
       console.warn('Audio error:', err)
     }
@@ -79,14 +90,12 @@ export default function InterviewPage() {
   const playAudio = useCallback((audioBase64: string) => {
     if (isMutedRef.current) return
     if (!audioReadyRef.current) {
-      // حفظ الصوت لتشغيله بعد أول interaction
       setPendingAudio(audioBase64)
       return
     }
     playAudioDirect(audioBase64)
   }, [])
 
-  // أول interaction من المستخدم تفتح الـ audio context
   const handleFirstInteraction = useCallback(() => {
     if (!audioReadyRef.current) {
       audioReadyRef.current = true
@@ -98,8 +107,76 @@ export default function InterviewPage() {
     const next = !isMuted
     setIsMuted(next)
     isMutedRef.current = next
-    if (next && audioRef.current) {
-      audioRef.current.pause()
+    if (next && audioRef.current) audioRef.current.pause()
+  }
+
+  // ── تسجيل الصوت ──
+  const startRecording = async () => {
+    try {
+      handleFirstInteraction()
+      setMicError(null)
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' })
+      mediaRecorderRef.current = mediaRecorder
+      audioChunksRef.current = []
+
+      mediaRecorder.ondataavailable = e => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data)
+      }
+
+      mediaRecorder.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop())
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
+        await transcribeAudio(audioBlob)
+      }
+
+      mediaRecorder.start()
+      setIsRecording(true)
+    } catch (err: any) {
+      setMicError('Microphone access denied')
+      console.error('Mic error:', err)
+    }
+  }
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop()
+      setIsRecording(false)
+    }
+  }
+
+  const transcribeAudio = async (audioBlob: Blob) => {
+    setIsTranscribing(true)
+    try {
+      const formData = new FormData()
+      formData.append('audio', audioBlob, 'recording.webm')
+
+      const res = await fetch('/api/transcribe', {
+        method: 'POST',
+        body: formData
+      })
+
+      const data = await res.json()
+      if (!data.success) throw new Error(data.error)
+
+      if (data.text?.trim()) {
+        setInput(data.text.trim())
+        // إرسال تلقائي بعد التحويل
+        const userMsg: Message = {
+          role: 'user',
+          content: data.text.trim(),
+          voiceAnalysis: data.analysis
+        }
+        const newMessages = [...messagesRef.current, userMsg]
+        setMessages(newMessages)
+        setInput('')
+        await callAdam(newMessages)
+      }
+    } catch (err: any) {
+      console.error('Transcribe error:', err)
+      setMicError('Transcription failed, please type instead')
+    } finally {
+      setIsTranscribing(false)
     }
   }
 
@@ -126,9 +203,7 @@ export default function InterviewPage() {
   }, [])
 
   useEffect(() => {
-    if (chatRef.current) {
-      chatRef.current.scrollTop = chatRef.current.scrollHeight
-    }
+    if (chatRef.current) chatRef.current.scrollTop = chatRef.current.scrollHeight
   }, [messages, isLoading])
 
   useEffect(() => {
@@ -159,9 +234,7 @@ export default function InterviewPage() {
       const newMsg: Message = { role: 'assistant', content: data.content, score: data.score }
       setMessages(prev => [...prev, newMsg])
 
-      if (data.audioBase64) {
-        playAudio(data.audioBase64)
-      }
+      if (data.audioBase64) playAudio(data.audioBase64)
 
       if (data.score) {
         setOverallScore(() => {
@@ -176,7 +249,6 @@ export default function InterviewPage() {
       } else {
         resetSilenceTimer()
       }
-
     } catch (err: any) {
       setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${err.message}` }])
     } finally {
@@ -187,7 +259,7 @@ export default function InterviewPage() {
 
   const sendMessage = async () => {
     if (!input.trim() || isLoading || isEnded) return
-    handleFirstInteraction() // ← تفعيل audio بعد أول رسالة
+    handleFirstInteraction()
     if (silenceTimer.current) clearTimeout(silenceTimer.current)
     if (audioRef.current) { audioRef.current.pause(); audioRef.current = null }
     const userMsg: Message = { role: 'user', content: input.trim() }
@@ -201,9 +273,15 @@ export default function InterviewPage() {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage() }
   }
 
+  const getConfidenceColor = (level: string) => {
+    if (level === 'high') return '#22C55E'
+    if (level === 'medium') return '#F59E0B'
+    return '#EF4444'
+  }
+
   return (
     <div
-      onClick={handleFirstInteraction} // ← أي click يفتح audio context
+      onClick={handleFirstInteraction}
       style={{ fontFamily: 'system-ui, sans-serif', background: '#0B0D11', color: '#F0EDE8', minHeight: '100vh', display: 'flex', flexDirection: 'column' }}
     >
       {/* Header */}
@@ -217,12 +295,6 @@ export default function InterviewPage() {
           <button onClick={toggleMute} style={{ background: 'none', border: '0.5px solid rgba(255,255,255,0.2)', borderRadius: 6, color: '#F0EDE8', padding: '3px 8px', cursor: 'pointer', fontSize: 14 }}>
             {isMuted ? '🔇' : '🔊'}
           </button>
-          {/* مؤشر حالة الصوت */}
-          {!audioReady && !isMuted && (
-            <span style={{ fontSize: 9, color: '#F59E0B', background: 'rgba(245,158,11,0.1)', border: '0.5px solid rgba(245,158,11,0.2)', borderRadius: 20, padding: '3px 8px' }}>
-              ⚡ Tap to enable audio
-            </span>
-          )}
           <span style={{ fontSize: 10, color: '#F87171', background: 'rgba(220,38,38,0.1)', border: '0.5px solid rgba(220,38,38,0.2)', borderRadius: 20, padding: '3px 8px' }}>● Live</span>
           <span style={{ fontWeight: 800, fontSize: 16, color: timeLeft < 180 ? '#EF4444' : '#F0EDE8' }}>{formatTime(timeLeft)}</span>
         </div>
@@ -243,13 +315,15 @@ export default function InterviewPage() {
           <div>
             <div style={{ fontSize: 12, fontWeight: 600 }}>{CONFIG.candidateName}</div>
             <div style={{ fontSize: 10, color: 'rgba(240,237,232,0.35)' }}>Candidate · {CONFIG.yearsExperience}</div>
-            <div style={{ fontSize: 9, color: 'rgba(240,237,232,0.25)', marginTop: 2 }}>{isLoading ? 'Listening...' : 'Your turn'}</div>
+            <div style={{ fontSize: 9, color: isRecording ? '#EF4444' : isTranscribing ? '#F59E0B' : 'rgba(240,237,232,0.25)', marginTop: 2 }}>
+              {isRecording ? '● Recording...' : isTranscribing ? '◌ Transcribing...' : isLoading ? 'Listening...' : 'Your turn'}
+            </div>
           </div>
         </div>
       </div>
 
       {/* Chat */}
-      <div ref={chatRef} style={{ flex: 1, padding: '10px 16px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8, minHeight: 200, maxHeight: 320 }}>
+      <div ref={chatRef} style={{ flex: 1, padding: '10px 16px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8, minHeight: 200, maxHeight: 300 }}>
         {messages.map((msg, i) => (
           <div key={i} style={{ maxWidth: '88%', alignSelf: msg.role === 'assistant' ? 'flex-start' : 'flex-end', background: msg.role === 'assistant' ? '#1a1f2e' : '#1E3A8A', border: msg.role === 'assistant' ? '0.5px solid rgba(42,92,255,0.18)' : 'none', borderRadius: 10, padding: '10px 13px', fontSize: 13, lineHeight: 1.7 }}>
             <div style={{ fontSize: 9, fontWeight: 600, letterSpacing: 0.5, marginBottom: 4, textTransform: 'uppercase', color: msg.role === 'assistant' ? '#8B96FF' : 'rgba(255,255,255,0.5)' }}>
@@ -258,9 +332,24 @@ export default function InterviewPage() {
             {msg.content === '[Candidate is silent]'
               ? <span style={{ color: 'rgba(240,237,232,0.3)', fontStyle: 'italic' }}>...</span>
               : msg.content}
+            {/* تقييم Adam */}
             {msg.score && (
               <div style={{ marginTop: 6, padding: '3px 8px', background: 'rgba(42,92,255,0.1)', borderRadius: 5, fontSize: 10, color: '#8B96FF' }}>
                 Score: {msg.score.score}/100
+              </div>
+            )}
+            {/* تحليل صوت المستخدم */}
+            {msg.voiceAnalysis && (
+              <div style={{ marginTop: 6, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 9, padding: '2px 6px', background: 'rgba(255,255,255,0.05)', borderRadius: 4, color: getConfidenceColor(msg.voiceAnalysis.confidence) }}>
+                  Confidence: {msg.voiceAnalysis.confidence}
+                </span>
+                <span style={{ fontSize: 9, padding: '2px 6px', background: 'rgba(255,255,255,0.05)', borderRadius: 4, color: getConfidenceColor(msg.voiceAnalysis.hesitation === 'low' ? 'high' : msg.voiceAnalysis.hesitation === 'high' ? 'low' : 'medium') }}>
+                  Hesitation: {msg.voiceAnalysis.hesitation}
+                </span>
+                <span style={{ fontSize: 9, padding: '2px 6px', background: 'rgba(255,255,255,0.05)', borderRadius: 4, color: 'rgba(240,237,232,0.4)' }}>
+                  {msg.voiceAnalysis.wordsPerMinute} WPM · {msg.voiceAnalysis.duration}s
+                </span>
               </div>
             )}
           </div>
@@ -274,24 +363,46 @@ export default function InterviewPage() {
         )}
       </div>
 
-      {/* Input */}
+      {/* Input + Mic */}
       {!isEnded ? (
-        <div style={{ padding: '10px 16px', display: 'flex', gap: 8, borderTop: '0.5px solid rgba(255,255,255,0.05)' }}>
-          <textarea
-            ref={inputRef}
-            value={input}
-            onChange={e => setInput(e.target.value)}
-            onKeyDown={handleKey}
-            placeholder="Type your answer and press Enter..."
-            disabled={isLoading}
-            rows={1}
-            style={{ flex: 1, background: '#16181F', border: '0.5px solid rgba(255,255,255,0.08)', color: '#F0EDE8', fontFamily: 'inherit', fontSize: 13, padding: '9px 12px', borderRadius: 8, outline: 'none', resize: 'none' }}
-          />
-          <button
-            onClick={sendMessage}
-            disabled={isLoading || !input.trim()}
-            style={{ width: 40, height: 40, background: isLoading ? '#333' : '#2563EB', border: 'none', borderRadius: 8, cursor: isLoading ? 'not-allowed' : 'pointer', color: '#fff', fontSize: 18, flexShrink: 0 }}
-          >→</button>
+        <div style={{ padding: '10px 16px', borderTop: '0.5px solid rgba(255,255,255,0.05)' }}>
+          {micError && (
+            <div style={{ fontSize: 11, color: '#F87171', marginBottom: 6, textAlign: 'center' }}>{micError}</div>
+          )}
+          <div style={{ display: 'flex', gap: 8 }}>
+            {/* زر الميكروفون */}
+            <button
+              onMouseDown={startRecording}
+              onMouseUp={stopRecording}
+              onTouchStart={startRecording}
+              onTouchEnd={stopRecording}
+              disabled={isLoading || isTranscribing || isEnded}
+              style={{
+                width: 44, height: 44, borderRadius: 8, border: 'none', cursor: 'pointer', flexShrink: 0, fontSize: 20,
+                background: isRecording ? '#EF4444' : isTranscribing ? '#F59E0B' : '#16181F',
+                boxShadow: isRecording ? '0 0 12px rgba(239,68,68,0.5)' : 'none',
+                transition: 'all 0.15s'
+              }}
+            >
+              {isTranscribing ? '⏳' : isRecording ? '⏹' : '🎤'}
+            </button>
+
+            <textarea
+              ref={inputRef}
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={handleKey}
+              placeholder={isRecording ? 'Recording... release to send' : isTranscribing ? 'Transcribing...' : 'Hold 🎤 to speak, or type here...'}
+              disabled={isLoading || isRecording || isTranscribing}
+              rows={1}
+              style={{ flex: 1, background: '#16181F', border: '0.5px solid rgba(255,255,255,0.08)', color: '#F0EDE8', fontFamily: 'inherit', fontSize: 13, padding: '9px 12px', borderRadius: 8, outline: 'none', resize: 'none' }}
+            />
+            <button
+              onClick={sendMessage}
+              disabled={isLoading || !input.trim()}
+              style={{ width: 44, height: 44, background: isLoading ? '#333' : '#2563EB', border: 'none', borderRadius: 8, cursor: isLoading ? 'not-allowed' : 'pointer', color: '#fff', fontSize: 18, flexShrink: 0 }}
+            >→</button>
+          </div>
         </div>
       ) : (
         <div style={{ padding: 16, textAlign: 'center', borderTop: '0.5px solid rgba(255,255,255,0.05)' }}>

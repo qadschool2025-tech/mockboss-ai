@@ -32,6 +32,9 @@ export default function InterviewPage() {
   const [questionCount, setQuestionCount] = useState(1)
   const [isEnded, setIsEnded] = useState(false)
   const [isMuted, setIsMuted] = useState(false)
+  const [audioReady, setAudioReady] = useState(false)
+  const [pendingAudio, setPendingAudio] = useState<string | null>(null)
+
   const chatRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const hasStarted = useRef(false)
@@ -40,24 +43,65 @@ export default function InterviewPage() {
   const isLoadingRef = useRef(false)
   const isEndedRef = useRef(false)
   const audioRef = useRef<HTMLAudioElement | null>(null)
+  const isMutedRef = useRef(false)
+  const audioReadyRef = useRef(false)
 
   useEffect(() => { messagesRef.current = messages }, [messages])
   useEffect(() => { isLoadingRef.current = isLoading }, [isLoading])
   useEffect(() => { isEndedRef.current = isEnded }, [isEnded])
 
-  const playAudio = useCallback((audioBase64: string) => {
-    if (isMuted) return
+  // تشغيل الصوت المعلق بعد أول interaction
+  useEffect(() => {
+    if (audioReady && pendingAudio) {
+      playAudioDirect(pendingAudio)
+      setPendingAudio(null)
+    }
+  }, [audioReady, pendingAudio])
+
+  const playAudioDirect = (audioBase64: string) => {
+    if (isMutedRef.current) return
     try {
       if (audioRef.current) {
         audioRef.current.pause()
+        audioRef.current.src = ''
         audioRef.current = null
       }
-      const audioData = `data:audio/mp3;base64,${audioBase64}`
-      const audio = new Audio(audioData)
+      const audio = new Audio(`data:audio/mpeg;base64,${audioBase64}`)
       audioRef.current = audio
-      audio.play().catch(() => {})
-    } catch {}
-  }, [isMuted])
+      audio.play().catch((err) => {
+        console.warn('Audio play failed:', err)
+      })
+    } catch (err) {
+      console.warn('Audio error:', err)
+    }
+  }
+
+  const playAudio = useCallback((audioBase64: string) => {
+    if (isMutedRef.current) return
+    if (!audioReadyRef.current) {
+      // حفظ الصوت لتشغيله بعد أول interaction
+      setPendingAudio(audioBase64)
+      return
+    }
+    playAudioDirect(audioBase64)
+  }, [])
+
+  // أول interaction من المستخدم تفتح الـ audio context
+  const handleFirstInteraction = useCallback(() => {
+    if (!audioReadyRef.current) {
+      audioReadyRef.current = true
+      setAudioReady(true)
+    }
+  }, [])
+
+  const toggleMute = () => {
+    const next = !isMuted
+    setIsMuted(next)
+    isMutedRef.current = next
+    if (next && audioRef.current) {
+      audioRef.current.pause()
+    }
+  }
 
   const resetSilenceTimer = useCallback(() => {
     if (silenceTimer.current) clearTimeout(silenceTimer.current)
@@ -143,6 +187,7 @@ export default function InterviewPage() {
 
   const sendMessage = async () => {
     if (!input.trim() || isLoading || isEnded) return
+    handleFirstInteraction() // ← تفعيل audio بعد أول رسالة
     if (silenceTimer.current) clearTimeout(silenceTimer.current)
     if (audioRef.current) { audioRef.current.pause(); audioRef.current = null }
     const userMsg: Message = { role: 'user', content: input.trim() }
@@ -157,7 +202,11 @@ export default function InterviewPage() {
   }
 
   return (
-    <div style={{ fontFamily: 'system-ui, sans-serif', background: '#0B0D11', color: '#F0EDE8', minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+    <div
+      onClick={handleFirstInteraction} // ← أي click يفتح audio context
+      style={{ fontFamily: 'system-ui, sans-serif', background: '#0B0D11', color: '#F0EDE8', minHeight: '100vh', display: 'flex', flexDirection: 'column' }}
+    >
+      {/* Header */}
       <div style={{ background: '#0F1117', borderBottom: '0.5px solid rgba(255,255,255,0.07)', padding: '12px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div style={{ fontWeight: 800, fontSize: 16 }}>Mock<span style={{ color: '#E85D2F' }}>Boss</span> AI</div>
         <div style={{ textAlign: 'center' }}>
@@ -165,14 +214,21 @@ export default function InterviewPage() {
           <div style={{ fontSize: 10, color: 'rgba(240,237,232,0.4)' }}>Based on highest hiring standards</div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <button onClick={() => setIsMuted(!isMuted)} style={{ background: 'none', border: '0.5px solid rgba(255,255,255,0.2)', borderRadius: 6, color: '#F0EDE8', padding: '3px 8px', cursor: 'pointer', fontSize: 14 }}>
+          <button onClick={toggleMute} style={{ background: 'none', border: '0.5px solid rgba(255,255,255,0.2)', borderRadius: 6, color: '#F0EDE8', padding: '3px 8px', cursor: 'pointer', fontSize: 14 }}>
             {isMuted ? '🔇' : '🔊'}
           </button>
+          {/* مؤشر حالة الصوت */}
+          {!audioReady && !isMuted && (
+            <span style={{ fontSize: 9, color: '#F59E0B', background: 'rgba(245,158,11,0.1)', border: '0.5px solid rgba(245,158,11,0.2)', borderRadius: 20, padding: '3px 8px' }}>
+              ⚡ Tap to enable audio
+            </span>
+          )}
           <span style={{ fontSize: 10, color: '#F87171', background: 'rgba(220,38,38,0.1)', border: '0.5px solid rgba(220,38,38,0.2)', borderRadius: 20, padding: '3px 8px' }}>● Live</span>
           <span style={{ fontWeight: 800, fontSize: 16, color: timeLeft < 180 ? '#EF4444' : '#F0EDE8' }}>{formatTime(timeLeft)}</span>
         </div>
       </div>
 
+      {/* Participants */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, padding: '12px 16px 0' }}>
         <div style={{ background: '#111520', border: '0.5px solid rgba(42,92,255,0.2)', borderRadius: 10, padding: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
           <div style={{ width: 44, height: 44, background: '#2563EB', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20 }}>🎯</div>
@@ -192,29 +248,50 @@ export default function InterviewPage() {
         </div>
       </div>
 
+      {/* Chat */}
       <div ref={chatRef} style={{ flex: 1, padding: '10px 16px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8, minHeight: 200, maxHeight: 320 }}>
         {messages.map((msg, i) => (
           <div key={i} style={{ maxWidth: '88%', alignSelf: msg.role === 'assistant' ? 'flex-start' : 'flex-end', background: msg.role === 'assistant' ? '#1a1f2e' : '#1E3A8A', border: msg.role === 'assistant' ? '0.5px solid rgba(42,92,255,0.18)' : 'none', borderRadius: 10, padding: '10px 13px', fontSize: 13, lineHeight: 1.7 }}>
             <div style={{ fontSize: 9, fontWeight: 600, letterSpacing: 0.5, marginBottom: 4, textTransform: 'uppercase', color: msg.role === 'assistant' ? '#8B96FF' : 'rgba(255,255,255,0.5)' }}>
               {msg.role === 'assistant' ? 'Adam Reid' : CONFIG.candidateName}
             </div>
-            {msg.content === '[Candidate is silent]' ? <span style={{ color: 'rgba(240,237,232,0.3)', fontStyle: 'italic' }}>...</span> : msg.content}
-            {msg.score && <div style={{ marginTop: 6, padding: '3px 8px', background: 'rgba(42,92,255,0.1)', borderRadius: 5, fontSize: 10, color: '#8B96FF' }}>Score: {msg.score.score}/100</div>}
+            {msg.content === '[Candidate is silent]'
+              ? <span style={{ color: 'rgba(240,237,232,0.3)', fontStyle: 'italic' }}>...</span>
+              : msg.content}
+            {msg.score && (
+              <div style={{ marginTop: 6, padding: '3px 8px', background: 'rgba(42,92,255,0.1)', borderRadius: 5, fontSize: 10, color: '#8B96FF' }}>
+                Score: {msg.score.score}/100
+              </div>
+            )}
           </div>
         ))}
         {isLoading && (
           <div style={{ alignSelf: 'flex-start', background: '#1a1f2e', border: '0.5px solid rgba(42,92,255,0.15)', borderRadius: 10, padding: '12px 16px', display: 'flex', gap: 4 }}>
-            {[0,1,2].map(i => <div key={i} style={{ width: 6, height: 6, background: '#8B96FF', borderRadius: '50%', animation: `pulse 1.2s infinite ${i*0.2}s` }} />)}
+            {[0, 1, 2].map(i => (
+              <div key={i} style={{ width: 6, height: 6, background: '#8B96FF', borderRadius: '50%', animation: `pulse 1.2s infinite ${i * 0.2}s` }} />
+            ))}
           </div>
         )}
       </div>
 
+      {/* Input */}
       {!isEnded ? (
         <div style={{ padding: '10px 16px', display: 'flex', gap: 8, borderTop: '0.5px solid rgba(255,255,255,0.05)' }}>
-          <textarea ref={inputRef} value={input} onChange={e => setInput(e.target.value)} onKeyDown={handleKey} placeholder="Type your answer and press Enter..." disabled={isLoading} rows={1}
-            style={{ flex: 1, background: '#16181F', border: '0.5px solid rgba(255,255,255,0.08)', color: '#F0EDE8', fontFamily: 'inherit', fontSize: 13, padding: '9px 12px', borderRadius: 8, outline: 'none', resize: 'none' }} />
-          <button onClick={sendMessage} disabled={isLoading || !input.trim()}
-            style={{ width: 40, height: 40, background: isLoading ? '#333' : '#2563EB', border: 'none', borderRadius: 8, cursor: isLoading ? 'not-allowed' : 'pointer', color: '#fff', fontSize: 18, flexShrink: 0 }}>→</button>
+          <textarea
+            ref={inputRef}
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={handleKey}
+            placeholder="Type your answer and press Enter..."
+            disabled={isLoading}
+            rows={1}
+            style={{ flex: 1, background: '#16181F', border: '0.5px solid rgba(255,255,255,0.08)', color: '#F0EDE8', fontFamily: 'inherit', fontSize: 13, padding: '9px 12px', borderRadius: 8, outline: 'none', resize: 'none' }}
+          />
+          <button
+            onClick={sendMessage}
+            disabled={isLoading || !input.trim()}
+            style={{ width: 40, height: 40, background: isLoading ? '#333' : '#2563EB', border: 'none', borderRadius: 8, cursor: isLoading ? 'not-allowed' : 'pointer', color: '#fff', fontSize: 18, flexShrink: 0 }}
+          >→</button>
         </div>
       ) : (
         <div style={{ padding: 16, textAlign: 'center', borderTop: '0.5px solid rgba(255,255,255,0.05)' }}>
@@ -223,14 +300,17 @@ export default function InterviewPage() {
         </div>
       )}
 
+      {/* Footer */}
       <div style={{ background: '#0D0F14', borderTop: '0.5px solid rgba(255,255,255,0.04)', padding: '8px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div style={{ fontSize: 10, color: 'rgba(240,237,232,0.2)' }}>Question {questionCount}</div>
         <div style={{ background: 'rgba(42,92,255,0.08)', border: '0.5px solid rgba(42,92,255,0.15)', borderRadius: 6, padding: '4px 12px', textAlign: 'center' }}>
           <div style={{ fontSize: 8, color: 'rgba(240,237,232,0.2)', textTransform: 'uppercase' }}>Performance</div>
           <div style={{ fontWeight: 800, fontSize: 15, color: '#8B96FF' }}>{overallScore ?? '—'}</div>
         </div>
-        <button onClick={() => { if (confirm('End interview?')) setIsEnded(true) }}
-          style={{ background: 'rgba(239,68,68,0.07)', border: '0.5px solid rgba(239,68,68,0.18)', color: '#F87171', borderRadius: 6, padding: '6px 12px', fontSize: 11, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>End</button>
+        <button
+          onClick={() => { if (confirm('End interview?')) setIsEnded(true) }}
+          style={{ background: 'rgba(239,68,68,0.07)', border: '0.5px solid rgba(239,68,68,0.18)', color: '#F87171', borderRadius: 6, padding: '6px 12px', fontSize: 11, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}
+        >End</button>
       </div>
 
       <style>{`@keyframes pulse{0%,80%,100%{opacity:0.3}40%{opacity:1}}`}</style>

@@ -13,14 +13,24 @@ const TIME_LIMITS: Record<string, number> = {
 
 async function textToSpeech(text: string): Promise<Buffer | null> {
   try {
-    const voiceId = process.env.ELEVENLABS_VOICE_ID!
+    const voiceId = process.env.ELEVENLABS_VOICE_ID
+    const apiKey = process.env.ELEVENLABS_API_KEY
+
+    if (!voiceId || !apiKey) {
+      console.error('ElevenLabs: MISSING env vars - voiceId:', !!voiceId, 'apiKey:', !!apiKey)
+      return null
+    }
+
+    console.log('ElevenLabs: calling TTS, voiceId starts with:', voiceId.substring(0, 6))
+
     const response = await fetch(
       `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
       {
         method: 'POST',
         headers: {
-          'xi-api-key': process.env.ELEVENLABS_API_KEY!,
-          'Content-Type': 'application/json'
+          'xi-api-key': apiKey,
+          'Content-Type': 'application/json',
+          'Accept': 'audio/mpeg'
         },
         body: JSON.stringify({
           text,
@@ -34,10 +44,19 @@ async function textToSpeech(text: string): Promise<Buffer | null> {
         })
       }
     )
-    if (!response.ok) return null
+
+    if (!response.ok) {
+      const errText = await response.text()
+      console.error('ElevenLabs FAILED - status:', response.status, 'error:', errText)
+      return null
+    }
+
     const buffer = Buffer.from(await response.arrayBuffer())
+    console.log('ElevenLabs: SUCCESS - audio size:', buffer.length, 'bytes')
     return buffer
-  } catch {
+
+  } catch (err) {
+    console.error('ElevenLabs EXCEPTION:', err)
     return null
   }
 }
@@ -143,9 +162,12 @@ export async function POST(req: NextRequest) {
     const audioBuffer = await textToSpeech(content)
     const audioBase64 = audioBuffer ? audioBuffer.toString('base64') : null
 
+    console.log('Response: audioBase64 present:', !!audioBase64, '| score:', !!score)
+
     return NextResponse.json({ success: true, content, score, audioBase64 })
 
   } catch (error: any) {
+    console.error('Interview API error:', error.message)
     return NextResponse.json(
       { success: false, error: error.message },
       { status: 500 }

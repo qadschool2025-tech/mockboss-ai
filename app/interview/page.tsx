@@ -2,19 +2,36 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 
-const CONFIG = {
-  candidateName: 'Ahmed',
-  jobTitle: 'Teacher',
-  institution: 'XYZ School',
-  sector: 'Education',
-  yearsExperience: '3 years',
-  language: 'en',
-  difficulty: 'standard',
-  cvSummary: 'Experience in teaching and classroom management',
-  jobRequirements: '',
-  isCareerSwitch: false,
-  plan: 'free'
-}
+const [CONFIG] = useState(() => {
+  if (typeof window === 'undefined') {
+    return {
+      candidateName: 'Candidate',
+      jobTitle: 'Professional',
+      institution: 'Company',
+      sector: 'General',
+      yearsExperience: '1–3 years',
+      language: 'en',
+      jobRequirements: '',
+      cvText: '',
+      plan: 'free',
+    }
+  }
+  try {
+    const saved = sessionStorage.getItem('mockboss_config')
+    if (saved) return JSON.parse(saved)
+  } catch {}
+  return {
+    candidateName: 'Candidate',
+    jobTitle: 'Professional',
+    institution: 'Company',
+    sector: 'General',
+    yearsExperience: '1–3 years',
+    language: 'en',
+    jobRequirements: '',
+    cvText: '',
+    plan: 'free',
+  }
+})
 
 interface VoiceAnalysis {
   wordsPerMinute: number

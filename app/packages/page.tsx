@@ -4,69 +4,50 @@ import { useRouter } from 'next/navigation'
 
 const PLANS = [
   {
-    name: 'Free',
-    price: '$0',
-    period: '',
-    color: 'rgba(255,255,255,0.06)',
-    border: 'rgba(255,255,255,0.1)',
-    accent: '#F0EDE8',
-    badge: null,
-    mode: '📝 Text only',
-    duration: '10 min',
-    sessions: '1 session/month',
-    features: [
-      'Text-based interview',
-      'Instant scoring per answer',
-      'Basic performance summary',
-      '1 session per month',
-    ],
-    cta: 'Start Free',
-    ctaBg: '#1E293B',
-  },
-  {
     name: 'GO',
-    price: '$9',
-    period: '/mo',
+    price: '$1.99',
+    period: '/session',
     color: 'rgba(232,93,47,0.06)',
     border: 'rgba(232,93,47,0.35)',
     accent: '#E85D2F',
-    badge: 'MOST POPULAR',
+    badge: 'TRY IT NOW',
     mode: '🎙️ Real Voice',
-    duration: '15 min',
-    sessions: '2 sessions/month',
+    duration: '7 min',
+    sessions: 'Pay as you go',
     features: [
       'Live voice interview with Adam Reid',
       'Voice confidence & hesitation analysis',
       'Instant scoring per answer',
-      '2 sessions per month',
+      'Full performance report',
+      'No commitment — pay per session',
     ],
-    cta: 'Get Started',
+    cta: 'Start Session',
     ctaBg: '#E85D2F',
   },
   {
     name: 'Pro',
-    price: '$19',
+    price: '$12',
     period: '/mo',
     color: 'rgba(37,99,235,0.06)',
     border: 'rgba(37,99,235,0.35)',
     accent: '#2563EB',
-    badge: null,
+    badge: 'MOST POPULAR',
     mode: '🎙️ Real Voice',
     duration: '30 min',
-    sessions: '5 sessions/month',
+    sessions: '10 sessions/month',
     features: [
       'Live voice interview with Adam Reid',
       'Voice confidence & hesitation analysis',
       'Full performance report',
       'CV-based targeted questions',
-      '5 sessions per month',
+      '10 sessions per month',
     ],
     cta: 'Get Pro',
     ctaBg: '#2563EB',
   },
   {
     name: 'Expert',
-    price: '$39',
+    price: '$36',
     period: '/mo',
     color: 'rgba(139,150,255,0.06)',
     border: 'rgba(139,150,255,0.35)',
@@ -101,7 +82,7 @@ export default function PackagesPage() {
         </div>
         <button onClick={() => router.push('/onboarding')}
           style={{ background: '#E85D2F', border: 'none', color: '#fff', fontSize: 13, fontWeight: 700, padding: '8px 18px', borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit' }}>
-          Start Free
+          Get Started
         </button>
       </nav>
 
@@ -116,12 +97,12 @@ export default function PackagesPage() {
             Choose your <span style={{ color: '#E85D2F' }}>interview room</span>
           </h1>
           <p style={{ fontSize: 15, color: 'rgba(240,237,232,0.5)', maxWidth: 420, lineHeight: 1.7, margin: '0 auto' }}>
-            Start free. Upgrade when you want the real voice experience.
+            Every plan includes real voice interviews with Adam Reid. No text-only mode.
           </p>
         </div>
 
         {/* Plans Grid */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 16, maxWidth: 1000, width: '100%', marginBottom: 60 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 16, maxWidth: 900, width: '100%', marginBottom: 60 }}>
           {PLANS.map((plan) => (
             <div key={plan.name} style={{ background: plan.color, border: `1px solid ${plan.border}`, borderRadius: 16, padding: '28px 22px', display: 'flex', flexDirection: 'column', position: 'relative', overflow: 'hidden' }}>
 
@@ -179,9 +160,9 @@ export default function PackagesPage() {
         {/* Bottom Quote */}
         <div style={{ textAlign: 'center', maxWidth: 500 }}>
           <div style={{ fontSize: 18, fontWeight: 900, letterSpacing: -0.5, marginBottom: 8 }}>
-            "Anyone can <span style={{ color: 'rgba(240,237,232,0.3)' }}>practice.</span>
+            Anyone can practice.
             <br />
-            Barbaros makes you <span style={{ color: '#E85D2F' }}>ready.</span>"
+            <span style={{ color: '#E85D2F' }}>Barbaros makes you ready.</span>
           </div>
           <div style={{ fontSize: 12, color: 'rgba(240,237,232,0.25)', marginTop: 12 }}>
             The closest thing to a real interview.

@@ -6,7 +6,7 @@ const client = new Anthropic({
 })
 
 const TIME_LIMITS: Record<string, number> = {
-  go: 7 * 60,
+  go: 15 * 60,
   pro: 30 * 60,
   expert: 60 * 60
 }
@@ -80,7 +80,7 @@ This rule overrides everything else. No exceptions.`
 Use Arabic as the primary language.
 Use English ONLY for technical terms with no Arabic equivalent.`
 
-  const cvSection = config.cvText
+  const cvSection = config.cvText && !config.cvText.startsWith('[NO_CV]')
     ? `
 CANDIDATE CV — READ AND ANALYZE CAREFULLY:
 ${config.cvText}
@@ -94,7 +94,11 @@ CV ANALYSIS RULES — CRITICAL:
 6. Never ask basic questions about information already in the CV — dig deeper instead.
 7. At least 3 questions must come directly from specific CV content.
 8. If CV shows career switch, ask how previous experience adds value to this role.`
-    : ''
+    : `
+NO CV PROVIDED:
+The candidate did not provide a CV. At the opening, mention this professionally:
+"I notice you have not provided a CV. A strong CV would have allowed me to tailor this interview more precisely. Let us proceed with what we have."
+Then conduct a general interview based on job title, sector, and experience level only.`
 
   const upgradeHint = UPGRADE_HINTS[config.plan]
     ? `

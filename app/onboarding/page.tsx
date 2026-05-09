@@ -12,7 +12,7 @@ interface OnboardingData {
   language: 'en' | 'ar' | 'mixed'
   jobRequirements: string
   cvText: string
-  plan: 'free' | 'go' | 'pro' | 'expert'
+  plan: 'go' | 'pro' | 'expert'
 }
 
 const SECTORS = [
@@ -27,7 +27,7 @@ const EXPERIENCE_LEVELS = [
 const STEPS = [
   { id: 1, label: 'Personal Info', icon: '👤' },
   { id: 2, label: 'Job Details', icon: '💼' },
-  { id: 3, label: 'Interview Prep', icon: '📋' },
+  { id: 3, label: 'Your CV', icon: '📋' },
   { id: 4, label: 'Ready', icon: '🚀' },
 ]
 
@@ -37,7 +37,9 @@ export default function OnboardingPage() {
 
   const [step, setStep] = useState(1)
   const [isParsingCV, setIsParsingCV] = useState(false)
+  const [cvReady, setCvReady] = useState(false)
   const [cvFileName, setCvFileName] = useState('')
+  const [cvSkipped, setCvSkipped] = useState(false)
   const [errors, setErrors] = useState<Partial<Record<keyof OnboardingData, string>>>({})
 
   const [data, setData] = useState<OnboardingData>({
@@ -49,7 +51,7 @@ export default function OnboardingPage() {
     language: 'en',
     jobRequirements: '',
     cvText: '',
-    plan: 'free',
+    plan: 'go',
   })
 
   const set = (field: keyof OnboardingData, value: string) => {
@@ -78,11 +80,16 @@ export default function OnboardingPage() {
   const handleCV = async (file: File) => {
     if (!file) return
     setCvFileName(file.name)
+    setCvReady(false)
+    setCvSkipped(false)
+
     if (file.type === 'text/plain') {
       const text = await file.text()
-      set('cvText', text.slice(0, 4000))
+      set('cvText', text.slice(0, 6000))
+      setCvReady(true)
       return
     }
+
     setIsParsingCV(true)
     try {
       const form = new FormData()
@@ -90,15 +97,31 @@ export default function OnboardingPage() {
       const res = await fetch('/api/parse-cv', { method: 'POST', body: form })
       if (res.ok) {
         const { text } = await res.json()
-        set('cvText', text.slice(0, 4000))
+        set('cvText', text.slice(0, 6000))
+        setCvReady(true)
+        setCvFileName(file.name)
       } else {
-        setCvFileName('Could not parse - paste text below')
+        setCvFileName('Could not parse — please paste your CV below')
+        setCvReady(false)
       }
     } catch {
-      setCvFileName('Upload failed - paste text below')
+      setCvFileName('Upload failed — please paste your CV below')
+      setCvReady(false)
     } finally {
       setIsParsingCV(false)
     }
+  }
+
+  const handleCvTextChange = (value: string) => {
+    set('cvText', value)
+    setCvReady(value.trim().length > 50)
+    setCvSkipped(false)
+  }
+
+  const skipCV = () => {
+    set('cvText', '[NO_CV] Candidate has no CV. Conduct a general interview based on job title, sector, and experience level only. Do not ask CV-specific questions.')
+    setCvSkipped(true)
+    setCvReady(true)
   }
 
   const startInterview = () => {
@@ -233,33 +256,118 @@ export default function OnboardingPage() {
             </div>
           )}
 
-          {/* Step 3 */}
+          {/* Step 3 — CV */}
           {step === 3 && (
             <div>
-              <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 4 }}>Sharpen the interview</h2>
-              <p style={{ fontSize: 13, color: 'rgba(240,237,232,0.45)', marginBottom: 24 }}>Optional but recommended — helps Adam ask targeted questions.</p>
+              <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 4 }}>Your CV</h2>
+              <p style={{ fontSize: 13, color: 'rgba(240,237,232,0.45)', marginBottom: 8 }}>
+                Adam reads your CV before the interview begins — and will question every detail.
+              </p>
+              <div style={{ fontSize: 12, color: '#E85D2F', marginBottom: 24, fontWeight: 600 }}>
+                ⚡ A CV-backed interview is 3x more targeted and realistic.
+              </div>
 
-              <div style={{ marginBottom: 18 }}>
-                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, letterSpacing: 0.4, textTransform: 'uppercase' as const, color: 'rgba(240,237,232,0.5)', marginBottom: 7 }}>Upload Your CV (optional)</label>
-                <div onClick={() => fileRef.current?.click()} style={{ border: '1px dashed rgba(42,92,255,0.35)', borderRadius: 8, padding: '16px 14px', cursor: 'pointer', textAlign: 'center' as const, background: 'rgba(42,92,255,0.04)' }}>
-                  {isParsingCV
-                    ? <span style={{ fontSize: 13, color: '#8B96FF' }}>Parsing CV...</span>
-                    : cvFileName
-                    ? <span style={{ fontSize: 13, color: '#22C55E' }}>✓ {cvFileName}</span>
-                    : <><div style={{ fontSize: 22, marginBottom: 6 }}>📄</div><div style={{ fontSize: 13, color: 'rgba(240,237,232,0.55)' }}>Click to upload PDF, DOCX, or TXT</div></>}
+              {/* Upload Area */}
+              {!cvSkipped && (
+                <>
+                  <div style={{ marginBottom: 14 }}>
+                    <label style={{ display: 'block', fontSize: 12, fontWeight: 600, letterSpacing: 0.4, textTransform: 'uppercase' as const, color: 'rgba(240,237,232,0.5)', marginBottom: 7 }}>
+                      Upload CV — PDF, DOCX, or TXT
+                    </label>
+                    <div
+                      onClick={() => !isParsingCV && fileRef.current?.click()}
+                      style={{
+                        border: `1px dashed ${cvReady && cvFileName ? 'rgba(34,197,94,0.5)' : 'rgba(42,92,255,0.35)'}`,
+                        borderRadius: 8,
+                        padding: '20px 14px',
+                        cursor: isParsingCV ? 'wait' : 'pointer',
+                        textAlign: 'center' as const,
+                        background: cvReady && cvFileName ? 'rgba(34,197,94,0.04)' : 'rgba(42,92,255,0.04)',
+                        transition: 'all 0.2s'
+                      }}>
+                      {isParsingCV ? (
+                        <div>
+                          <div style={{ fontSize: 24, marginBottom: 8 }}>⏳</div>
+                          <div style={{ fontSize: 13, color: '#8B96FF', fontWeight: 600 }}>Adam is reading your CV...</div>
+                          <div style={{ fontSize: 11, color: 'rgba(240,237,232,0.3)', marginTop: 4 }}>Please wait</div>
+                        </div>
+                      ) : cvReady && cvFileName ? (
+                        <div>
+                          <div style={{ fontSize: 24, marginBottom: 6 }}>✅</div>
+                          <div style={{ fontSize: 13, color: '#22C55E', fontWeight: 600 }}>{cvFileName}</div>
+                          <div style={{ fontSize: 11, color: 'rgba(240,237,232,0.3)', marginTop: 4 }}>CV ready — Adam has read your profile</div>
+                        </div>
+                      ) : cvFileName ? (
+                        <div>
+                          <div style={{ fontSize: 13, color: '#F87171' }}>{cvFileName}</div>
+                        </div>
+                      ) : (
+                        <div>
+                          <div style={{ fontSize: 28, marginBottom: 8 }}>📄</div>
+                          <div style={{ fontSize: 13, color: 'rgba(240,237,232,0.55)' }}>Click to upload your CV</div>
+                          <div style={{ fontSize: 11, color: 'rgba(240,237,232,0.3)', marginTop: 4 }}>PDF, DOCX, or TXT</div>
+                        </div>
+                      )}
+                    </div>
+                    <input ref={fileRef} type="file" accept=".pdf,.docx,.txt" style={{ display: 'none' }} onChange={e => { if (e.target.files?.[0]) handleCV(e.target.files[0]) }} />
+                  </div>
+
+                  {/* Paste CV Text */}
+                  <div style={{ marginBottom: 14 }}>
+                    <label style={{ display: 'block', fontSize: 12, fontWeight: 600, letterSpacing: 0.4, textTransform: 'uppercase' as const, color: 'rgba(240,237,232,0.5)', marginBottom: 7 }}>
+                      Or paste CV text
+                    </label>
+                    <textarea
+                      value={data.cvText.startsWith('[NO_CV]') ? '' : data.cvText}
+                      onChange={e => handleCvTextChange(e.target.value)}
+                      placeholder="Paste your CV content here..."
+                      rows={5}
+                      style={{ ...inputStyle(false), resize: 'vertical' as const, lineHeight: 1.6 }}
+                    />
+                    {data.cvText.trim().length > 50 && !cvFileName && (
+                      <div style={{ fontSize: 11, color: '#22C55E', marginTop: 5 }}>✓ CV text received — Adam will read this</div>
+                    )}
+                  </div>
+
+                  {/* Job Requirements */}
+                  <div style={{ marginBottom: 18 }}>
+                    <label style={{ display: 'block', fontSize: 12, fontWeight: 600, letterSpacing: 0.4, textTransform: 'uppercase' as const, color: 'rgba(240,237,232,0.5)', marginBottom: 7 }}>
+                      Job Requirements (optional)
+                    </label>
+                    <textarea
+                      value={data.jobRequirements}
+                      onChange={e => set('jobRequirements', e.target.value)}
+                      placeholder="Paste the job posting or key requirements..."
+                      rows={3}
+                      style={{ ...inputStyle(false), resize: 'vertical' as const, lineHeight: 1.6 }}
+                    />
+                  </div>
+
+                  {/* Skip CV */}
+                  {!cvReady && (
+                    <button
+                      onClick={skipCV}
+                      style={{ width: '100%', padding: '11px', background: 'transparent', border: '0.5px solid rgba(255,255,255,0.1)', borderRadius: 8, color: 'rgba(240,237,232,0.35)', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}>
+                      I don't have a CV — proceed without it
+                    </button>
+                  )}
+                </>
+              )}
+
+              {/* Skipped CV State */}
+              {cvSkipped && (
+                <div style={{ textAlign: 'center', padding: '20px', background: 'rgba(239,68,68,0.05)', border: '0.5px solid rgba(239,68,68,0.2)', borderRadius: 10 }}>
+                  <div style={{ fontSize: 20, marginBottom: 8 }}>⚠️</div>
+                  <div style={{ fontSize: 13, color: 'rgba(240,237,232,0.6)', lineHeight: 1.6, marginBottom: 12 }}>
+                    No CV provided. Adam will conduct a general interview — but a CV would have made this 3x more targeted.
+                  </div>
+                  <button
+                    onClick={() => { setCvSkipped(false); setCvReady(false); set('cvText', '') }}
+                    style={{ fontSize: 12, color: '#E85D2F', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline', fontFamily: 'inherit' }}>
+                    Add CV instead
+                  </button>
                 </div>
-                <input ref={fileRef} type="file" accept=".pdf,.docx,.txt" style={{ display: 'none' }} onChange={e => { if (e.target.files?.[0]) handleCV(e.target.files[0]) }} />
-              </div>
-
-              <div style={{ marginBottom: 18 }}>
-                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, letterSpacing: 0.4, textTransform: 'uppercase' as const, color: 'rgba(240,237,232,0.5)', marginBottom: 7 }}>Or paste CV text (optional)</label>
-                <textarea value={data.cvText} onChange={e => set('cvText', e.target.value)} placeholder="Paste your CV text or key skills here..." rows={5} style={{ ...inputStyle(false), resize: 'vertical' as const, lineHeight: 1.6 }} />
-              </div>
-
-              <div style={{ marginBottom: 18 }}>
-                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, letterSpacing: 0.4, textTransform: 'uppercase' as const, color: 'rgba(240,237,232,0.5)', marginBottom: 7 }}>Job Requirements (optional)</label>
-                <textarea value={data.jobRequirements} onChange={e => set('jobRequirements', e.target.value)} placeholder="Paste the job posting or key requirements..." rows={4} style={{ ...inputStyle(false), resize: 'vertical' as const, lineHeight: 1.6 }} />
-              </div>
+              )}
             </div>
           )}
 
@@ -268,7 +376,9 @@ export default function OnboardingPage() {
             <div style={{ textAlign: 'center' }}>
               <div style={{ fontSize: 52, marginBottom: 12 }}>🎯</div>
               <h2 style={{ fontSize: 22, fontWeight: 700, marginBottom: 8 }}>You are ready, {data.candidateName.split(' ')[0]}</h2>
-              <p style={{ fontSize: 13, color: 'rgba(240,237,232,0.5)', marginBottom: 28, lineHeight: 1.7 }}>Adam Reid is waiting. Hold the mic button while answering and speak clearly.</p>
+              <p style={{ fontSize: 13, color: 'rgba(240,237,232,0.5)', marginBottom: 28, lineHeight: 1.7 }}>
+                Adam Reid has reviewed your profile. Hold the mic button while answering and speak clearly.
+              </p>
 
               <div style={{ background: '#0F1117', border: '0.5px solid rgba(255,255,255,0.08)', borderRadius: 10, padding: '16px 18px', textAlign: 'left' as const, marginBottom: 24 }}>
                 {([
@@ -278,7 +388,7 @@ export default function OnboardingPage() {
                   ['Sector', data.sector],
                   ['Experience', data.yearsExperience],
                   ['Language', { en: 'English', ar: 'Arabic', mixed: 'Mixed' }[data.language]],
-                  ['CV', data.cvText ? 'Provided ✓' : 'Not provided'],
+                  ['CV', cvSkipped ? '⚠️ Not provided' : data.cvText ? '✅ Provided & read by Adam' : '⚠️ Not provided'],
                 ] as [string, string][]).map(([k, v]) => (
                   <div key={k} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: '0.5px solid rgba(255,255,255,0.05)', fontSize: 13 }}>
                     <span style={{ color: 'rgba(240,237,232,0.45)' }}>{k}</span>
@@ -287,10 +397,14 @@ export default function OnboardingPage() {
                 ))}
               </div>
 
-              <button onClick={startInterview} style={{ width: '100%', padding: '14px', background: 'linear-gradient(135deg,#2A5CFF,#1d45cc)', border: 'none', borderRadius: 10, color: '#fff', fontWeight: 700, fontSize: 15, cursor: 'pointer' }}>
+              <button
+                onClick={startInterview}
+                style={{ width: '100%', padding: '14px', background: 'linear-gradient(135deg,#2A5CFF,#1d45cc)', border: 'none', borderRadius: 10, color: '#fff', fontWeight: 700, fontSize: 15, cursor: 'pointer' }}>
                 Enter Interview Room →
               </button>
-              <p style={{ fontSize: 11, color: 'rgba(240,237,232,0.25)', marginTop: 12 }}>Free plan · 15-minute session · Text only</p>
+              <p style={{ fontSize: 11, color: 'rgba(240,237,232,0.25)', marginTop: 12 }}>
+                {cvSkipped ? '⚠️ General interview — no CV provided' : '✅ CV-backed interview — fully personalized'}
+              </p>
             </div>
           )}
 
@@ -302,8 +416,18 @@ export default function OnboardingPage() {
                   Back
                 </button>
               )}
-              <button onClick={next} style={{ flex: 1, padding: '12px 20px', background: '#2A5CFF', border: 'none', borderRadius: 9, color: '#fff', fontWeight: 700, fontSize: 14, cursor: 'pointer', fontFamily: 'inherit' }}>
-                {step === 3 ? 'Review and Start' : 'Continue'}
+              <button
+                onClick={next}
+                disabled={step === 3 && isParsingCV}
+                style={{
+                  flex: 1, padding: '12px 20px',
+                  background: step === 3 && isParsingCV ? '#1a1f2e' : '#2A5CFF',
+                  border: 'none', borderRadius: 9, color: step === 3 && isParsingCV ? 'rgba(240,237,232,0.3)' : '#fff',
+                  fontWeight: 700, fontSize: 14,
+                  cursor: step === 3 && isParsingCV ? 'not-allowed' : 'pointer',
+                  fontFamily: 'inherit'
+                }}>
+                {step === 3 && isParsingCV ? 'Reading CV...' : step === 3 ? 'Review and Start' : 'Continue'}
               </button>
             </div>
           )}

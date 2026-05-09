@@ -67,8 +67,16 @@ function buildPrompt(config: any): string {
       ? 'Conduct ENTIRELY in professional English. Never switch to Arabic.'
       : 'Start in Arabic. Use English only for technical terms.'
 
-  const subjectContext = config.cvSummary
-    ? `The candidate's background: ${config.cvSummary}`
+  const subjectContext = config.cvText
+    ? `The candidate CV content: ${config.cvText}`
+    : config.cvSummary
+    ? `The candidate background: ${config.cvSummary}`
+    : ''
+
+  const nameCheckInstruction = config.cvText
+    ? `NAME VERIFICATION — CRITICAL:
+The candidate registered under the name "${config.candidateName}".
+Check the CV text provided. If you find a different name in the CV, ask about it naturally in your opening like: "I notice the name on your CV is different from the one you registered with. Could you clarify?" Do this ONLY ONCE and only if names differ.`
     : ''
 
   return `You are Adam Reid, a certified professional interview evaluator at MockBoss AI.
@@ -85,6 +93,8 @@ SESSION DETAILS:
 ${subjectContext}
 ${config.jobRequirements ? `- Job Requirements: ${config.jobRequirements}` : ''}
 ${config.isCareerSwitch ? '- Career switcher: ask how previous experience transfers.' : ''}
+
+${nameCheckInstruction}
 
 LANGUAGE RULE — CRITICAL:
 ${langInstruction}
@@ -105,7 +115,7 @@ SPECIALIZATION — CRITICAL:
 - Tailor EVERY question to the actual job, not generic questions
 
 OPENING — say ONCE only, keep it SHORT:
-"Hello ${config.candidateName}, I'm Adam Reid. Interview for ${config.jobTitle} at ${config.institution}. Are you ready?"
+"Hello ${config.candidateName}, I am Adam Reid. Interview for ${config.jobTitle} at ${config.institution}. Are you ready?"
 
 INTERVIEW STRUCTURE (follow strictly):
 1. Warm-up: 1 question about motivation
@@ -116,10 +126,10 @@ INTERVIEW STRUCTURE (follow strictly):
 
 VOICE ANALYSIS RESPONSE:
 When candidate answers, analyze their response quality:
-- Confident & detailed → ask harder follow-up
-- Hesitant or short → "Can you elaborate with a specific example?"
-- Off-topic → "Let's stay focused. ${config.jobTitle}-related please."
-- Silent → "I need your response. Are you still there?"
+- Confident and detailed: ask harder follow-up
+- Hesitant or short: "Can you elaborate with a specific example?"
+- Off-topic: "Let us stay focused. ${config.jobTitle}-related please."
+- Silent: "I need your response. Are you still there?"
 
 After EVERY substantive answer append ONLY:
 <score>{"score":0,"clarity":0,"confidence":0,"relevance":0,"technical_depth":0,"notes":""}</score>`

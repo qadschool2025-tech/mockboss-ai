@@ -32,8 +32,6 @@ const translations = {
     speaking: '● Speaking...',
     listening: '○ Listening',
     processing: 'Processing...',
-    showText: 'Show text',
-    hideText: 'Hide text',
     candidate: 'Candidate',
     yourTurn: 'Your turn',
     listeningToAdam: 'Listening to Adam...',
@@ -52,6 +50,9 @@ const translations = {
     endConfirm: 'End interview?',
     question: 'Q',
     poweredBy: 'Developed by certified HR professionals, powered by AI',
+    startBtn: 'Enter Interview Room →',
+    startHint: 'Click to start and enable audio',
+    lastQuestion: 'Last question from Adam:',
   },
   ar: {
     basedOn: 'وفق أعلى معايير التوظيف',
@@ -59,8 +60,6 @@ const translations = {
     speaking: '● يتحدث...',
     listening: '○ يستمع',
     processing: 'جاري المعالجة...',
-    showText: 'عرض النص',
-    hideText: 'إخفاء النص',
     candidate: 'مرشح',
     yourTurn: 'دورك',
     listeningToAdam: 'يستمع لآدم...',
@@ -79,6 +78,9 @@ const translations = {
     endConfirm: 'إنهاء المقابلة؟',
     question: 'س',
     poweredBy: 'طُوِّر بمشاركة متخصصين معتمدين في الموارد البشرية، مدعوم بالذكاء الاصطناعي',
+    startBtn: 'ادخل غرفة المقابلة ←',
+    startHint: 'اضغط للبدء وتفعيل الصوت',
+    lastQuestion: 'آخر سؤال من آدم:',
   }
 }
 
@@ -119,6 +121,7 @@ export default function InterviewPage() {
   const t = translations[CONFIG.language === 'ar' ? 'ar' : 'en']
   const isRTL = CONFIG.language === 'ar'
 
+  const [started, setStarted] = useState(false)
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
@@ -143,7 +146,6 @@ export default function InterviewPage() {
   const [pendingAudio, setPendingAudio] = useState<string | null>(null)
   const [micError, setMicError] = useState<string | null>(null)
   const [adamSpeaking, setAdamSpeaking] = useState(false)
-  const [showText, setShowText] = useState(false)
   const [lastAdamText, setLastAdamText] = useState('')
 
   const inputRef = useRef<HTMLTextAreaElement>(null)
@@ -321,13 +323,6 @@ export default function InterviewPage() {
     return () => clearInterval(interval)
   }, [])
 
-  useEffect(() => {
-    if (!hasStarted.current) {
-      hasStarted.current = true
-      callAdam([])
-    }
-  }, [])
-
   const formatTime = (secs: number) => {
     const m = Math.floor(secs / 60)
     const s = secs % 60
@@ -403,6 +398,48 @@ export default function InterviewPage() {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage() }
   }
 
+  const handleStart = () => {
+    handleFirstInteraction()
+    setStarted(true)
+    if (!hasStarted.current) {
+      hasStarted.current = true
+      callAdam([])
+    }
+  }
+
+  // شاشة البداية
+  if (!started) {
+    return (
+      <div
+        dir={isRTL ? 'rtl' : 'ltr'}
+        style={{ fontFamily: 'system-ui, sans-serif', background: '#0B0D11', color: '#F0EDE8', minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}
+      >
+        <div style={{ textAlign: 'center', padding: '24px' }}>
+          <div style={{ fontSize: 72, marginBottom: 24 }}>🎯</div>
+          <div style={{ fontSize: 28, fontWeight: 900, marginBottom: 8, letterSpacing: -0.5 }}>
+            Barbar<span style={{ color: '#E85D2F' }}>os</span>
+          </div>
+          <div style={{ fontSize: 14, color: 'rgba(240,237,232,0.5)', marginBottom: 8 }}>
+            {CONFIG.candidateName} · {CONFIG.jobTitle}
+          </div>
+          <div style={{ fontSize: 12, color: 'rgba(240,237,232,0.3)', marginBottom: 48 }}>
+            {CONFIG.institution}
+          </div>
+
+          <button
+            onClick={handleStart}
+            style={{ background: 'linear-gradient(135deg, #2563EB, #1d45cc)', border: 'none', borderRadius: 14, padding: '16px 48px', fontSize: 16, fontWeight: 700, color: '#fff', cursor: 'pointer', fontFamily: 'inherit', boxShadow: '0 0 30px rgba(37,99,235,0.3)', marginBottom: 16 }}>
+            {t.startBtn}
+          </button>
+
+          <div style={{ fontSize: 11, color: 'rgba(240,237,232,0.25)' }}>
+            {t.startHint}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div
       onClick={handleFirstInteraction}
@@ -455,21 +492,17 @@ export default function InterviewPage() {
             )}
           </div>
 
-          {adamSpeaking && <div style={{ fontSize: 11, color: '#8B96FF', fontWeight: 600 }}>{t.speaking}</div>}
+          {adamSpeaking && <div style={{ fontSize: 11, color: '#8B96FF', fontWeight: 600, marginBottom: 8 }}>{t.speaking}</div>}
 
-          {/* Show Text Button */}
-          {lastAdamText && !adamSpeaking && !isLoading && (
-            <button
-              onClick={() => setShowText(!showText)}
-              style={{ marginTop: 12, background: 'none', border: '0.5px solid rgba(255,255,255,0.1)', borderRadius: 6, color: 'rgba(240,237,232,0.3)', fontSize: 10, cursor: 'pointer', padding: '4px 10px', fontFamily: 'inherit' }}>
-              {showText ? t.hideText : t.showText}
-            </button>
-          )}
-
-          {/* Emergency Text */}
-          {showText && lastAdamText && (
-            <div style={{ marginTop: 12, padding: '10px 12px', background: 'rgba(255,255,255,0.03)', border: '0.5px solid rgba(255,255,255,0.08)', borderRadius: 8, fontSize: 12, color: 'rgba(240,237,232,0.6)', lineHeight: 1.6, textAlign: isRTL ? 'right' : 'left' }}>
-              {lastAdamText}
+          {/* نص آدم يظهر دائماً بعد أول رسالة */}
+          {lastAdamText && (
+            <div style={{ marginTop: 12, padding: '12px 14px', background: 'rgba(42,92,255,0.06)', border: '0.5px solid rgba(42,92,255,0.15)', borderRadius: 10, textAlign: isRTL ? 'right' : 'left' }}>
+              <div style={{ fontSize: 9, color: '#8B96FF', fontWeight: 700, letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: 6 }}>
+                {t.lastQuestion}
+              </div>
+              <div style={{ fontSize: 13, color: 'rgba(240,237,232,0.75)', lineHeight: 1.6 }}>
+                {lastAdamText}
+              </div>
             </div>
           )}
         </div>

@@ -128,9 +128,11 @@ export async function POST(req: NextRequest) {
       })
     }
 
-    const apiMessages = messages.length > 0
-      ? messages.map((m: any) => ({ role: m.role, content: m.content }))
-      : [{ role: 'user', content: 'Start the interview' }]
+    const isFirstMessage = messages.length === 0
+
+    const apiMessages = isFirstMessage
+      ? [{ role: 'user', content: 'Start the interview' }]
+      : messages.map((m: any) => ({ role: m.role, content: m.content }))
 
     const last = apiMessages[apiMessages.length - 1]
     if (last?.role === 'user' && !last.content?.trim()) {
@@ -139,7 +141,7 @@ export async function POST(req: NextRequest) {
 
     const response = await client.messages.create({
       model: 'claude-sonnet-4-5',
-      max_tokens: 600,
+      max_tokens: isFirstMessage ? 120 : 600,
       system: buildPrompt(config),
       messages: apiMessages
     })

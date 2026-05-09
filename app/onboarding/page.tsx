@@ -21,7 +21,7 @@ const SECTORS = [
 ]
 
 const EXPERIENCE_LEVELS = [
-  'Less than 1 year', '1–3 years', '3–5 years', '5–10 years', '10+ years'
+  'Less than 1 year', '1-3 years', '3-5 years', '5-10 years', '10+ years'
 ]
 
 const STEPS = [
@@ -92,10 +92,10 @@ export default function OnboardingPage() {
         const { text } = await res.json()
         set('cvText', text.slice(0, 4000))
       } else {
-        setCvFileName('Could not parse – paste text below')
+        setCvFileName('Could not parse - paste text below')
       }
     } catch {
-      setCvFileName('Upload failed – paste text below')
+      setCvFileName('Upload failed - paste text below')
     } finally {
       setIsParsingCV(false)
     }
@@ -181,7 +181,7 @@ export default function OnboardingPage() {
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                   {(['en', 'ar', 'mixed'] as const).map(lang => (
                     <button key={lang} onClick={() => set('language', lang)} style={{ ...chipStyle, ...(data.language === lang ? chipActive : {}) }}>
-                      {{ en: '🇬🇧 English', ar: '🇸🇦 Arabic', mixed: '🔀 Mixed' }[lang]}
+                      {{ en: 'English', ar: 'Arabic', mixed: 'Mixed' }[lang]}
                     </button>
                   ))}
                 </div>
@@ -191,8 +191,8 @@ export default function OnboardingPage() {
 
           {step === 2 && (
             <div>
-              <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 4 }}>Job you're applying for</h2>
-              <p style={{ fontSize: 13, color: 'rgba(240,237,232,0.45)', marginBottom: 24 }}>The more specific you are, the sharper Adam's questions will be.</p>
+              <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 4 }}>Job you are applying for</h2>
+              <p style={{ fontSize: 13, color: 'rgba(240,237,232,0.45)', marginBottom: 24 }}>The more specific you are, the sharper Adam questions will be.</p>
 
               <div style={{ marginBottom: 18 }}>
                 <label style={{ display: 'block', fontSize: 12, fontWeight: 600, letterSpacing: 0.4, textTransform: 'uppercase' as const, color: 'rgba(240,237,232,0.5)', marginBottom: 7 }}>Job Title *</label>
@@ -231,13 +231,15 @@ export default function OnboardingPage() {
           {step === 3 && (
             <div>
               <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 4 }}>Sharpen the interview</h2>
-              <p style={{ fontSize: 13, color: 'rgba(240,237,232,0.45)', marginBottom: 24 }}>Optional but recommended — helps Adam ask targeted questions.</p>
+              <p style={{ fontSize: 13, color: 'rgba(240,237,232,0.45)', marginBottom: 24 }}>Optional but recommended - helps Adam ask targeted questions.</p>
 
               <div style={{ marginBottom: 18 }}>
                 <label style={{ display: 'block', fontSize: 12, fontWeight: 600, letterSpacing: 0.4, textTransform: 'uppercase' as const, color: 'rgba(240,237,232,0.5)', marginBottom: 7 }}>Upload Your CV (optional)</label>
                 <div onClick={() => fileRef.current?.click()} style={{ border: '1px dashed rgba(42,92,255,0.35)', borderRadius: 8, padding: '16px 14px', cursor: 'pointer', textAlign: 'center' as const, background: 'rgba(42,92,255,0.04)' }}>
-                  {isParsingCV ? <span style={{ fontSize: 13, color: '#8B96FF' }}>⏳ Parsing CV…</span>
-                    : cvFileName ? <span style={{ fontSize: 13, color: '#22C55E' }}>✓ {cvFileName}</span>
+                  {isParsingCV
+                    ? <span style={{ fontSize: 13, color: '#8B96FF' }}>Parsing CV...</span>
+                    : cvFileName
+                    ? <span style={{ fontSize: 13, color: '#22C55E' }}>✓ {cvFileName}</span>
                     : <><div style={{ fontSize: 22, marginBottom: 6 }}>📄</div><div style={{ fontSize: 13, color: 'rgba(240,237,232,0.55)' }}>Click to upload PDF, DOCX, or TXT</div></>}
                 </div>
                 <input ref={fileRef} type="file" accept=".pdf,.docx,.txt" style={{ display: 'none' }} onChange={e => { if (e.target.files?.[0]) handleCV(e.target.files[0]) }} />
@@ -258,18 +260,18 @@ export default function OnboardingPage() {
           {step === 4 && (
             <div style={{ textAlign: 'center' }}>
               <div style={{ fontSize: 52, marginBottom: 12 }}>🎯</div>
-              <h2 style={{ fontSize: 22, fontWeight: 700, marginBottom: 8 }}>You're ready, {data.candidateName.split(' ')[0]}</h2>
-              <p style={{ fontSize: 13, color: 'rgba(240,237,232,0.5)', marginBottom: 28, lineHeight: 1.7 }}>Adam Reid is waiting. Hold the 🎤 button while answering and speak clearly.</p>
+              <h2 style={{ fontSize: 22, fontWeight: 700, marginBottom: 8 }}>You are ready, {data.candidateName.split(' ')[0]}</h2>
+              <p style={{ fontSize: 13, color: 'rgba(240,237,232,0.5)', marginBottom: 28, lineHeight: 1.7 }}>Adam Reid is waiting. Hold the mic button while answering and speak clearly.</p>
 
               <div style={{ background: '#0F1117', border: '0.5px solid rgba(255,255,255,0.08)', borderRadius: 10, padding: '16px 18px', textAlign: 'left' as const, marginBottom: 24 }}>
                 {([
-                  ['👤 Name', data.candidateName],
-                  ['💼 Role', data.jobTitle],
-                  ['🏢 Institution', data.institution],
-                  ['🏭 Sector', data.sector],
-                  ['📅 Experience', data.yearsExperience],
-                  ['🌐 Language', { en: 'English', ar: 'Arabic', mixed: 'Mixed' }[data.language]],
-                  ['📄 CV', data.cvText ? '✓ Provided' : '—'],
+                  ['Name', data.candidateName],
+                  ['Role', data.jobTitle],
+                  ['Institution', data.institution],
+                  ['Sector', data.sector],
+                  ['Experience', data.yearsExperience],
+                  ['Language', { en: 'English', ar: 'Arabic', mixed: 'Mixed' }[data.language]],
+                  ['CV', data.cvText ? 'Provided' : 'Not provided'],
                 ] as [string, string][]).map(([k, v]) => (
                   <div key={k} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: '0.5px solid rgba(255,255,255,0.05)', fontSize: 13 }}>
                     <span style={{ color: 'rgba(240,237,232,0.45)' }}>{k}</span>
@@ -279,7 +281,7 @@ export default function OnboardingPage() {
               </div>
 
               <button onClick={startInterview} style={{ width: '100%', padding: '14px', background: 'linear-gradient(135deg,#2A5CFF,#1d45cc)', border: 'none', borderRadius: 10, color: '#fff', fontWeight: 700, fontSize: 15, cursor: 'pointer' }}>
-                Enter Interview Room →
+                Enter Interview Room
               </button>
               <p style={{ fontSize: 11, color: 'rgba(240,237,232,0.25)', marginTop: 12 }}>Free plan · 15-minute session</p>
             </div>
@@ -289,11 +291,11 @@ export default function OnboardingPage() {
             <div style={{ display: 'flex', gap: 10, marginTop: 28 }}>
               {step > 1 && (
                 <button onClick={back} style={{ padding: '12px 16px', background: 'transparent', border: '0.5px solid rgba(255,255,255,0.15)', borderRadius: 9, color: 'rgba(240,237,232,0.6)', fontWeight: 600, fontSize: 14, cursor: 'pointer', fontFamily: 'inherit' }}>
-                  ← Back
+                  Back
                 </button>
               )}
               <button onClick={next} style={{ flex: 1, padding: '12px 20px', background: '#2A5CFF', border: 'none', borderRadius: 9, color: '#fff', fontWeight: 700, fontSize: 14, cursor: 'pointer', fontFamily: 'inherit' }}>
-                {step === 3 ? 'Review & Start →' : 'Continue →'}
+                {step === 3 ? 'Review and Start' : 'Continue'}
               </button>
             </div>
           )}

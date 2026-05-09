@@ -117,7 +117,6 @@ export default function InterviewPage() {
   const resetSilenceTimer = useCallback(() => {
     if (silenceTimer.current) clearTimeout(silenceTimer.current)
     silenceTimer.current = setTimeout(() => {
-      // لا ترسل صمت إذا كان المستخدم يسجل أو يتحول
       if (!isLoadingRef.current && !isEndedRef.current && !isRecordingRef.current && !isTranscribingRef.current) {
         const silenceMsg: Message = { role: 'user', content: '[Candidate is silent]' }
         const newMsgs = [...messagesRef.current, silenceMsg]
@@ -132,13 +131,9 @@ export default function InterviewPage() {
     try {
       handleFirstInteraction()
       setMicError(null)
-      // أوقف silence timer فوراً
       if (silenceTimer.current) clearTimeout(silenceTimer.current)
-      // أوقف صوت Adam
-      if (audioRef.current) {
-        audioRef.current.pause()
-        audioRef.current = null
-      }
+      if (audioRef.current) { audioRef.current.pause(); audioRef.current = null }
+
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' })
       mediaRecorderRef.current = mediaRecorder
@@ -192,7 +187,6 @@ export default function InterviewPage() {
         setMessages(newMessages)
         await callAdam(newMessages)
       } else {
-        // تسجيل فارغ — أعد تشغيل السايلنس تايمر فقط
         resetSilenceTimer()
       }
     } catch (err: any) {
@@ -295,7 +289,6 @@ export default function InterviewPage() {
       onClick={handleFirstInteraction}
       style={{ fontFamily: 'system-ui, sans-serif', background: '#0B0D11', color: '#F0EDE8', minHeight: '100vh', display: 'flex', flexDirection: 'column' }}
     >
-      {/* Header */}
       <div style={{ background: '#0F1117', borderBottom: '0.5px solid rgba(255,255,255,0.07)', padding: '12px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div style={{ fontWeight: 800, fontSize: 16 }}>Mock<span style={{ color: '#E85D2F' }}>Boss</span> AI</div>
         <div style={{ textAlign: 'center' }}>
@@ -311,7 +304,6 @@ export default function InterviewPage() {
         </div>
       </div>
 
-      {/* Participants */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, padding: '12px 16px 0' }}>
         <div style={{ background: '#111520', border: '0.5px solid rgba(42,92,255,0.2)', borderRadius: 10, padding: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
           <div style={{ width: 44, height: 44, background: '#2563EB', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20 }}>🎯</div>
@@ -333,7 +325,6 @@ export default function InterviewPage() {
         </div>
       </div>
 
-      {/* Chat */}
       <div ref={chatRef} style={{ flex: 1, padding: '10px 16px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8, minHeight: 200, maxHeight: 300 }}>
         {messages.map((msg, i) => (
           <div key={i} style={{ maxWidth: '88%', alignSelf: msg.role === 'assistant' ? 'flex-start' : 'flex-end', background: msg.role === 'assistant' ? '#1a1f2e' : '#1E3A8A', border: msg.role === 'assistant' ? '0.5px solid rgba(42,92,255,0.18)' : 'none', borderRadius: 10, padding: '10px 13px', fontSize: 13, lineHeight: 1.7 }}>
@@ -357,7 +348,7 @@ export default function InterviewPage() {
                   Hesitation: {msg.voiceAnalysis.hesitation}
                 </span>
                 <span style={{ fontSize: 9, padding: '2px 6px', background: 'rgba(255,255,255,0.05)', borderRadius: 4, color: 'rgba(240,237,232,0.4)' }}>
-                  {msg.voiceAnalysis.wordsPerMinute} WPM · {msg.voiceAnalysis.duration}s
+                  {msg.voiceAnalysis.wordCount} words · {msg.voiceAnalysis.duration}s
                 </span>
               </div>
             )}
@@ -373,7 +364,6 @@ export default function InterviewPage() {
         )}
       </div>
 
-      {/* Input + Mic */}
       {!isEnded ? (
         <div style={{ padding: '10px 16px', borderTop: '0.5px solid rgba(255,255,255,0.05)' }}>
           {micError && (
@@ -382,7 +372,6 @@ export default function InterviewPage() {
             </div>
           )}
           <div style={{ display: 'flex', gap: 8 }}>
-            {/* زر الميكروفون */}
             <button
               onMouseDown={startRecording}
               onMouseUp={stopRecording}
@@ -393,30 +382,24 @@ export default function InterviewPage() {
                 width: 44, height: 44, borderRadius: 8, border: 'none',
                 cursor: isLoading || isTranscribing ? 'not-allowed' : 'pointer',
                 flexShrink: 0, fontSize: 20,
-                background: isRecording ? '#DC2626' : isTranscribing ? '#92400E' : '#1E293B',
+                background: isRecording ? '#DC2626' : '#1E293B',
                 boxShadow: isRecording ? '0 0 20px rgba(220,38,38,0.7)' : 'none',
                 transition: 'all 0.15s',
-                userSelect: 'none'
+                userSelect: 'none' as any
               }}
             >
               {isTranscribing ? '⏳' : isRecording ? '⏹' : '🎤'}
             </button>
-
             <textarea
               ref={inputRef}
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={handleKey}
-              placeholder={
-                isRecording ? '● Recording... release to send'
-                : isTranscribing ? 'Processing your voice...'
-                : 'Hold 🎤 to speak, or type here...'
-              }
+              placeholder={isRecording ? '● Recording... release to send' : isTranscribing ? 'Processing...' : 'Hold 🎤 to speak, or type here...'}
               disabled={isLoading || isRecording || isTranscribing}
               rows={1}
               style={{ flex: 1, background: '#16181F', border: '0.5px solid rgba(255,255,255,0.08)', color: '#F0EDE8', fontFamily: 'inherit', fontSize: 13, padding: '9px 12px', borderRadius: 8, outline: 'none', resize: 'none' }}
             />
-
             <button
               onClick={sendMessage}
               disabled={isLoading || !input.trim() || isRecording || isTranscribing}
@@ -427,13 +410,10 @@ export default function InterviewPage() {
       ) : (
         <div style={{ padding: 16, textAlign: 'center', borderTop: '0.5px solid rgba(255,255,255,0.05)' }}>
           <div style={{ fontSize: 14, color: '#8B96FF', marginBottom: 8 }}>Session ended · Score: {overallScore ?? '—'}/100</div>
-          <button style={{ background: '#1E3A8A', color: '#fff', border: 'none', borderRadius: 8, padding: '10px 24px', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>
-            View Full Report →
-          </button>
+          <button style={{ background: '#1E3A8A', color: '#fff', border: 'none', borderRadius: 8, padding: '10px 24px', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>View Full Report →</button>
         </div>
       )}
 
-      {/* Footer */}
       <div style={{ background: '#0D0F14', borderTop: '0.5px solid rgba(255,255,255,0.04)', padding: '8px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div style={{ fontSize: 10, color: 'rgba(240,237,232,0.2)' }}>Question {questionCount}</div>
         <div style={{ background: 'rgba(42,92,255,0.08)', border: '0.5px solid rgba(42,92,255,0.15)', borderRadius: 6, padding: '4px 12px', textAlign: 'center' }}>

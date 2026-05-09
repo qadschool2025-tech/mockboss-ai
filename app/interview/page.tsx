@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 
-
 interface VoiceAnalysis {
   wordsPerMinute: number
   duration: number
@@ -19,7 +18,7 @@ interface Message {
 }
 
 export default function InterviewPage() {
- const [CONFIG] = useState(() => {
+  const [CONFIG] = useState(() => {
     if (typeof window === 'undefined') {
       return {
         candidateName: 'Candidate',
@@ -34,7 +33,7 @@ export default function InterviewPage() {
       }
     }
     try {
-      const saved = sessionStorage.getItem('mockboss_config')
+      const saved = sessionStorage.getItem('barbaros_config')
       if (saved) return JSON.parse(saved)
     } catch {}
     return {
@@ -49,7 +48,7 @@ export default function InterviewPage() {
       plan: 'free',
     }
   })
-  
+
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
@@ -307,8 +306,9 @@ export default function InterviewPage() {
       onClick={handleFirstInteraction}
       style={{ fontFamily: 'system-ui, sans-serif', background: '#0B0D11', color: '#F0EDE8', minHeight: '100vh', display: 'flex', flexDirection: 'column' }}
     >
+      {/* Nav */}
       <div style={{ background: '#0F1117', borderBottom: '0.5px solid rgba(255,255,255,0.07)', padding: '12px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div style={{ fontWeight: 800, fontSize: 16 }}>Mock<span style={{ color: '#E85D2F' }}>Boss</span> AI</div>
+        <div style={{ fontWeight: 800, fontSize: 16 }}>Barbar<span style={{ color: '#E85D2F' }}>os</span></div>
         <div style={{ textAlign: 'center' }}>
           <div style={{ fontSize: 12, fontWeight: 600 }}>{CONFIG.jobTitle} · {CONFIG.institution}</div>
           <div style={{ fontSize: 10, color: 'rgba(240,237,232,0.4)' }}>Based on highest hiring standards</div>
@@ -322,6 +322,7 @@ export default function InterviewPage() {
         </div>
       </div>
 
+      {/* Faces */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, padding: '12px 16px 0' }}>
         <div style={{ background: '#111520', border: '0.5px solid rgba(42,92,255,0.2)', borderRadius: 10, padding: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
           <div style={{ width: 44, height: 44, background: '#2563EB', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20 }}>🎯</div>
@@ -332,7 +333,9 @@ export default function InterviewPage() {
           </div>
         </div>
         <div style={{ background: '#111318', border: '0.5px solid rgba(255,255,255,0.06)', borderRadius: 10, padding: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{ width: 44, height: 44, background: '#1a1a22', border: '1.5px solid rgba(255,255,255,0.08)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 16 }}>A</div>
+          <div style={{ width: 44, height: 44, background: '#1a1a22', border: '1.5px solid rgba(255,255,255,0.08)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 16 }}>
+            {CONFIG.candidateName?.charAt(0).toUpperCase()}
+          </div>
           <div>
             <div style={{ fontSize: 12, fontWeight: 600 }}>{CONFIG.candidateName}</div>
             <div style={{ fontSize: 10, color: 'rgba(240,237,232,0.35)' }}>Candidate · {CONFIG.yearsExperience}</div>
@@ -343,6 +346,7 @@ export default function InterviewPage() {
         </div>
       </div>
 
+      {/* Chat */}
       <div ref={chatRef} style={{ flex: 1, padding: '10px 16px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8, minHeight: 200, maxHeight: 300 }}>
         {messages.map((msg, i) => (
           <div key={i} style={{ maxWidth: '88%', alignSelf: msg.role === 'assistant' ? 'flex-start' : 'flex-end', background: msg.role === 'assistant' ? '#1a1f2e' : '#1E3A8A', border: msg.role === 'assistant' ? '0.5px solid rgba(42,92,255,0.18)' : 'none', borderRadius: 10, padding: '10px 13px', fontSize: 13, lineHeight: 1.7 }}>
@@ -382,6 +386,7 @@ export default function InterviewPage() {
         )}
       </div>
 
+      {/* Input */}
       {!isEnded ? (
         <div style={{ padding: '10px 16px', borderTop: '0.5px solid rgba(255,255,255,0.05)' }}>
           {micError && (
@@ -428,10 +433,13 @@ export default function InterviewPage() {
       ) : (
         <div style={{ padding: 16, textAlign: 'center', borderTop: '0.5px solid rgba(255,255,255,0.05)' }}>
           <div style={{ fontSize: 14, color: '#8B96FF', marginBottom: 8 }}>Session ended · Score: {overallScore ?? '—'}/100</div>
-          <button style={{ background: '#1E3A8A', color: '#fff', border: 'none', borderRadius: 8, padding: '10px 24px', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>View Full Report →</button>
+          <button style={{ background: '#1E3A8A', color: '#fff', border: 'none', borderRadius: 8, padding: '10px 24px', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>
+            View Full Report →
+          </button>
         </div>
       )}
 
+      {/* Bottom */}
       <div style={{ background: '#0D0F14', borderTop: '0.5px solid rgba(255,255,255,0.04)', padding: '8px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div style={{ fontSize: 10, color: 'rgba(240,237,232,0.2)' }}>Question {questionCount}</div>
         <div style={{ background: 'rgba(42,92,255,0.08)', border: '0.5px solid rgba(42,92,255,0.15)', borderRadius: 6, padding: '4px 12px', textAlign: 'center' }}>

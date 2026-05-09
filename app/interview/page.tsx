@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
 
 interface VoiceAnalysis {
   wordsPerMinute: number
@@ -18,6 +19,8 @@ interface Message {
 }
 
 export default function InterviewPage() {
+  const router = useRouter()
+
   const [CONFIG] = useState(() => {
     if (typeof window === 'undefined') {
       return {
@@ -78,12 +81,14 @@ export default function InterviewPage() {
   const audioReadyRef = useRef(false)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
+  const overallScoreRef = useRef<number | null>(null)
 
   useEffect(() => { messagesRef.current = messages }, [messages])
   useEffect(() => { isLoadingRef.current = isLoading }, [isLoading])
   useEffect(() => { isEndedRef.current = isEnded }, [isEnded])
   useEffect(() => { isRecordingRef.current = isRecording }, [isRecording])
   useEffect(() => { isTranscribingRef.current = isTranscribing }, [isTranscribing])
+  useEffect(() => { overallScoreRef.current = overallScore }, [overallScore])
 
   useEffect(() => {
     if (audioReady && pendingAudio) {
@@ -241,6 +246,13 @@ export default function InterviewPage() {
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
   }
 
+  const endSession = (msgs: Message[], finalScore: number | null) => {
+    sessionStorage.setItem('barbaros_messages', JSON.stringify(msgs))
+    sessionStorage.setItem('barbaros_score', String(finalScore ?? 0))
+    setIsEnded(true)
+    setTimeout(() => router.push('/session-end'), 2000)
+  }
+
   const callAdam = async (msgs: Message[]) => {
     setIsLoading(true)
     if (silenceTimer.current) clearTimeout(silenceTimer.current)
@@ -254,20 +266,21 @@ export default function InterviewPage() {
       if (!data.success) throw new Error(data.error)
 
       const newMsg: Message = { role: 'assistant', content: data.content, score: data.score }
-      setMessages(prev => [...prev, newMsg])
+      const updatedMsgs = [...msgs, newMsg]
+      setMessages(updatedMsgs)
 
       if (data.audioBase64) playAudio(data.audioBase64)
 
+      let latestScore = overallScoreRef.current
       if (data.score) {
-        setOverallScore(() => {
-          const all = [...msgs.filter(m => m.score).map(m => m.score.score), data.score.score]
-          return Math.round(all.reduce((a, b) => a + b, 0) / all.length)
-        })
+        const all = [...msgs.filter(m => m.score).map(m => m.score.score), data.score.score]
+        latestScore = Math.round(all.reduce((a, b) => a + b, 0) / all.length)
+        setOverallScore(latestScore)
         setQuestionCount(prev => prev + 1)
       }
 
       if (data.isEndOfSession) {
-        setIsEnded(true)
+        endSession(updatedMsgs, latestScore)
       } else {
         resetSilenceTimer()
       }
@@ -432,8 +445,15 @@ export default function InterviewPage() {
         </div>
       ) : (
         <div style={{ padding: 16, textAlign: 'center', borderTop: '0.5px solid rgba(255,255,255,0.05)' }}>
-          <div style={{ fontSize: 14, color: '#8B96FF', marginBottom: 8 }}>Session ended · Score: {overallScore ?? '—'}/100</div>
-          <button style={{ background: '#1E3A8A', color: '#fff', border: 'none', borderRadius: 8, padding: '10px 24px', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>
+          <div style={{ fontSize: 14, color: '#8B96FF', marginBottom: 8 }}>
+            Session ended · Score: {overallScore ?? '—'}/100
+          </div>
+          <div style={{ fontSize: 12, color: 'rgba(240,237,232,0.3)', marginBottom: 12 }}>
+            Redirecting to your report...
+          </div>
+          <button
+            onClick={() => router.push('/report')}
+            style={{ background: '#1E3A8A', color: '#fff', border: 'none', borderRadius: 8, padding: '10px 24px', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>
             View Full Report →
           </button>
         </div>
@@ -447,7 +467,11 @@ export default function InterviewPage() {
           <div style={{ fontWeight: 800, fontSize: 15, color: '#8B96FF' }}>{overallScore ?? '—'}</div>
         </div>
         <button
-          onClick={() => { if (confirm('End interview?')) setIsEnded(true) }}
+          onClick={() => {
+            if (confirm('End interview?')) {
+              endSession(messagesRef.current, overallScoreRef.current)
+            }
+          }}
           style={{ background: 'rgba(239,68,68,0.07)', border: '0.5px solid rgba(239,68,68,0.18)', color: '#F87171', borderRadius: 6, padding: '6px 12px', fontSize: 11, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}
         >End</button>
       </div>

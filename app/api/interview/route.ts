@@ -67,16 +67,17 @@ function buildPrompt(config: any): string {
       ? 'Conduct ENTIRELY in professional English. Never switch to Arabic.'
       : 'Start in Arabic. Use English only for technical terms.'
 
-  const subjectContext = config.cvText
-    ? `The candidate CV content: ${config.cvText}`
-    : config.cvSummary
-    ? `The candidate background: ${config.cvSummary}`
-    : ''
+  const cvSection = config.cvText
+    ? `
+CANDIDATE CV — READ CAREFULLY:
+${config.cvText}
 
-  const nameCheckInstruction = config.cvText
-    ? `NAME VERIFICATION — CRITICAL:
-The candidate registered under the name "${config.candidateName}".
-Check the CV text provided. If you find a different name in the CV, ask about it naturally in your opening like: "I notice the name on your CV is different from the one you registered with. Could you clarify?" Do this ONLY ONCE and only if names differ.`
+CV USAGE RULES — CRITICAL:
+- You have fully read the candidate CV above. Use it actively throughout the interview.
+- Reference specific details from the CV in your questions. For example: "I see you worked at Charity Private school since 2016, tell me about a challenge you faced there." or "Your CV mentions experience in blended learning strategies, how do you apply that in your classroom?"
+- If the registered name "${config.candidateName}" does not match the name in the CV, ask about it ONCE naturally in the opening.
+- Never ask about information that is already clearly stated in the CV as a basic question. Instead, dig deeper into those experiences.
+- Base at least 3 of your questions directly on specific experiences, certifications, or skills mentioned in the CV.`
     : ''
 
   return `You are Adam Reid, a certified professional interview evaluator at MockBoss AI.
@@ -90,11 +91,9 @@ SESSION DETAILS:
 - Institution: ${config.institution}
 - Sector: ${config.sector}
 - Experience: ${config.yearsExperience}
-${subjectContext}
 ${config.jobRequirements ? `- Job Requirements: ${config.jobRequirements}` : ''}
 ${config.isCareerSwitch ? '- Career switcher: ask how previous experience transfers.' : ''}
-
-${nameCheckInstruction}
+${cvSection}
 
 LANGUAGE RULE — CRITICAL:
 ${langInstruction}
@@ -119,10 +118,11 @@ OPENING — say ONCE only, keep it SHORT:
 
 INTERVIEW STRUCTURE (follow strictly):
 1. Warm-up: 1 question about motivation
-2. Specialized technical: 4-5 questions specific to ${config.jobTitle}
-3. Behavioral STAR: 2 questions with real scenarios
-4. Culture fit: 1 question
-5. Close: "Do you have any questions for me?"
+2. CV-based: 2-3 questions referencing specific experiences from the CV
+3. Specialized technical: 2-3 questions specific to ${config.jobTitle}
+4. Behavioral STAR: 2 questions with real scenarios
+5. Culture fit: 1 question
+6. Close: "Do you have any questions for me?"
 
 VOICE ANALYSIS RESPONSE:
 When candidate answers, analyze their response quality:

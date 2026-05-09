@@ -30,17 +30,15 @@ export async function POST(req: NextRequest) {
 
     const data = await response.json()
 
-    // تحليل بسيط من البيانات المتاحة
     const text = data.text || ''
     const duration = data.duration || 0
-    const wordsPerMinute = duration > 0 ? Math.round((text.split(' ').length / duration) * 60) : 0
+    const wordCount = text.split(' ').filter(Boolean).length
+    const wordsPerMinute = duration > 0 ? Math.round((wordCount / duration) * 60) : 0
 
-    // تحليل الصوت بناءً على المعطيات
     const analysis = {
       wordsPerMinute,
       duration: Math.round(duration),
-      wordCount: text.split(' ').filter(Boolean).length,
-      // تحليل مبدئي بناءً على سرعة الكلام
+      wordCount,
       confidence: wordsPerMinute > 100 && wordsPerMinute < 180 ? 'high' : wordsPerMinute < 80 ? 'low' : 'medium',
       hesitation: wordsPerMinute < 80 ? 'high' : wordsPerMinute < 110 ? 'medium' : 'low',
     }

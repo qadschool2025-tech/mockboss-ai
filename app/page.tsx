@@ -98,9 +98,9 @@ export default function LandingPage() {
         {/* Plans Preview */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10, maxWidth: 700, width: '100%', marginBottom: 60 }}>
           {[
-            { name: 'GO', price: '$1.99', note: '🎙️ Voice · 7 min · per session', border: 'rgba(232,93,47,0.35)', bg: 'rgba(232,93,47,0.06)', period: '/session' },
+            { name: 'GO', price: '$2.50', note: '🎙️ Voice · 15 min · per session', border: 'rgba(232,93,47,0.35)', bg: 'rgba(232,93,47,0.06)', period: '/session' },
             { name: 'Pro', price: '$12', note: '🎙️ Voice · 30 min · 10 sessions', border: 'rgba(37,99,235,0.35)', bg: 'rgba(37,99,235,0.06)', period: '/mo' },
-            { name: 'Expert', price: '$36', note: '🎙️ Voice · 60 min · Unlimited', border: 'rgba(139,150,255,0.35)', bg: 'rgba(139,150,255,0.06)', period: '/mo' },
+            { name: 'Expert', price: '$36', note: '🎙️ Voice · 60 min · 20 sessions', border: 'rgba(139,150,255,0.35)', bg: 'rgba(139,150,255,0.06)', period: '/mo' },
           ].map((plan, i) => (
             <div key={i} style={{ background: plan.bg, border: `0.5px solid ${plan.border}`, borderRadius: 10, padding: '14px 12px', textAlign: 'center' }}>
               <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>{plan.name}</div>

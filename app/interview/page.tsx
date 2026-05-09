@@ -110,11 +110,14 @@ export default function InterviewPage() {
     if (next && audioRef.current) audioRef.current.pause()
   }
 
-  // ── تسجيل الصوت ──
   const startRecording = async () => {
     try {
       handleFirstInteraction()
       setMicError(null)
+      if (audioRef.current) {
+        audioRef.current.pause()
+        audioRef.current = null
+      }
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' })
       mediaRecorderRef.current = mediaRecorder
@@ -133,7 +136,7 @@ export default function InterviewPage() {
       mediaRecorder.start()
       setIsRecording(true)
     } catch (err: any) {
-      setMicError('Microphone access denied')
+      setMicError('Microphone access denied — please allow mic permission')
       console.error('Mic error:', err)
     }
   }
@@ -160,8 +163,6 @@ export default function InterviewPage() {
       if (!data.success) throw new Error(data.error)
 
       if (data.text?.trim()) {
-        setInput(data.text.trim())
-        // إرسال تلقائي بعد التحويل
         const userMsg: Message = {
           role: 'user',
           content: data.text.trim(),
@@ -169,12 +170,11 @@ export default function InterviewPage() {
         }
         const newMessages = [...messagesRef.current, userMsg]
         setMessages(newMessages)
-        setInput('')
         await callAdam(newMessages)
       }
     } catch (err: any) {
       console.error('Transcribe error:', err)
-      setMicError('Transcription failed, please type instead')
+      setMicError('Transcription failed — please type your answer')
     } finally {
       setIsTranscribing(false)
     }
@@ -332,13 +332,11 @@ export default function InterviewPage() {
             {msg.content === '[Candidate is silent]'
               ? <span style={{ color: 'rgba(240,237,232,0.3)', fontStyle: 'italic' }}>...</span>
               : msg.content}
-            {/* تقييم Adam */}
             {msg.score && (
               <div style={{ marginTop: 6, padding: '3px 8px', background: 'rgba(42,92,255,0.1)', borderRadius: 5, fontSize: 10, color: '#8B96FF' }}>
                 Score: {msg.score.score}/100
               </div>
             )}
-            {/* تحليل صوت المستخدم */}
             {msg.voiceAnalysis && (
               <div style={{ marginTop: 6, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                 <span style={{ fontSize: 9, padding: '2px 6px', background: 'rgba(255,255,255,0.05)', borderRadius: 4, color: getConfidenceColor(msg.voiceAnalysis.confidence) }}>
@@ -370,7 +368,6 @@ export default function InterviewPage() {
             <div style={{ fontSize: 11, color: '#F87171', marginBottom: 6, textAlign: 'center' }}>{micError}</div>
           )}
           <div style={{ display: 'flex', gap: 8 }}>
-            {/* زر الميكروفون */}
             <button
               onMouseDown={startRecording}
               onMouseUp={stopRecording}
@@ -378,21 +375,22 @@ export default function InterviewPage() {
               onTouchEnd={stopRecording}
               disabled={isLoading || isTranscribing || isEnded}
               style={{
-                width: 44, height: 44, borderRadius: 8, border: 'none', cursor: 'pointer', flexShrink: 0, fontSize: 20,
-                background: isRecording ? '#EF4444' : isTranscribing ? '#F59E0B' : '#16181F',
-                boxShadow: isRecording ? '0 0 12px rgba(239,68,68,0.5)' : 'none',
+                width: 44, height: 44, borderRadius: 8, border: 'none',
+                cursor: isLoading || isTranscribing ? 'not-allowed' : 'pointer',
+                flexShrink: 0, fontSize: 20,
+                background: isRecording ? '#EF4444' : isTranscribing ? '#92400E' : '#16181F',
+                boxShadow: isRecording ? '0 0 16px rgba(239,68,68,0.6)' : 'none',
                 transition: 'all 0.15s'
               }}
             >
               {isTranscribing ? '⏳' : isRecording ? '⏹' : '🎤'}
             </button>
-
             <textarea
               ref={inputRef}
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={handleKey}
-              placeholder={isRecording ? 'Recording... release to send' : isTranscribing ? 'Transcribing...' : 'Hold 🎤 to speak, or type here...'}
+              placeholder={isRecording ? '● Recording... release to send' : isTranscribing ? 'Transcribing your answer...' : 'Hold 🎤 to speak, or type here...'}
               disabled={isLoading || isRecording || isTranscribing}
               rows={1}
               style={{ flex: 1, background: '#16181F', border: '0.5px solid rgba(255,255,255,0.08)', color: '#F0EDE8', fontFamily: 'inherit', fontSize: 13, padding: '9px 12px', borderRadius: 8, outline: 'none', resize: 'none' }}
@@ -400,7 +398,7 @@ export default function InterviewPage() {
             <button
               onClick={sendMessage}
               disabled={isLoading || !input.trim()}
-              style={{ width: 44, height: 44, background: isLoading ? '#333' : '#2563EB', border: 'none', borderRadius: 8, cursor: isLoading ? 'not-allowed' : 'pointer', color: '#fff', fontSize: 18, flexShrink: 0 }}
+              style={{ width: 44, height: 44, background: isLoading || !input.trim() ? '#1a1a22' : '#2563EB', border: 'none', borderRadius: 8, cursor: isLoading ? 'not-allowed' : 'pointer', color: '#fff', fontSize: 18, flexShrink: 0, transition: 'background 0.15s' }}
             >→</button>
           </div>
         </div>

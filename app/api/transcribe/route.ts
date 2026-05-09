@@ -13,6 +13,7 @@ export async function POST(req: NextRequest) {
     openaiForm.append('file', audio, 'recording.webm')
     openaiForm.append('model', 'gpt-4o-mini-transcribe')
     openaiForm.append('response_format', 'json')
+    openaiForm.append('language', 'en')
 
     const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
       method: 'POST',

@@ -38,13 +38,13 @@ export default function LandingPage() {
           <span style={{ color: '#E85D2F' }}> ready to get hired.</span>
         </h1>
 
-        {/* 🔥 Quote 1 — تحت العنوان مباشرة */}
+        {/* Quote 1 */}
         <div style={{ width: '100%', maxWidth: 600, marginBottom: 32, background: 'linear-gradient(135deg, rgba(232,93,47,0.08), rgba(232,93,47,0.03))', border: '0.5px solid rgba(232,93,47,0.2)', borderRadius: 16, padding: '24px' }}>
           <div style={{ fontSize: 11, color: '#E85D2F', fontWeight: 700, letterSpacing: 2, marginBottom: 12, textTransform: 'uppercase' }}>Why Barbaros?</div>
           <div style={{ fontSize: 'clamp(16px, 2.5vw, 22px)', fontWeight: 900, lineHeight: 1.5, letterSpacing: -0.5 }}>
-            "ChatGPT will <span style={{ color: 'rgba(240,237,232,0.35)', textDecoration: 'line-through' }}>chat</span> with you.
+            ChatGPT will <span style={{ color: 'rgba(240,237,232,0.35)', textDecoration: 'line-through' }}>chat</span> with you.
             <br />
-            Barbaros will <span style={{ color: '#E85D2F' }}>hire</span> you."
+            Barbaros will <span style={{ color: '#E85D2F' }}>hire</span> you.
           </div>
         </div>
 
@@ -57,7 +57,7 @@ export default function LandingPage() {
         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', justifyContent: 'center', marginBottom: 60 }}>
           <button onClick={() => router.push('/onboarding')}
             style={{ background: '#E85D2F', border: 'none', color: '#fff', fontSize: 15, fontWeight: 800, padding: '14px 32px', borderRadius: 10, cursor: 'pointer', fontFamily: 'inherit', letterSpacing: -0.3 }}>
-            Start Free Interview →
+            Get Started →
           </button>
           <button onClick={() => router.push('/packages')}
             style={{ background: 'rgba(255,255,255,0.05)', border: '0.5px solid rgba(255,255,255,0.12)', color: '#F0EDE8', fontSize: 15, fontWeight: 600, padding: '14px 32px', borderRadius: 10, cursor: 'pointer', fontFamily: 'inherit' }}>
@@ -96,29 +96,28 @@ export default function LandingPage() {
         </div>
 
         {/* Plans Preview */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10, maxWidth: 700, width: '100%', marginBottom: 60 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10, maxWidth: 700, width: '100%', marginBottom: 60 }}>
           {[
-            { name: 'Free', price: '$0', note: '📝 Text only · 10 min', border: 'rgba(255,255,255,0.07)', bg: 'rgba(255,255,255,0.03)' },
-            { name: 'GO', price: '$9', note: '🎙️ Voice · 15 min', border: 'rgba(232,93,47,0.25)', bg: 'rgba(232,93,47,0.06)' },
-            { name: 'Pro', price: '$19', note: '🎙️ Voice · 30 min', border: 'rgba(37,99,235,0.25)', bg: 'rgba(37,99,235,0.06)' },
-            { name: 'Expert', price: '$39', note: '🎙️ Voice · 60 min', border: 'rgba(139,150,255,0.25)', bg: 'rgba(139,150,255,0.06)' },
+            { name: 'GO', price: '$1.99', note: '🎙️ Voice · 7 min · per session', border: 'rgba(232,93,47,0.35)', bg: 'rgba(232,93,47,0.06)', period: '/session' },
+            { name: 'Pro', price: '$12', note: '🎙️ Voice · 30 min · 10 sessions', border: 'rgba(37,99,235,0.35)', bg: 'rgba(37,99,235,0.06)', period: '/mo' },
+            { name: 'Expert', price: '$36', note: '🎙️ Voice · 60 min · Unlimited', border: 'rgba(139,150,255,0.35)', bg: 'rgba(139,150,255,0.06)', period: '/mo' },
           ].map((plan, i) => (
             <div key={i} style={{ background: plan.bg, border: `0.5px solid ${plan.border}`, borderRadius: 10, padding: '14px 12px', textAlign: 'center' }}>
               <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>{plan.name}</div>
               <div style={{ fontSize: 22, fontWeight: 900, marginBottom: 4 }}>
-                {plan.price}<span style={{ fontSize: 11, fontWeight: 400, color: 'rgba(240,237,232,0.4)' }}>/mo</span>
+                {plan.price}<span style={{ fontSize: 11, fontWeight: 400, color: 'rgba(240,237,232,0.4)' }}>{plan.period}</span>
               </div>
               <div style={{ fontSize: 10, color: 'rgba(240,237,232,0.4)' }}>{plan.note}</div>
             </div>
           ))}
         </div>
 
-        {/* 🔥 Quote 2 — قبل الزر الأخير */}
+        {/* Quote 2 */}
         <div style={{ width: '100%', maxWidth: 700, marginBottom: 40, background: 'linear-gradient(135deg, rgba(37,99,235,0.08), rgba(139,150,255,0.04))', border: '0.5px solid rgba(139,150,255,0.2)', borderRadius: 16, padding: '32px 24px' }}>
           <div style={{ fontSize: 'clamp(18px, 3vw, 26px)', fontWeight: 900, lineHeight: 1.4, letterSpacing: -0.5, marginBottom: 8 }}>
-            "Anyone can <span style={{ color: 'rgba(240,237,232,0.35)' }}>practice.</span>
+            Anyone can <span style={{ color: 'rgba(240,237,232,0.35)' }}>practice.</span>
             <br />
-            Barbaros makes you <span style={{ color: '#8B96FF' }}>ready.</span>"
+            Barbaros makes you <span style={{ color: '#8B96FF' }}>ready.</span>
           </div>
           <div style={{ fontSize: 12, color: 'rgba(240,237,232,0.3)', marginTop: 12 }}>The closest thing to a real interview.</div>
         </div>
@@ -126,7 +125,7 @@ export default function LandingPage() {
         {/* Final CTA */}
         <button onClick={() => router.push('/onboarding')}
           style={{ background: '#E85D2F', border: 'none', color: '#fff', fontSize: 16, fontWeight: 800, padding: '16px 40px', borderRadius: 12, cursor: 'pointer', fontFamily: 'inherit', letterSpacing: -0.3, marginBottom: 60 }}>
-          Start Free Interview →
+          Get Started →
         </button>
 
       </main>

@@ -2,36 +2,6 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 
-const [CONFIG] = useState(() => {
-  if (typeof window === 'undefined') {
-    return {
-      candidateName: 'Candidate',
-      jobTitle: 'Professional',
-      institution: 'Company',
-      sector: 'General',
-      yearsExperience: '1–3 years',
-      language: 'en',
-      jobRequirements: '',
-      cvText: '',
-      plan: 'free',
-    }
-  }
-  try {
-    const saved = sessionStorage.getItem('mockboss_config')
-    if (saved) return JSON.parse(saved)
-  } catch {}
-  return {
-    candidateName: 'Candidate',
-    jobTitle: 'Professional',
-    institution: 'Company',
-    sector: 'General',
-    yearsExperience: '1–3 years',
-    language: 'en',
-    jobRequirements: '',
-    cvText: '',
-    plan: 'free',
-  }
-})
 
 interface VoiceAnalysis {
   wordsPerMinute: number
@@ -49,6 +19,37 @@ interface Message {
 }
 
 export default function InterviewPage() {
+ const [CONFIG] = useState(() => {
+    if (typeof window === 'undefined') {
+      return {
+        candidateName: 'Candidate',
+        jobTitle: 'Professional',
+        institution: 'Company',
+        sector: 'General',
+        yearsExperience: '1–3 years',
+        language: 'en',
+        jobRequirements: '',
+        cvText: '',
+        plan: 'free',
+      }
+    }
+    try {
+      const saved = sessionStorage.getItem('mockboss_config')
+      if (saved) return JSON.parse(saved)
+    } catch {}
+    return {
+      candidateName: 'Candidate',
+      jobTitle: 'Professional',
+      institution: 'Company',
+      sector: 'General',
+      yearsExperience: '1–3 years',
+      language: 'en',
+      jobRequirements: '',
+      cvText: '',
+      plan: 'free',
+    }
+  })
+  
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)

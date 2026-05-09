@@ -6,10 +6,12 @@ const client = new Anthropic({
 })
 
 const TIME_LIMITS: Record<string, number> = {
-  free: 15 * 60,
+  go: 7 * 60,
   pro: 30 * 60,
   expert: 60 * 60
 }
+
+const VOICE_PLANS = ['go', 'pro', 'expert']
 
 async function textToSpeech(text: string): Promise<Buffer | null> {
   try {
@@ -62,10 +64,10 @@ async function textToSpeech(text: string): Promise<Buffer | null> {
 function buildPrompt(config: any): string {
   const langInstruction =
     config.language === 'ar'
-      ? 'Conduct ENTIRELY in simple Modern Standard Arabic. Never switch to English.'
+      ? `LANGUAGE: You MUST speak ONLY in Arabic. Every single word must be in Arabic. Never use English under any circumstances. Not even one English word. This is absolute and non-negotiable.`
       : config.language === 'en'
-      ? 'Conduct ENTIRELY in professional English. Never switch to Arabic.'
-      : 'Start in Arabic. Use English only for technical terms.'
+      ? `LANGUAGE: You MUST speak ONLY in English. Every single word must be in English. Never use Arabic under any circumstances. This is absolute and non-negotiable.`
+      : `LANGUAGE: Use Arabic as the primary language. You may use English only for technical terms that have no Arabic equivalent.`
 
   const cvSection = config.cvText
     ? `
@@ -80,7 +82,7 @@ CV USAGE RULES — CRITICAL:
 - Base at least 3 of your questions directly on specific experiences, certifications, or skills mentioned in the CV.`
     : ''
 
-  return `You are Adam Reid, a certified professional interview evaluator at MockBoss AI.
+  return `You are Adam Reid, a certified professional interview evaluator at Barbaros AI.
 Your mission: conduct a REAL, TOUGH, and SPECIALIZED job interview.
 
 You are NOT an assistant. You do NOT explain or teach. You are a real interviewer.
@@ -95,7 +97,6 @@ ${config.jobRequirements ? `- Job Requirements: ${config.jobRequirements}` : ''}
 ${config.isCareerSwitch ? '- Career switcher: ask how previous experience transfers.' : ''}
 ${cvSection}
 
-LANGUAGE RULE — CRITICAL:
 ${langInstruction}
 
 RESPONSE RULES — CRITICAL:
@@ -140,7 +141,7 @@ export async function POST(req: NextRequest) {
     const { config, messages, sessionStartTime } = await req.json()
 
     const elapsed = (Date.now() - sessionStartTime) / 1000
-    const limit = TIME_LIMITS[config.plan] ?? TIME_LIMITS.free
+    const limit = TIME_LIMITS[config.plan] ?? TIME_LIMITS.go
 
     if (elapsed >= limit) {
       const scored = messages.filter((m: any) => m.score)
@@ -186,7 +187,8 @@ export async function POST(req: NextRequest) {
       } catch {}
     }
 
-    const audioBuffer = await textToSpeech(content)
+    const isVoicePlan = VOICE_PLANS.includes(config.plan)
+    const audioBuffer = isVoicePlan ? await textToSpeech(content) : null
     const audioBase64 = audioBuffer ? audioBuffer.toString('base64') : null
 
     return NextResponse.json({ success: true, content, score, audioBase64 })

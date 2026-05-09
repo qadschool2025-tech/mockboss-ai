@@ -21,8 +21,6 @@ async function textToSpeech(text: string): Promise<Buffer | null> {
       return null
     }
 
-    console.log('ElevenLabs: calling TTS, voiceId starts with:', voiceId.substring(0, 6))
-
     const response = await fetch(
       `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
       {
@@ -161,8 +159,6 @@ export async function POST(req: NextRequest) {
 
     const audioBuffer = await textToSpeech(content)
     const audioBase64 = audioBuffer ? audioBuffer.toString('base64') : null
-
-    console.log('Response: audioBase64 present:', !!audioBase64, '| score:', !!score)
 
     return NextResponse.json({ success: true, content, score, audioBase64 })
 

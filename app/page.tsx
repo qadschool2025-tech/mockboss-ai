@@ -11,7 +11,7 @@ export default function LandingPage() {
       {/* Nav */}
       <nav style={{ background: '#0F1117', borderBottom: '0.5px solid rgba(255,255,255,0.07)', padding: '14px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div style={{ fontWeight: 900, fontSize: 22, letterSpacing: -0.5 }}>
-          Hi<span style={{ color: '#E85D2F' }}>rix</span>
+          Barbar<span style={{ color: '#E85D2F' }}>os</span>
         </div>
         <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
           <button onClick={() => router.push('/packages')}
@@ -38,6 +38,16 @@ export default function LandingPage() {
           <span style={{ color: '#E85D2F' }}> ready to get hired.</span>
         </h1>
 
+        {/* 🔥 Quote 1 — تحت العنوان مباشرة */}
+        <div style={{ width: '100%', maxWidth: 600, marginBottom: 32, background: 'linear-gradient(135deg, rgba(232,93,47,0.08), rgba(232,93,47,0.03))', border: '0.5px solid rgba(232,93,47,0.2)', borderRadius: 16, padding: '24px' }}>
+          <div style={{ fontSize: 11, color: '#E85D2F', fontWeight: 700, letterSpacing: 2, marginBottom: 12, textTransform: 'uppercase' }}>Why Barbaros?</div>
+          <div style={{ fontSize: 'clamp(16px, 2.5vw, 22px)', fontWeight: 900, lineHeight: 1.5, letterSpacing: -0.5 }}>
+            "ChatGPT will <span style={{ color: 'rgba(240,237,232,0.35)', textDecoration: 'line-through' }}>chat</span> with you.
+            <br />
+            Barbaros will <span style={{ color: '#E85D2F' }}>hire</span> you."
+          </div>
+        </div>
+
         {/* Subheadline */}
         <p style={{ fontSize: 16, color: 'rgba(240,237,232,0.5)', maxWidth: 480, lineHeight: 1.7, margin: '0 0 40px' }}>
           Practice with Adam Reid — your AI interview evaluator. Real questions. Real voice. Real feedback.
@@ -53,16 +63,6 @@ export default function LandingPage() {
             style={{ background: 'rgba(255,255,255,0.05)', border: '0.5px solid rgba(255,255,255,0.12)', color: '#F0EDE8', fontSize: 15, fontWeight: 600, padding: '14px 32px', borderRadius: 10, cursor: 'pointer', fontFamily: 'inherit' }}>
             View Plans
           </button>
-        </div>
-
-        {/* 🔥 Quote 1 — بعد Hero مباشرة */}
-        <div style={{ width: '100%', maxWidth: 700, marginBottom: 60, background: 'linear-gradient(135deg, rgba(232,93,47,0.08), rgba(232,93,47,0.03))', border: '0.5px solid rgba(232,93,47,0.2)', borderRadius: 16, padding: '32px 24px' }}>
-          <div style={{ fontSize: 11, color: '#E85D2F', fontWeight: 700, letterSpacing: 2, marginBottom: 16, textTransform: 'uppercase' }}>Why Hirix?</div>
-          <div style={{ fontSize: 'clamp(18px, 3vw, 26px)', fontWeight: 900, lineHeight: 1.4, letterSpacing: -0.5 }}>
-            "ChatGPT will <span style={{ color: 'rgba(240,237,232,0.35)', textDecoration: 'line-through' }}>chat</span> with you.
-            <br />
-            Hirix will <span style={{ color: '#E85D2F' }}>hire</span> you."
-          </div>
         </div>
 
         {/* Stats */}
@@ -118,7 +118,7 @@ export default function LandingPage() {
           <div style={{ fontSize: 'clamp(18px, 3vw, 26px)', fontWeight: 900, lineHeight: 1.4, letterSpacing: -0.5, marginBottom: 8 }}>
             "Anyone can <span style={{ color: 'rgba(240,237,232,0.35)' }}>practice.</span>
             <br />
-            Hirix makes you <span style={{ color: '#8B96FF' }}>ready.</span>"
+            Barbaros makes you <span style={{ color: '#8B96FF' }}>ready.</span>"
           </div>
           <div style={{ fontSize: 12, color: 'rgba(240,237,232,0.3)', marginTop: 12 }}>The closest thing to a real interview.</div>
         </div>
@@ -133,8 +133,8 @@ export default function LandingPage() {
 
       {/* Footer */}
       <footer style={{ background: '#0D0F14', borderTop: '0.5px solid rgba(255,255,255,0.04)', padding: '16px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-        <div style={{ fontWeight: 900, fontSize: 14 }}>Hi<span style={{ color: '#E85D2F' }}>rix</span></div>
-        <div style={{ fontSize: 11, color: 'rgba(240,237,232,0.2)' }}>© 2026 Hirix. All rights reserved.</div>
+        <div style={{ fontWeight: 900, fontSize: 14 }}>Barbar<span style={{ color: '#E85D2F' }}>os</span></div>
+        <div style={{ fontSize: 11, color: 'rgba(240,237,232,0.2)' }}>© 2026 Barbaros. All rights reserved.</div>
         <div style={{ fontSize: 11, color: 'rgba(240,237,232,0.2)' }}>Powered by AI</div>
       </footer>
 

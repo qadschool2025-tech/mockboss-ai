@@ -5,11 +5,11 @@ import { Inter } from 'next/font/google';
 const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
-  title: 'Acevia — AI Interview Platform',
+  title: 'Barbaros — AI Interview Platform',
   description: 'Practice with Adam Reid, your AI interview evaluator. Real questions. Real voice. Real feedback. The closest thing to a real interview.',
   openGraph: {
-    title: 'Acevia — AI Interview Platform',
-    description: 'ChatGPT will chat with you. Acevia will hire you.',
+    title: 'Barbaros — AI Interview Platform',
+    description: 'ChatGPT will chat with you. Barbaros will hire you.',
     images: [
       {
         url: 'https://mockboss-ai.vercel.app/og.png',
@@ -18,8 +18,8 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'Acevia — AI Interview Platform',
-    description: 'ChatGPT will chat with you. Acevia will hire you.',
+    title: 'Barbaros — AI Interview Platform',
+    description: 'ChatGPT will chat with you. Barbaros will hire you.',
     images: [
       {
         url: 'https://mockboss-ai.vercel.app/og.png',

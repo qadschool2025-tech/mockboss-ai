@@ -12,7 +12,7 @@ interface OnboardingData {
   language: 'en' | 'ar' | 'mixed'
   jobRequirements: string
   cvText: string
-  plan: 'free' | 'pro' | 'expert'
+  plan: 'free' | 'go' | 'pro' | 'expert'
 }
 
 const SECTORS = [
@@ -102,7 +102,7 @@ export default function OnboardingPage() {
   }
 
   const startInterview = () => {
-    sessionStorage.setItem('mockboss_config', JSON.stringify(data))
+    sessionStorage.setItem('barbaros_config', JSON.stringify(data))
     router.push('/interview')
   }
 
@@ -141,15 +141,18 @@ export default function OnboardingPage() {
   return (
     <div style={{ fontFamily: 'system-ui, sans-serif', background: '#0B0D11', color: '#F0EDE8', minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
 
+      {/* Nav */}
       <nav style={{ background: '#0F1117', borderBottom: '0.5px solid rgba(255,255,255,0.07)', padding: '12px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <span style={{ fontWeight: 800, fontSize: 17 }}>Mock<span style={{ color: '#E85D2F' }}>Boss</span> AI</span>
+        <span style={{ fontWeight: 800, fontSize: 17 }}>Barbar<span style={{ color: '#E85D2F' }}>os</span></span>
         <span style={{ fontSize: 12, color: 'rgba(240,237,232,0.4)' }}>Step {step} of 4</span>
       </nav>
 
+      {/* Progress Bar */}
       <div style={{ height: 2, background: 'rgba(255,255,255,0.06)' }}>
         <div style={{ height: '100%', background: 'linear-gradient(90deg,#2A5CFF,#E85D2F)', width: `${(step / 4) * 100}%`, transition: 'width 0.4s ease' }} />
       </div>
 
+      {/* Steps */}
       <div style={{ display: 'flex', justifyContent: 'center', gap: 8, padding: '20px 16px 0', flexWrap: 'wrap' }}>
         {STEPS.map(s => (
           <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 6, opacity: s.id <= step ? 1 : 0.3 }}>
@@ -165,6 +168,7 @@ export default function OnboardingPage() {
       <main style={{ flex: 1, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '24px 16px 40px' }}>
         <div style={{ width: '100%', maxWidth: 520, background: '#111318', border: '0.5px solid rgba(255,255,255,0.08)', borderRadius: 14, padding: '28px 24px' }}>
 
+          {/* Step 1 */}
           {step === 1 && (
             <div>
               <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 4 }}>Tell us about yourself</h2>
@@ -189,10 +193,11 @@ export default function OnboardingPage() {
             </div>
           )}
 
+          {/* Step 2 */}
           {step === 2 && (
             <div>
               <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 4 }}>Job you are applying for</h2>
-              <p style={{ fontSize: 13, color: 'rgba(240,237,232,0.45)', marginBottom: 24 }}>The more specific you are, the sharper Adam questions will be.</p>
+              <p style={{ fontSize: 13, color: 'rgba(240,237,232,0.45)', marginBottom: 24 }}>The more specific you are, the sharper Adam's questions will be.</p>
 
               <div style={{ marginBottom: 18 }}>
                 <label style={{ display: 'block', fontSize: 12, fontWeight: 600, letterSpacing: 0.4, textTransform: 'uppercase' as const, color: 'rgba(240,237,232,0.5)', marginBottom: 7 }}>Job Title *</label>
@@ -228,10 +233,11 @@ export default function OnboardingPage() {
             </div>
           )}
 
+          {/* Step 3 */}
           {step === 3 && (
             <div>
               <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 4 }}>Sharpen the interview</h2>
-              <p style={{ fontSize: 13, color: 'rgba(240,237,232,0.45)', marginBottom: 24 }}>Optional but recommended - helps Adam ask targeted questions.</p>
+              <p style={{ fontSize: 13, color: 'rgba(240,237,232,0.45)', marginBottom: 24 }}>Optional but recommended — helps Adam ask targeted questions.</p>
 
               <div style={{ marginBottom: 18 }}>
                 <label style={{ display: 'block', fontSize: 12, fontWeight: 600, letterSpacing: 0.4, textTransform: 'uppercase' as const, color: 'rgba(240,237,232,0.5)', marginBottom: 7 }}>Upload Your CV (optional)</label>
@@ -257,6 +263,7 @@ export default function OnboardingPage() {
             </div>
           )}
 
+          {/* Step 4 */}
           {step === 4 && (
             <div style={{ textAlign: 'center' }}>
               <div style={{ fontSize: 52, marginBottom: 12 }}>🎯</div>
@@ -271,7 +278,7 @@ export default function OnboardingPage() {
                   ['Sector', data.sector],
                   ['Experience', data.yearsExperience],
                   ['Language', { en: 'English', ar: 'Arabic', mixed: 'Mixed' }[data.language]],
-                  ['CV', data.cvText ? 'Provided' : 'Not provided'],
+                  ['CV', data.cvText ? 'Provided ✓' : 'Not provided'],
                 ] as [string, string][]).map(([k, v]) => (
                   <div key={k} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: '0.5px solid rgba(255,255,255,0.05)', fontSize: 13 }}>
                     <span style={{ color: 'rgba(240,237,232,0.45)' }}>{k}</span>
@@ -281,12 +288,13 @@ export default function OnboardingPage() {
               </div>
 
               <button onClick={startInterview} style={{ width: '100%', padding: '14px', background: 'linear-gradient(135deg,#2A5CFF,#1d45cc)', border: 'none', borderRadius: 10, color: '#fff', fontWeight: 700, fontSize: 15, cursor: 'pointer' }}>
-                Enter Interview Room
+                Enter Interview Room →
               </button>
-              <p style={{ fontSize: 11, color: 'rgba(240,237,232,0.25)', marginTop: 12 }}>Free plan · 15-minute session</p>
+              <p style={{ fontSize: 11, color: 'rgba(240,237,232,0.25)', marginTop: 12 }}>Free plan · 15-minute session · Text only</p>
             </div>
           )}
 
+          {/* Navigation */}
           {step < 4 && (
             <div style={{ display: 'flex', gap: 10, marginTop: 28 }}>
               {step > 1 && (

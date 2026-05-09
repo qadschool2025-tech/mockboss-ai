@@ -25,6 +25,61 @@ const getPlanTime = (plan: string) => {
   return 15 * 60
 }
 
+const translations = {
+  en: {
+    basedOn: 'Based on highest hiring standards',
+    evaluator: 'Certified Interview Evaluator · Barbaros AI',
+    speaking: '● Speaking...',
+    listening: '○ Listening',
+    processing: 'Processing...',
+    showText: 'Show text',
+    hideText: 'Hide text',
+    yourTurn: 'Your turn',
+    listeningToAdam: 'Listening to Adam...',
+    keepHolding: '● Keep holding until you finish your complete answer',
+    holdHint: 'Hold for your complete answer — release only when done',
+    recording: '● Recording...',
+    typeHere: 'Or type your answer here...',
+    micDenied: 'Microphone access denied — please allow mic permission',
+    transcribeFailed: 'Transcription failed — please try again',
+    sessionEnded: 'Session ended',
+    score: 'Score',
+    redirecting: 'Redirecting to your report...',
+    viewReport: 'View Full Report →',
+    performance: 'Performance',
+    end: 'End',
+    endConfirm: 'End interview?',
+    question: 'Q',
+    poweredBy: 'Developed by certified HR professionals, powered by AI',
+  },
+  ar: {
+    basedOn: 'وفق أعلى معايير التوظيف',
+    evaluator: 'مقيّم مقابلات معتمد · Barbaros AI',
+    speaking: '● يتحدث...',
+    listening: '○ يستمع',
+    processing: 'جاري المعالجة...',
+    showText: 'عرض النص',
+    hideText: 'إخفاء النص',
+    yourTurn: 'دورك',
+    listeningToAdam: 'يستمع لآدم...',
+    keepHolding: '● استمر بالضغط حتى تنهي إجابتك كاملة',
+    holdHint: 'اضغط مع الاستمرار للإجابة الكاملة — أفلت فقط عند الانتهاء',
+    recording: '● جاري التسجيل...',
+    typeHere: 'أو اكتب إجابتك هنا...',
+    micDenied: 'تم رفض الوصول للميكروفون — يرجى السماح بالإذن',
+    transcribeFailed: 'فشل التحويل — يرجى المحاولة مجدداً',
+    sessionEnded: 'انتهت الجلسة',
+    score: 'النتيجة',
+    redirecting: 'جاري التحويل إلى تقريرك...',
+    viewReport: 'عرض التقرير الكامل ←',
+    performance: 'الأداء',
+    end: 'إنهاء',
+    endConfirm: 'إنهاء المقابلة؟',
+    question: 'س',
+    poweredBy: 'طُوِّر بمشاركة متخصصين معتمدين في الموارد البشرية، مدعوم بالذكاء الاصطناعي',
+  }
+}
+
 export default function InterviewPage() {
   const router = useRouter()
 
@@ -58,6 +113,9 @@ export default function InterviewPage() {
       plan: 'go',
     }
   })
+
+  const t = translations[CONFIG.language === 'ar' ? 'ar' : 'en']
+  const isRTL = CONFIG.language === 'ar'
 
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
@@ -205,7 +263,7 @@ export default function InterviewPage() {
       mediaRecorder.start()
       setIsRecording(true)
     } catch (err: any) {
-      setMicError('Microphone access denied — please allow mic permission')
+      setMicError(t.micDenied)
     }
   }
 
@@ -244,7 +302,7 @@ export default function InterviewPage() {
         resetSilenceTimer()
       }
     } catch (err: any) {
-      setMicError('Transcription failed — please try again')
+      setMicError(t.transcribeFailed)
       resetSilenceTimer()
     } finally {
       setIsTranscribing(false)
@@ -346,6 +404,7 @@ export default function InterviewPage() {
   return (
     <div
       onClick={handleFirstInteraction}
+      dir={isRTL ? 'rtl' : 'ltr'}
       style={{ fontFamily: 'system-ui, sans-serif', background: '#0B0D11', color: '#F0EDE8', minHeight: '100vh', display: 'flex', flexDirection: 'column' }}
     >
       {/* Nav */}
@@ -353,13 +412,13 @@ export default function InterviewPage() {
         <div style={{ fontWeight: 800, fontSize: 16 }}>Barbar<span style={{ color: '#E85D2F' }}>os</span></div>
         <div style={{ textAlign: 'center' }}>
           <div style={{ fontSize: 12, fontWeight: 600 }}>{CONFIG.jobTitle} · {CONFIG.institution}</div>
-          <div style={{ fontSize: 10, color: 'rgba(240,237,232,0.4)' }}>Based on highest hiring standards</div>
+          <div style={{ fontSize: 10, color: 'rgba(240,237,232,0.4)' }}>{t.basedOn}</div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <button onClick={toggleMute} style={{ background: 'none', border: '0.5px solid rgba(255,255,255,0.2)', borderRadius: 6, color: '#F0EDE8', padding: '3px 8px', cursor: 'pointer', fontSize: 14 }}>
             {isMuted ? '🔇' : '🔊'}
           </button>
-          <span style={{ fontSize: 10, color: '#F87171', background: 'rgba(220,38,38,0.1)', border: '0.5px solid rgba(220,38,38,0.2)', borderRadius: 20, padding: '3px 8px' }}>● Live</span>
+          <span style={{ fontSize: 10, color: '#F87171', background: 'rgba(220,38,38,0.1)', border: '0.5px solid rgba(220,38,38,0.2)', borderRadius: 20, padding: '3px 8px' }}>● {isRTL ? 'مباشر' : 'Live'}</span>
           <span style={{ fontWeight: 800, fontSize: 16, color: timeLeft < 180 ? '#EF4444' : '#F0EDE8' }}>{formatTime(timeLeft)}</span>
         </div>
       </div>
@@ -375,7 +434,7 @@ export default function InterviewPage() {
           </div>
 
           <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>Adam Reid</div>
-          <div style={{ fontSize: 11, color: 'rgba(240,237,232,0.4)', marginBottom: 20 }}>Certified Interview Evaluator · Barbaros AI</div>
+          <div style={{ fontSize: 11, color: 'rgba(240,237,232,0.4)', marginBottom: 20 }}>{t.evaluator}</div>
 
           {/* Adam Voice Waves */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, height: 44, marginBottom: 8 }}>
@@ -389,25 +448,25 @@ export default function InterviewPage() {
               ))
             ) : (
               <div style={{ fontSize: 11, color: 'rgba(240,237,232,0.3)' }}>
-                {isTranscribing ? 'Processing...' : '○ Listening'}
+                {isTranscribing ? t.processing : t.listening}
               </div>
             )}
           </div>
 
-          {adamSpeaking && <div style={{ fontSize: 11, color: '#8B96FF', fontWeight: 600 }}>● Speaking...</div>}
+          {adamSpeaking && <div style={{ fontSize: 11, color: '#8B96FF', fontWeight: 600 }}>{t.speaking}</div>}
 
-          {/* Show Text Button — Emergency */}
+          {/* Show Text Button */}
           {lastAdamText && !adamSpeaking && !isLoading && (
             <button
               onClick={() => setShowText(!showText)}
               style={{ marginTop: 12, background: 'none', border: '0.5px solid rgba(255,255,255,0.1)', borderRadius: 6, color: 'rgba(240,237,232,0.3)', fontSize: 10, cursor: 'pointer', padding: '4px 10px', fontFamily: 'inherit' }}>
-              {showText ? 'Hide text' : 'Show text'}
+              {showText ? t.hideText : t.showText}
             </button>
           )}
 
           {/* Emergency Text */}
           {showText && lastAdamText && (
-            <div style={{ marginTop: 12, padding: '10px 12px', background: 'rgba(255,255,255,0.03)', border: '0.5px solid rgba(255,255,255,0.08)', borderRadius: 8, fontSize: 12, color: 'rgba(240,237,232,0.6)', lineHeight: 1.6, textAlign: 'left' }}>
+            <div style={{ marginTop: 12, padding: '10px 12px', background: 'rgba(255,255,255,0.03)', border: '0.5px solid rgba(255,255,255,0.08)', borderRadius: 8, fontSize: 12, color: 'rgba(240,237,232,0.6)', lineHeight: 1.6, textAlign: isRTL ? 'right' : 'left' }}>
               {lastAdamText}
             </div>
           )}
@@ -421,7 +480,7 @@ export default function InterviewPage() {
           </div>
 
           <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 2 }}>{CONFIG.candidateName}</div>
-          <div style={{ fontSize: 10, color: 'rgba(240,237,232,0.35)', marginBottom: 14 }}>Candidate · {CONFIG.yearsExperience}</div>
+          <div style={{ fontSize: 10, color: 'rgba(240,237,232,0.35)', marginBottom: 14 }}>{t.candidate} · {CONFIG.yearsExperience}</div>
 
           {/* Candidate Waves */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, height: 32 }}>
@@ -430,17 +489,17 @@ export default function InterviewPage() {
                 <div key={i} style={{ width: 4, borderRadius: 4, background: '#DC2626', animation: `wave 0.6s ease-in-out infinite`, animationDelay: `${i * 0.1}s`, height: `${h}px` }} />
               ))
             ) : isTranscribing ? (
-              <div style={{ fontSize: 11, color: '#F59E0B', fontWeight: 600 }}>◌ Processing...</div>
+              <div style={{ fontSize: 11, color: '#F59E0B', fontWeight: 600 }}>{t.processing}</div>
             ) : (
               <div style={{ fontSize: 11, color: 'rgba(240,237,232,0.25)' }}>
-                {isLoading ? 'Listening to Adam...' : 'Your turn'}
+                {isLoading ? t.listeningToAdam : t.yourTurn}
               </div>
             )}
           </div>
 
           {isRecording && (
             <div style={{ fontSize: 10, color: '#DC2626', marginTop: 8, fontWeight: 600 }}>
-              ● Keep holding until you finish your complete answer
+              {t.keepHolding}
             </div>
           )}
         </div>
@@ -458,13 +517,13 @@ export default function InterviewPage() {
 
           {!isRecording && !isLoading && !isTranscribing && (
             <div style={{ fontSize: 11, color: 'rgba(240,237,232,0.25)', textAlign: 'center', marginBottom: 8 }}>
-              🎤 Hold for your <strong style={{ color: 'rgba(240,237,232,0.4)' }}>complete answer</strong> — release only when done
+              🎤 {t.holdHint}
             </div>
           )}
 
           {isRecording && (
             <div style={{ fontSize: 11, color: '#DC2626', textAlign: 'center', marginBottom: 8, fontWeight: 600, animation: 'pulse 1s infinite' }}>
-              ● Recording — keep holding until you finish
+              {t.recording}
             </div>
           )}
 
@@ -484,40 +543,52 @@ export default function InterviewPage() {
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={handleKey}
-              placeholder={isRecording ? '● Recording...' : isTranscribing ? 'Processing...' : 'Or type your answer here...'}
+              placeholder={isRecording ? t.recording : isTranscribing ? t.processing : t.typeHere}
               disabled={isLoading || isRecording || isTranscribing}
               rows={1}
+              dir={isRTL ? 'rtl' : 'ltr'}
               style={{ flex: 1, background: '#16181F', border: '0.5px solid rgba(255,255,255,0.08)', color: '#F0EDE8', fontFamily: 'inherit', fontSize: 13, padding: '9px 12px', borderRadius: 8, outline: 'none', resize: 'none' }}
             />
 
             <button
               onClick={sendMessage}
               disabled={isLoading || !input.trim() || isRecording || isTranscribing}
-              style={{ width: 52, height: 52, background: (isLoading || !input.trim()) ? '#1a1a22' : '#2563EB', border: 'none', borderRadius: 12, cursor: (isLoading || !input.trim()) ? 'not-allowed' : 'pointer', color: '#fff', fontSize: 20, flexShrink: 0, transition: 'background 0.15s' }}>→</button>
+              style={{ width: 52, height: 52, background: (isLoading || !input.trim()) ? '#1a1a22' : '#2563EB', border: 'none', borderRadius: 12, cursor: (isLoading || !input.trim()) ? 'not-allowed' : 'pointer', color: '#fff', fontSize: 20, flexShrink: 0, transition: 'background 0.15s' }}>
+              {isRTL ? '←' : '→'}
+            </button>
           </div>
         </div>
       ) : (
         <div style={{ padding: 20, textAlign: 'center', borderTop: '0.5px solid rgba(255,255,255,0.05)', background: '#0D0F14' }}>
-          <div style={{ fontSize: 14, color: '#8B96FF', marginBottom: 8 }}>Session ended · Score: {overallScore ?? '—'}/100</div>
-          <div style={{ fontSize: 12, color: 'rgba(240,237,232,0.3)', marginBottom: 12 }}>Redirecting to your report...</div>
+          <div style={{ fontSize: 14, color: '#8B96FF', marginBottom: 8 }}>
+            {t.sessionEnded} · {t.score}: {overallScore ?? '—'}/100
+          </div>
+          <div style={{ fontSize: 12, color: 'rgba(240,237,232,0.3)', marginBottom: 12 }}>
+            {t.redirecting}
+          </div>
           <button onClick={() => router.push('/report')} style={{ background: '#1E3A8A', color: '#fff', border: 'none', borderRadius: 8, padding: '10px 24px', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>
-            View Full Report →
+            {t.viewReport}
           </button>
         </div>
       )}
 
       {/* Bottom Bar */}
       <div style={{ background: '#0B0D11', borderTop: '0.5px solid rgba(255,255,255,0.04)', padding: '8px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div style={{ fontSize: 10, color: 'rgba(240,237,232,0.2)' }}>Q{questionCount} · {getPlanLabel(CONFIG.plan)}</div>
+        <div style={{ fontSize: 10, color: 'rgba(240,237,232,0.2)' }}>{t.question}{questionCount} · {getPlanLabel(CONFIG.plan)}</div>
         <div style={{ background: 'rgba(42,92,255,0.08)', border: '0.5px solid rgba(42,92,255,0.15)', borderRadius: 6, padding: '4px 12px', textAlign: 'center' }}>
-          <div style={{ fontSize: 8, color: 'rgba(240,237,232,0.2)', textTransform: 'uppercase' }}>Performance</div>
+          <div style={{ fontSize: 8, color: 'rgba(240,237,232,0.2)', textTransform: 'uppercase' }}>{t.performance}</div>
           <div style={{ fontWeight: 800, fontSize: 15, color: '#8B96FF' }}>{overallScore ?? '—'}</div>
         </div>
         <button
-          onClick={() => { if (confirm('End interview?')) endSession(messagesRef.current, overallScoreRef.current) }}
+          onClick={() => { if (confirm(t.endConfirm)) endSession(messagesRef.current, overallScoreRef.current) }}
           style={{ background: 'rgba(239,68,68,0.07)', border: '0.5px solid rgba(239,68,68,0.18)', color: '#F87171', borderRadius: 6, padding: '6px 12px', fontSize: 11, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
-          End
+          {t.end}
         </button>
+      </div>
+
+      {/* Footer */}
+      <div style={{ background: '#0D0F14', borderTop: '0.5px solid rgba(255,255,255,0.04)', padding: '8px 16px', textAlign: 'center' }}>
+        <div style={{ fontSize: 10, color: 'rgba(240,237,232,0.15)' }}>{t.poweredBy}</div>
       </div>
 
       <style>{`

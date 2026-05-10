@@ -18,6 +18,13 @@ interface Message {
   voiceAnalysis?: VoiceAnalysis
 }
 
+const getPlanTime = (plan: string) => {
+  if (plan === 'go') return 15 * 60
+  if (plan === 'pro') return 30 * 60
+  if (plan === 'expert') return 60 * 60
+  return 15 * 60
+}
+
 export default function InterviewPage() {
   const router = useRouter()
 
@@ -32,7 +39,7 @@ export default function InterviewPage() {
         language: 'en',
         jobRequirements: '',
         cvText: '',
-        plan: 'free',
+        plan: 'go',
       }
     }
     try {
@@ -48,7 +55,7 @@ export default function InterviewPage() {
       language: 'en',
       jobRequirements: '',
       cvText: '',
-      plan: 'free',
+      plan: 'go',
     }
   })
 
@@ -56,7 +63,16 @@ export default function InterviewPage() {
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [sessionStartTime] = useState(Date.now())
-  const [timeLeft, setTimeLeft] = useState(15 * 60)
+  const [timeLeft, setTimeLeft] = useState(() => getPlanTime(
+    (() => {
+      if (typeof window === 'undefined') return 'go'
+      try {
+        const saved = sessionStorage.getItem('barbaros_config')
+        if (saved) return JSON.parse(saved).plan ?? 'go'
+      } catch {}
+      return 'go'
+    })()
+  ))
   const [overallScore, setOverallScore] = useState<number | null>(null)
   const [questionCount, setQuestionCount] = useState(1)
   const [isEnded, setIsEnded] = useState(false)
@@ -246,6 +262,13 @@ export default function InterviewPage() {
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
   }
 
+  const getPlanLabel = (plan: string) => {
+    if (plan === 'go') return 'GO · 15 min'
+    if (plan === 'pro') return 'Pro · 30 min'
+    if (plan === 'expert') return 'Expert · 60 min'
+    return 'GO · 15 min'
+  }
+
   const endSession = (msgs: Message[], finalScore: number | null) => {
     sessionStorage.setItem('barbaros_messages', JSON.stringify(msgs))
     sessionStorage.setItem('barbaros_score', String(finalScore ?? 0))
@@ -382,9 +405,6 @@ export default function InterviewPage() {
                 <span style={{ fontSize: 9, padding: '2px 6px', background: 'rgba(255,255,255,0.05)', borderRadius: 4, color: getConfidenceColor(msg.voiceAnalysis.hesitation === 'low' ? 'high' : msg.voiceAnalysis.hesitation === 'high' ? 'low' : 'medium') }}>
                   Hesitation: {msg.voiceAnalysis.hesitation}
                 </span>
-                <span style={{ fontSize: 9, padding: '2px 6px', background: 'rgba(255,255,255,0.05)', borderRadius: 4, color: 'rgba(240,237,232,0.4)' }}>
-                  {msg.voiceAnalysis.wordCount} words · {msg.voiceAnalysis.duration}s
-                </span>
               </div>
             )}
           </div>
@@ -461,7 +481,7 @@ export default function InterviewPage() {
 
       {/* Bottom */}
       <div style={{ background: '#0D0F14', borderTop: '0.5px solid rgba(255,255,255,0.04)', padding: '8px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div style={{ fontSize: 10, color: 'rgba(240,237,232,0.2)' }}>Question {questionCount}</div>
+        <div style={{ fontSize: 10, color: 'rgba(240,237,232,0.2)' }}>Q{questionCount} · {getPlanLabel(CONFIG.plan)}</div>
         <div style={{ background: 'rgba(42,92,255,0.08)', border: '0.5px solid rgba(42,92,255,0.15)', borderRadius: 6, padding: '4px 12px', textAlign: 'center' }}>
           <div style={{ fontSize: 8, color: 'rgba(240,237,232,0.2)', textTransform: 'uppercase' }}>Performance</div>
           <div style={{ fontWeight: 800, fontSize: 15, color: '#8B96FF' }}>{overallScore ?? '—'}</div>

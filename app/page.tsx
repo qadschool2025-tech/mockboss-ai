@@ -57,18 +57,17 @@ export default function LandingPage() {
           Built with certified HR professionals · Trusted worldwide
         </div>
 
-        {/* Headline */}
+        {/* Headline — الجملة الأصلية */}
         <h1 style={{
           fontSize: 'clamp(32px, 6vw, 64px)',
           fontWeight: 900,
           lineHeight: 1.1,
-          marginBottom: 20,
+          margin: '0 0 20px 0',
           maxWidth: 780,
-          letterSpacing: -1,
-          margin: '0 0 20px 0'
+          letterSpacing: -1
         }}>
-          The interview that tells you<br />
-          <span style={{ color: '#E85D2F' }}>the truth about yourself</span>
+          Walk into your next interview<br />
+          <span style={{ color: '#E85D2F' }}>ready to get hired.</span>
         </h1>
 
         {/* Subtitle */}

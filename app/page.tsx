@@ -1,235 +1,141 @@
 'use client'
+
 import { useRouter } from 'next/navigation'
 
 export default function LandingPage() {
   const router = useRouter()
 
   return (
-    <div style={{
-      fontFamily: 'system-ui, sans-serif',
-      background: '#0B0D11',
-      color: '#F0EDE8',
-      minHeight: '100vh',
-      display: 'flex',
-      flexDirection: 'column'
-    }}>
+    <div style={{ fontFamily: 'system-ui, sans-serif', background: '#0B0D11', color: '#F0EDE8', minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
 
       {/* Nav */}
-      <nav style={{
-        background: '#0F1117',
-        borderBottom: '0.5px solid rgba(255,255,255,0.07)',
-        padding: '14px 32px',
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center'
-      }}>
-        <div style={{ fontWeight: 800, fontSize: 20 }}>
-          Mock<span style={{ color: '#E85D2F' }}>Boss</span> AI
+      <nav style={{ background: '#0F1117', borderBottom: '0.5px solid rgba(255,255,255,0.07)', padding: '14px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ fontWeight: 900, fontSize: 22, letterSpacing: -0.5 }}>
+          Barbar<span style={{ color: '#E85D2F' }}>os</span>
         </div>
         <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-          <button
-            onClick={() => router.push('/packages')}
-            style={{ background: 'none', border: '0.5px solid rgba(255,255,255,0.2)', borderRadius: 8, color: '#F0EDE8', padding: '8px 18px', cursor: 'pointer', fontSize: 13, fontFamily: 'inherit' }}
-          >
+          <button onClick={() => router.push('/packages')}
+            style={{ background: 'none', border: 'none', color: 'rgba(240,237,232,0.5)', fontSize: 13, cursor: 'pointer', fontFamily: 'inherit' }}>
             Pricing
           </button>
-          <button
-            onClick={() => router.push('/onboarding')}
-            style={{ background: '#E85D2F', border: 'none', borderRadius: 8, color: '#fff', padding: '8px 20px', cursor: 'pointer', fontSize: 13, fontWeight: 700, fontFamily: 'inherit' }}
-          >
-            Start Interview
+          <button onClick={() => router.push('/onboarding')}
+            style={{ background: '#E85D2F', border: 'none', color: '#fff', fontSize: 13, fontWeight: 700, padding: '8px 18px', borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit' }}>
+            Get Started
           </button>
         </div>
       </nav>
 
-      {/* Hero */}
-      <main style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '60px 24px 40px', textAlign: 'center' }}>
+      <main style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '60px 24px', textAlign: 'center' }}>
 
         {/* Badge */}
-        <div style={{
-          display: 'inline-flex', alignItems: 'center', gap: 6,
-          background: 'rgba(232,93,47,0.08)',
-          border: '0.5px solid rgba(232,93,47,0.25)',
-          borderRadius: 20, padding: '5px 14px', marginBottom: 28,
-          fontSize: 11, color: '#E85D2F', fontWeight: 600, letterSpacing: 0.3
-        }}>
-          <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#E85D2F', display: 'inline-block' }} />
-          Built with certified HR professionals · Trusted worldwide
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'rgba(232,93,47,0.1)', border: '0.5px solid rgba(232,93,47,0.3)', borderRadius: 20, padding: '5px 14px', marginBottom: 32, fontSize: 11, color: '#E85D2F', fontWeight: 600, letterSpacing: 0.5 }}>
+          ● AI-POWERED INTERVIEW PLATFORM
         </div>
 
-        {/* Headline — الجملة الأصلية */}
-        <h1 style={{
-          fontSize: 'clamp(32px, 6vw, 64px)',
-          fontWeight: 900,
-          lineHeight: 1.1,
-          margin: '0 0 20px 0',
-          maxWidth: 780,
-          letterSpacing: -1
-        }}>
-          Walk into your next interview<br />
-          <span style={{ color: '#E85D2F' }}>ready to get hired.</span>
+        {/* Headline */}
+        <h1 style={{ fontSize: 'clamp(32px, 6vw, 64px)', fontWeight: 900, lineHeight: 1.1, margin: '0 0 20px', letterSpacing: -1, maxWidth: 700 }}>
+          Walk into your next interview
+          <span style={{ color: '#E85D2F' }}> ready to get hired.</span>
         </h1>
 
-        {/* Subtitle */}
-        <p style={{ fontSize: 17, color: 'rgba(240,237,232,0.55)', maxWidth: 520, lineHeight: 1.7, marginBottom: 12 }}>
-          AI-powered mock interviews with real voice, real pressure, and honest feedback — conducted by a certified HR evaluator.
+        {/* 🔥 Quote 1 — تحت العنوان مباشرة */}
+        <div style={{ width: '100%', maxWidth: 600, marginBottom: 32, background: 'linear-gradient(135deg, rgba(232,93,47,0.08), rgba(232,93,47,0.03))', border: '0.5px solid rgba(232,93,47,0.2)', borderRadius: 16, padding: '24px' }}>
+          <div style={{ fontSize: 11, color: '#E85D2F', fontWeight: 700, letterSpacing: 2, marginBottom: 12, textTransform: 'uppercase' }}>Why Barbaros?</div>
+          <div style={{ fontSize: 'clamp(16px, 2.5vw, 22px)', fontWeight: 900, lineHeight: 1.5, letterSpacing: -0.5 }}>
+            "ChatGPT will <span style={{ color: 'rgba(240,237,232,0.35)', textDecoration: 'line-through' }}>chat</span> with you.
+            <br />
+            Barbaros will <span style={{ color: '#E85D2F' }}>hire</span> you."
+          </div>
+        </div>
+
+        {/* Subheadline */}
+        <p style={{ fontSize: 16, color: 'rgba(240,237,232,0.5)', maxWidth: 480, lineHeight: 1.7, margin: '0 0 40px' }}>
+          Practice with Adam Reid — your AI interview evaluator. Real questions. Real voice. Real feedback.
         </p>
 
-        {/* Credibility lines */}
-        <p style={{ fontSize: 13, color: 'rgba(240,237,232,0.3)', maxWidth: 480, lineHeight: 1.6, marginBottom: 36, fontStyle: 'italic' }}>
-          "Most candidates fail not because of lack of skill, but lack of preparation."<br />
-          "One real interview simulation is worth ten mock attempts."
-        </p>
-
-        {/* CTAs */}
-        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', justifyContent: 'center', marginBottom: 56 }}>
-          <button
-            onClick={() => router.push('/onboarding')}
-            style={{
-              background: '#E85D2F', border: 'none', borderRadius: 10,
-              color: '#fff', padding: '14px 32px', fontSize: 15, fontWeight: 700,
-              cursor: 'pointer', fontFamily: 'inherit', letterSpacing: 0.2
-            }}
-          >
-            Start Your Interview →
+        {/* CTA Buttons */}
+        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', justifyContent: 'center', marginBottom: 60 }}>
+          <button onClick={() => router.push('/onboarding')}
+            style={{ background: '#E85D2F', border: 'none', color: '#fff', fontSize: 15, fontWeight: 800, padding: '14px 32px', borderRadius: 10, cursor: 'pointer', fontFamily: 'inherit', letterSpacing: -0.3 }}>
+            Start Free Interview →
           </button>
-          <button
-            onClick={() => router.push('/packages')}
-            style={{
-              background: 'rgba(255,255,255,0.04)',
-              border: '0.5px solid rgba(255,255,255,0.15)',
-              borderRadius: 10, color: '#F0EDE8',
-              padding: '14px 28px', fontSize: 15, fontWeight: 600,
-              cursor: 'pointer', fontFamily: 'inherit'
-            }}
-          >
-            View Pricing
+          <button onClick={() => router.push('/packages')}
+            style={{ background: 'rgba(255,255,255,0.05)', border: '0.5px solid rgba(255,255,255,0.12)', color: '#F0EDE8', fontSize: 15, fontWeight: 600, padding: '14px 32px', borderRadius: 10, cursor: 'pointer', fontFamily: 'inherit' }}>
+            View Plans
           </button>
         </div>
 
         {/* Stats */}
-        <div style={{
-          display: 'flex', gap: 48, justifyContent: 'center',
-          flexWrap: 'wrap', marginBottom: 60
-        }}>
+        <div style={{ display: 'flex', gap: 40, flexWrap: 'wrap', justifyContent: 'center', marginBottom: 60 }}>
           {[
             { value: '10K+', label: 'Interviews conducted' },
             { value: '94%', label: 'Success rate' },
             { value: '4.9★', label: 'User rating' },
-          ].map(stat => (
-            <div key={stat.label} style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: 'clamp(28px, 4vw, 38px)', fontWeight: 900, letterSpacing: -1 }}>{stat.value}</div>
-              <div style={{ fontSize: 13, color: 'rgba(240,237,232,0.4)', marginTop: 4 }}>{stat.label}</div>
+          ].map((stat, i) => (
+            <div key={i} style={{ textAlign: 'center' }}>
+              <div style={{ fontSize: 26, fontWeight: 900 }}>{stat.value}</div>
+              <div style={{ fontSize: 11, color: 'rgba(240,237,232,0.35)', marginTop: 2 }}>{stat.label}</div>
             </div>
           ))}
         </div>
 
         {/* Features */}
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-          gap: 14, maxWidth: 860, width: '100%', marginBottom: 60
-        }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12, maxWidth: 700, width: '100%', marginBottom: 60 }}>
           {[
-            { icon: '🎙️', title: 'Real Voice', desc: 'Your evaluator speaks to you in a real human voice — not text' },
-            { icon: '📄', title: 'CV-Aware', desc: 'Reads your CV and asks targeted, specific questions' },
-            { icon: '📊', title: 'Detailed Report', desc: '7-criteria assessment with Arabic & English feedback' },
-            { icon: '⚡', title: 'Instant Feedback', desc: 'Live scoring after every answer' },
-          ].map(f => (
-            <div key={f.title} style={{
-              background: '#111520',
-              border: '0.5px solid rgba(255,255,255,0.07)',
-              borderRadius: 12, padding: '18px 20px', textAlign: 'left'
-            }}>
-              <div style={{ fontSize: 22, marginBottom: 8 }}>{f.icon}</div>
-              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>{f.title}</div>
-              <div style={{ fontSize: 12, color: 'rgba(240,237,232,0.4)', lineHeight: 1.5 }}>{f.desc}</div>
+            { icon: '🎙️', title: 'Real Voice Interview', desc: 'Speak directly with Adam Reid. Your confidence is measured live.' },
+            { icon: '⚡', title: 'Instant Scoring', desc: 'Every answer scored in real-time. No waiting.' },
+            { icon: '📊', title: 'Full Report', desc: 'Detailed performance analysis after every session.' },
+            { icon: '🌐', title: 'Any Language', desc: 'Arabic, English, or both. You choose.' },
+          ].map((f, i) => (
+            <div key={i} style={{ background: '#0F1117', border: '0.5px solid rgba(255,255,255,0.07)', borderRadius: 12, padding: '20px 16px', textAlign: 'left' }}>
+              <div style={{ fontSize: 24, marginBottom: 10 }}>{f.icon}</div>
+              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6 }}>{f.title}</div>
+              <div style={{ fontSize: 11, color: 'rgba(240,237,232,0.4)', lineHeight: 1.6 }}>{f.desc}</div>
             </div>
           ))}
         </div>
 
-        {/* HR Evaluator intro */}
-        <div style={{
-          background: '#111520',
-          border: '0.5px solid rgba(42,92,255,0.2)',
-          borderRadius: 14, padding: '20px 24px', maxWidth: 560, width: '100%',
-          display: 'flex', alignItems: 'center', gap: 16, marginBottom: 40
-        }}>
-          <div style={{
-            width: 56, height: 56, background: '#2563EB',
-            borderRadius: '50%', display: 'flex', alignItems: 'center',
-            justifyContent: 'center', fontSize: 24, flexShrink: 0
-          }}>🎯</div>
-          <div style={{ textAlign: 'left' }}>
-            <div style={{ fontWeight: 700, fontSize: 15 }}>Your Institution — HR</div>
-            <div style={{ fontSize: 12, color: 'rgba(240,237,232,0.4)', marginBottom: 6 }}>Certified Interview Evaluator · MockBoss AI</div>
-            <div style={{ fontSize: 12, color: 'rgba(240,237,232,0.6)', lineHeight: 1.5 }}>
-              "I won't hold back. I'll push you, challenge your answers, and give you the honest evaluation you need to land your next role."
+        {/* Plans Preview */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10, maxWidth: 700, width: '100%', marginBottom: 60 }}>
+          {[
+            { name: 'Free', price: '$0', note: '📝 Text only · 10 min', border: 'rgba(255,255,255,0.07)', bg: 'rgba(255,255,255,0.03)' },
+            { name: 'GO', price: '$9', note: '🎙️ Voice · 15 min', border: 'rgba(232,93,47,0.25)', bg: 'rgba(232,93,47,0.06)' },
+            { name: 'Pro', price: '$19', note: '🎙️ Voice · 30 min', border: 'rgba(37,99,235,0.25)', bg: 'rgba(37,99,235,0.06)' },
+            { name: 'Expert', price: '$39', note: '🎙️ Voice · 60 min', border: 'rgba(139,150,255,0.25)', bg: 'rgba(139,150,255,0.06)' },
+          ].map((plan, i) => (
+            <div key={i} style={{ background: plan.bg, border: `0.5px solid ${plan.border}`, borderRadius: 10, padding: '14px 12px', textAlign: 'center' }}>
+              <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>{plan.name}</div>
+              <div style={{ fontSize: 22, fontWeight: 900, marginBottom: 4 }}>
+                {plan.price}<span style={{ fontSize: 11, fontWeight: 400, color: 'rgba(240,237,232,0.4)' }}>/mo</span>
+              </div>
+              <div style={{ fontSize: 10, color: 'rgba(240,237,232,0.4)' }}>{plan.note}</div>
             </div>
+          ))}
+        </div>
+
+        {/* 🔥 Quote 2 — قبل الزر الأخير */}
+        <div style={{ width: '100%', maxWidth: 700, marginBottom: 40, background: 'linear-gradient(135deg, rgba(37,99,235,0.08), rgba(139,150,255,0.04))', border: '0.5px solid rgba(139,150,255,0.2)', borderRadius: 16, padding: '32px 24px' }}>
+          <div style={{ fontSize: 'clamp(18px, 3vw, 26px)', fontWeight: 900, lineHeight: 1.4, letterSpacing: -0.5, marginBottom: 8 }}>
+            "Anyone can <span style={{ color: 'rgba(240,237,232,0.35)' }}>practice.</span>
+            <br />
+            Barbaros makes you <span style={{ color: '#8B96FF' }}>ready.</span>"
           </div>
+          <div style={{ fontSize: 12, color: 'rgba(240,237,232,0.3)', marginTop: 12 }}>The closest thing to a real interview.</div>
         </div>
 
-        {/* Slogan above packages */}
-        <div style={{
-          fontSize: 15, fontWeight: 600,
-          color: 'rgba(240,237,232,0.7)',
-          fontStyle: 'italic', marginBottom: 20,
-          textAlign: 'center'
-        }}>
-          "Invest less than a cup of coffee — and drink it tomorrow with your new team"
-        </div>
-
-        {/* Packages teaser */}
-        <div style={{
-          display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'center', marginBottom: 20
-        }}>
-          {[
-            { name: 'GO', price: '$2.50', desc: 'Single session · 15 min' },
-            { name: 'Pro', price: '$12/mo', desc: '10 sessions · 30 min each' },
-            { name: 'Expert', price: '$36/mo', desc: '20 sessions · 60 min each' },
-          ].map((pkg, i) => (
-            <div
-              key={pkg.name}
-              onClick={() => router.push('/packages')}
-              style={{
-                background: i === 1 ? 'rgba(42,92,255,0.1)' : '#111318',
-                border: i === 1 ? '0.5px solid rgba(42,92,255,0.35)' : '0.5px solid rgba(255,255,255,0.07)',
-                borderRadius: 10, padding: '12px 20px', cursor: 'pointer', textAlign: 'center',
-                minWidth: 140
-              }}
-            >
-              <div style={{ fontWeight: 800, fontSize: 14 }}>{pkg.name}</div>
-              <div style={{ fontWeight: 700, fontSize: 17, color: i === 1 ? '#8B96FF' : '#F0EDE8', margin: '4px 0' }}>{pkg.price}</div>
-              <div style={{ fontSize: 11, color: 'rgba(240,237,232,0.4)' }}>{pkg.desc}</div>
-            </div>
-          ))}
-        </div>
-
-        <div style={{ fontSize: 11, color: 'rgba(240,237,232,0.25)', marginBottom: 48 }}>
-          All plans include real voice · No free tier · Cancel anytime
-        </div>
+        {/* Final CTA */}
+        <button onClick={() => router.push('/onboarding')}
+          style={{ background: '#E85D2F', border: 'none', color: '#fff', fontSize: 16, fontWeight: 800, padding: '16px 40px', borderRadius: 12, cursor: 'pointer', fontFamily: 'inherit', letterSpacing: -0.3, marginBottom: 60 }}>
+          Start Free Interview →
+        </button>
 
       </main>
 
       {/* Footer */}
-      <footer style={{
-        background: '#0D0F14',
-        borderTop: '0.5px solid rgba(255,255,255,0.05)',
-        padding: '16px 32px',
-        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-        flexWrap: 'wrap', gap: 8
-      }}>
-        <div style={{ fontWeight: 700, fontSize: 14 }}>
-          Mock<span style={{ color: '#E85D2F' }}>Boss</span> AI
-        </div>
-        <div style={{ fontSize: 11, color: 'rgba(240,237,232,0.25)' }}>
-          © 2025 MockBoss AI · Built with certified HR professionals
-        </div>
-        <div style={{ display: 'flex', gap: 16 }}>
-          {['Privacy', 'Terms', 'Contact'].map(l => (
-            <span key={l} style={{ fontSize: 11, color: 'rgba(240,237,232,0.3)', cursor: 'pointer' }}>{l}</span>
-          ))}
-        </div>
+      <footer style={{ background: '#0D0F14', borderTop: '0.5px solid rgba(255,255,255,0.04)', padding: '16px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+        <div style={{ fontWeight: 900, fontSize: 14 }}>Barbar<span style={{ color: '#E85D2F' }}>os</span></div>
+        <div style={{ fontSize: 11, color: 'rgba(240,237,232,0.2)' }}>© 2026 Barbaros. All rights reserved.</div>
+        <div style={{ fontSize: 11, color: 'rgba(240,237,232,0.2)' }}>Powered by AI</div>
       </footer>
 
     </div>

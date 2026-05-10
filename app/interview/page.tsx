@@ -82,6 +82,7 @@ export default function InterviewPage() {
   const [audioReady, setAudioReady] = useState(false)
   const [pendingAudio, setPendingAudio] = useState<string | null>(null)
   const [micError, setMicError] = useState<string | null>(null)
+  const [showMicHint, setShowMicHint] = useState(true)
 
   const chatRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
@@ -105,6 +106,11 @@ export default function InterviewPage() {
   useEffect(() => { isRecordingRef.current = isRecording }, [isRecording])
   useEffect(() => { isTranscribingRef.current = isTranscribing }, [isTranscribing])
   useEffect(() => { overallScoreRef.current = overallScore }, [overallScore])
+
+  // إخفاء تنبيه المايك بعد أول تسجيل
+  useEffect(() => {
+    if (isRecording) setShowMicHint(false)
+  }, [isRecording])
 
   useEffect(() => {
     if (audioReady && pendingAudio) {
@@ -358,6 +364,24 @@ export default function InterviewPage() {
         </div>
       </div>
 
+      {/* Mic Hint Banner */}
+      {showMicHint && !isEnded && (
+        <div style={{ background: 'linear-gradient(135deg, rgba(37,99,235,0.15), rgba(42,92,255,0.08))', border: '0.5px solid rgba(42,92,255,0.3)', margin: '10px 16px 0', borderRadius: 10, padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ fontSize: 18, flexShrink: 0 }}>🎤</span>
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#8B96FF', marginBottom: 2 }}>How to use your microphone</div>
+            <div style={{ fontSize: 11, color: 'rgba(240,237,232,0.55)', lineHeight: 1.5 }}>
+              Press and <strong style={{ color: '#F0EDE8' }}>hold</strong> the mic button while speaking. Release <strong style={{ color: '#F0EDE8' }}>only when you finish your complete answer.</strong>
+            </div>
+          </div>
+          <button
+            onClick={() => setShowMicHint(false)}
+            style={{ background: 'none', border: 'none', color: 'rgba(240,237,232,0.3)', cursor: 'pointer', fontSize: 16, flexShrink: 0, padding: 4 }}>
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* Faces */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, padding: '12px 16px 0' }}>
         <div style={{ background: '#111520', border: '0.5px solid rgba(42,92,255,0.2)', borderRadius: 10, padding: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -376,7 +400,7 @@ export default function InterviewPage() {
             <div style={{ fontSize: 12, fontWeight: 600 }}>{CONFIG.candidateName}</div>
             <div style={{ fontSize: 10, color: 'rgba(240,237,232,0.35)' }}>Candidate · {CONFIG.yearsExperience}</div>
             <div style={{ fontSize: 9, color: isRecording ? '#EF4444' : isTranscribing ? '#F59E0B' : 'rgba(240,237,232,0.25)', marginTop: 2 }}>
-              {isRecording ? '● Recording...' : isTranscribing ? '◌ Processing...' : isLoading ? 'Listening...' : 'Your turn'}
+              {isRecording ? '● Recording... keep holding' : isTranscribing ? '◌ Processing...' : isLoading ? 'Listening...' : 'Your turn'}
             </div>
           </div>
         </div>
@@ -427,6 +451,12 @@ export default function InterviewPage() {
               ⚠ {micError}
             </div>
           )}
+          {/* Recording reminder */}
+          {isRecording && (
+            <div style={{ fontSize: 11, color: '#DC2626', marginBottom: 6, textAlign: 'center', padding: '4px 8px', background: 'rgba(220,38,38,0.08)', borderRadius: 6, fontWeight: 600, animation: 'pulse 1s infinite' }}>
+              ● Recording — keep holding until you finish your complete answer
+            </div>
+          )}
           <div style={{ display: 'flex', gap: 8 }}>
             <button
               onMouseDown={startRecording}
@@ -451,7 +481,7 @@ export default function InterviewPage() {
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={handleKey}
-              placeholder={isRecording ? '● Recording... release to send' : isTranscribing ? 'Processing...' : 'Hold 🎤 to speak, or type here...'}
+              placeholder={isRecording ? '● Recording... keep holding until done' : isTranscribing ? 'Processing...' : 'Hold 🎤 for your full answer, or type here...'}
               disabled={isLoading || isRecording || isTranscribing}
               rows={1}
               style={{ flex: 1, background: '#16181F', border: '0.5px solid rgba(255,255,255,0.08)', color: '#F0EDE8', fontFamily: 'inherit', fontSize: 13, padding: '9px 12px', borderRadius: 8, outline: 'none', resize: 'none' }}

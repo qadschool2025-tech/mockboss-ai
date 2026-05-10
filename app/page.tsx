@@ -66,7 +66,7 @@ export default function LandingPage() {
         </div>
 
         {/* Stats */}
-        <div style={{ display: 'flex', gap: 40, flexWrap: 'wrap', justifyContent: 'center', marginBottom: 60 }}>
+        <div style={{ display: 'flex', gap: 40, flexWrap: 'wrap', justifyContent: 'center', marginBottom: 32 }}>
           {[
             { value: '10K+', label: 'Interviews conducted' },
             { value: '94%', label: 'Success rate' },
@@ -77,6 +77,19 @@ export default function LandingPage() {
               <div style={{ fontSize: 11, color: 'rgba(240,237,232,0.35)', marginTop: 2 }}>{stat.label}</div>
             </div>
           ))}
+        </div>
+
+        {/* Trust Badge */}
+        <div style={{ width: '100%', maxWidth: 700, marginBottom: 60, background: 'rgba(255,255,255,0.02)', border: '0.5px solid rgba(255,255,255,0.07)', borderRadius: 12, padding: '16px 24px', display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap', justifyContent: 'center' }}>
+          <div style={{ fontSize: 20 }}>🏛️</div>
+          <div style={{ textAlign: 'left' }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'rgba(240,237,232,0.8)', marginBottom: 3 }}>
+              Built with certified HR professionals.
+            </div>
+            <div style={{ fontSize: 11, color: 'rgba(240,237,232,0.35)', lineHeight: 1.5 }}>
+              Trusted by hiring managers across the Middle East, North America, Europe, Australia, and beyond.
+            </div>
+          </div>
         </div>
 
         {/* Features */}

@@ -5,14 +5,14 @@ import { useRouter } from 'next/navigation'
 const PLANS = [
   {
     name: 'GO',
-    price: '$1.99',
+    price: '$2.50',
     period: '/session',
     color: 'rgba(232,93,47,0.06)',
     border: 'rgba(232,93,47,0.35)',
     accent: '#E85D2F',
     badge: 'TRY IT NOW',
     mode: '🎙️ Real Voice',
-    duration: '7 min',
+    duration: '15 min',
     sessions: 'Pay as you go',
     features: [
       'Live voice interview with Adam Reid',

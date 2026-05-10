@@ -6,10 +6,13 @@ const client = new Anthropic({
 })
 
 const TIME_LIMITS: Record<string, number> = {
+  free: 15 * 60,
   go: 15 * 60,
   pro: 30 * 60,
   expert: 60 * 60
 }
+
+const VOICE_PLANS = ['go', 'pro', 'expert']
 
 async function textToSpeech(text: string): Promise<Buffer | null> {
   try {
@@ -17,7 +20,7 @@ async function textToSpeech(text: string): Promise<Buffer | null> {
     const apiKey = process.env.ELEVENLABS_API_KEY
 
     if (!voiceId || !apiKey) {
-      console.error('ElevenLabs: MISSING env vars')
+      console.error('ElevenLabs: MISSING env vars - voiceId:', !!voiceId, 'apiKey:', !!apiKey)
       return null
     }
 
@@ -62,20 +65,28 @@ async function textToSpeech(text: string): Promise<Buffer | null> {
 function buildPrompt(config: any): string {
   const langInstruction =
     config.language === 'ar'
-      ? 'Conduct ENTIRELY in simple Modern Standard Arabic. Never switch to English.'
+      ? `LANGUAGE: You MUST speak ONLY in Arabic. Every single word must be in Arabic. Never use English under any circumstances. Not even one English word. This is absolute and non-negotiable.`
       : config.language === 'en'
-      ? 'Conduct ENTIRELY in professional English. Never switch to Arabic.'
-      : 'Start in Arabic. Use English only for technical terms.'
+      ? `LANGUAGE: You MUST speak ONLY in English. Every single word must be in English. Never use Arabic under any circumstances. This is absolute and non-negotiable.`
+      : `LANGUAGE: Use Arabic as the primary language. You may use English only for technical terms that have no Arabic equivalent.`
 
-  const subjectContext = config.cvSummary
-    ? `The candidate's background: ${config.cvSummary}`
+  const cvSection = config.cvText
+    ? `
+CANDIDATE CV — READ CAREFULLY:
+${config.cvText}
+
+CV USAGE RULES — CRITICAL:
+- You have fully read the candidate CV above. Use it actively throughout the interview.
+- Reference specific details from the CV in your questions. For example: "I see you worked at Charity Private school since 2016, tell me about a challenge you faced there." or "Your CV mentions experience in blended learning strategies, how do you apply that in your classroom?"
+- If the registered name "${config.candidateName}" does not match the name in the CV, ask about it ONCE naturally in the opening.
+- Never ask about information that is already clearly stated in the CV as a basic question. Instead, dig deeper into those experiences.
+- Base at least 3 of your questions directly on specific experiences, certifications, or skills mentioned in the CV.`
     : ''
 
-  return `You are a certified HR interview evaluator representing ${config.institution}.
-Your mission: conduct a REAL, TOUGH, and SPECIALIZED job interview on behalf of ${config.institution}'s HR department.
+  return `You are Adam Reid, a certified professional interview evaluator at Barbaros AI.
+Your mission: conduct a REAL, TOUGH, and SPECIALIZED job interview.
 
-You are NOT an assistant. You do NOT explain or teach. You are the HR representative of ${config.institution}.
-NEVER reveal you are AI. NEVER mention "MockBoss" or "Adam Reid" during the interview.
+You are NOT an assistant. You do NOT explain or teach. You are a real interviewer.
 
 SESSION DETAILS:
 - Candidate: ${config.candidateName}
@@ -83,47 +94,47 @@ SESSION DETAILS:
 - Institution: ${config.institution}
 - Sector: ${config.sector}
 - Experience: ${config.yearsExperience}
-${subjectContext}
 ${config.jobRequirements ? `- Job Requirements: ${config.jobRequirements}` : ''}
 ${config.isCareerSwitch ? '- Career switcher: ask how previous experience transfers.' : ''}
+${cvSection}
 
-LANGUAGE RULE — CRITICAL:
 ${langInstruction}
 
 RESPONSE RULES — CRITICAL:
 - Maximum 2 sentences per response
 - Never explain, never teach, never give hints
+- Never say you are AI
 - Ask ONE question at a time only
 - Be direct and professional
 
 SPECIALIZATION — CRITICAL:
 - Ask questions SPECIFIC to ${config.jobTitle} in ${config.sector}
 - Use real scenarios from ${config.sector} field
-- For teachers: classroom management, curriculum, student assessment, pedagogy
-- For engineers: technical problems, tools, methodologies
-- For doctors: clinical decisions, patient care, protocols
-- Tailor EVERY question to the actual job
+- For teachers: ask about classroom management, curriculum, student assessment, pedagogy
+- For engineers: ask about technical problems, tools, methodologies
+- For doctors: ask about clinical decisions, patient care, protocols
+- Tailor EVERY question to the actual job, not generic questions
 
 OPENING — say ONCE only, keep it SHORT:
-"Hello ${config.candidateName}, I'm calling from the HR department at ${config.institution}. We're ready to begin your interview for the ${config.jobTitle} position. Are you ready?"
+"Hello ${config.candidateName}, I am Adam Reid. Interview for ${config.jobTitle} at ${config.institution}. Are you ready?"
 
-INTERVIEW STRUCTURE:
+INTERVIEW STRUCTURE (follow strictly):
 1. Warm-up: 1 question about motivation
-2. Specialized technical: 4-5 questions specific to ${config.jobTitle}
-3. Behavioral STAR: 2 questions with real scenarios
-4. Culture fit: 1 question
-5. Close: "Do you have any questions for us?"
+2. CV-based: 2-3 questions referencing specific experiences from the CV
+3. Specialized technical: 2-3 questions specific to ${config.jobTitle}
+4. Behavioral STAR: 2 questions with real scenarios
+5. Culture fit: 1 question
+6. Close: "Do you have any questions for me?"
 
 VOICE ANALYSIS RESPONSE:
-- Confident & detailed → ask harder follow-up
-- Hesitant or short → "Can you elaborate with a specific example?"
-- Off-topic → "Let's stay focused on the ${config.jobTitle} role."
-- Silent → "I need your response. Are you still there?"
+When candidate answers, analyze their response quality:
+- Confident and detailed: ask harder follow-up
+- Hesitant or short: "Can you elaborate with a specific example?"
+- Off-topic: "Let us stay focused. ${config.jobTitle}-related please."
+- Silent: "I need your response. Are you still there?"
 
-After EVERY substantive answer append ONLY this JSON — no text after it:
-<score>{"score":0,"academic_knowledge":0,"practical_experience":0,"problem_solving":0,"communication_confidence":0,"professionalism":0,"work_environment_fit":0,"language_technical":0,"hesitation_signals":0,"notes":""}</score>
-
-Score each 0-100. hesitation_signals: 0=many hesitations, 100=very fluent.`
+After EVERY substantive answer append ONLY:
+<score>{"score":0,"clarity":0,"confidence":0,"relevance":0,"technical_depth":0,"notes":""}</score>`
 }
 
 export async function POST(req: NextRequest) {
@@ -131,7 +142,7 @@ export async function POST(req: NextRequest) {
     const { config, messages, sessionStartTime } = await req.json()
 
     const elapsed = (Date.now() - sessionStartTime) / 1000
-    const limit = TIME_LIMITS[config.plan] ?? TIME_LIMITS.go
+    const limit = TIME_LIMITS[config.plan] ?? TIME_LIMITS.free
 
     if (elapsed >= limit) {
       const scored = messages.filter((m: any) => m.score)
@@ -140,7 +151,7 @@ export async function POST(req: NextRequest) {
         : 0
       return NextResponse.json({
         success: true,
-        content: `${config.candidateName}, our time is up. Thank you for your time today. We will be in touch soon.`,
+        content: `${config.candidateName}, our time is up. Thank you for your time.`,
         isEndOfSession: true,
         finalScore: avg
       })
@@ -177,7 +188,8 @@ export async function POST(req: NextRequest) {
       } catch {}
     }
 
-    const audioBuffer = await textToSpeech(content)
+    const isVoicePlan = VOICE_PLANS.includes(config.plan)
+    const audioBuffer = isVoicePlan ? await textToSpeech(content) : null
     const audioBase64 = audioBuffer ? audioBuffer.toString('base64') : null
 
     return NextResponse.json({ success: true, content, score, audioBase64 })

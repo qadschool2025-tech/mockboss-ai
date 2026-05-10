@@ -64,7 +64,8 @@ export default function LandingPage() {
           lineHeight: 1.1,
           marginBottom: 20,
           maxWidth: 780,
-          letterSpacing: -1
+          letterSpacing: -1,
+          margin: '0 0 20px 0'
         }}>
           The interview that tells you<br />
           <span style={{ color: '#E85D2F' }}>the truth about yourself</span>
@@ -72,10 +73,10 @@ export default function LandingPage() {
 
         {/* Subtitle */}
         <p style={{ fontSize: 17, color: 'rgba(240,237,232,0.55)', maxWidth: 520, lineHeight: 1.7, marginBottom: 12 }}>
-          AI-powered mock interviews with real voice, real pressure, and honest feedback — conducted by Adam Reid, your certified evaluator.
+          AI-powered mock interviews with real voice, real pressure, and honest feedback — conducted by a certified HR evaluator.
         </p>
 
-        {/* ChatGPT credibility lines */}
+        {/* Credibility lines */}
         <p style={{ fontSize: 13, color: 'rgba(240,237,232,0.3)', maxWidth: 480, lineHeight: 1.6, marginBottom: 36, fontStyle: 'italic' }}>
           "Most candidates fail not because of lack of skill, but lack of preparation."<br />
           "One real interview simulation is worth ten mock attempts."
@@ -131,7 +132,7 @@ export default function LandingPage() {
           gap: 14, maxWidth: 860, width: '100%', marginBottom: 60
         }}>
           {[
-            { icon: '🎙️', title: 'Real Voice', desc: 'Adam speaks to you in a real human voice — not text' },
+            { icon: '🎙️', title: 'Real Voice', desc: 'Your evaluator speaks to you in a real human voice — not text' },
             { icon: '📄', title: 'CV-Aware', desc: 'Reads your CV and asks targeted, specific questions' },
             { icon: '📊', title: 'Detailed Report', desc: '7-criteria assessment with Arabic & English feedback' },
             { icon: '⚡', title: 'Instant Feedback', desc: 'Live scoring after every answer' },
@@ -148,7 +149,7 @@ export default function LandingPage() {
           ))}
         </div>
 
-        {/* Adam Reid intro */}
+        {/* HR Evaluator intro */}
         <div style={{
           background: '#111520',
           border: '0.5px solid rgba(42,92,255,0.2)',
@@ -161,12 +162,22 @@ export default function LandingPage() {
             justifyContent: 'center', fontSize: 24, flexShrink: 0
           }}>🎯</div>
           <div style={{ textAlign: 'left' }}>
-            <div style={{ fontWeight: 700, fontSize: 15 }}>Adam Reid</div>
+            <div style={{ fontWeight: 700, fontSize: 15 }}>Your Institution — HR</div>
             <div style={{ fontSize: 12, color: 'rgba(240,237,232,0.4)', marginBottom: 6 }}>Certified Interview Evaluator · MockBoss AI</div>
             <div style={{ fontSize: 12, color: 'rgba(240,237,232,0.6)', lineHeight: 1.5 }}>
               "I won't hold back. I'll push you, challenge your answers, and give you the honest evaluation you need to land your next role."
             </div>
           </div>
+        </div>
+
+        {/* Slogan above packages */}
+        <div style={{
+          fontSize: 15, fontWeight: 600,
+          color: 'rgba(240,237,232,0.7)',
+          fontStyle: 'italic', marginBottom: 20,
+          textAlign: 'center'
+        }}>
+          "Invest less than a cup of coffee — and drink it tomorrow with your new team"
         </div>
 
         {/* Packages teaser */}

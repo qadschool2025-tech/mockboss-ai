@@ -6,8 +6,7 @@ const client = new Anthropic({
 })
 
 const TIME_LIMITS: Record<string, number> = {
-  free: 15 * 60,
-  go: 15 * 60,
+  go: 7 * 60,
   pro: 30 * 60,
   expert: 60 * 60
 }
@@ -142,7 +141,7 @@ export async function POST(req: NextRequest) {
     const { config, messages, sessionStartTime } = await req.json()
 
     const elapsed = (Date.now() - sessionStartTime) / 1000
-    const limit = TIME_LIMITS[config.plan] ?? TIME_LIMITS.free
+    const limit = TIME_LIMITS[config.plan] ?? TIME_LIMITS.go
 
     if (elapsed >= limit) {
       const scored = messages.filter((m: any) => m.score)

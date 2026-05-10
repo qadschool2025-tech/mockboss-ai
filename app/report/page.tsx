@@ -43,10 +43,6 @@ export default function ReportPage() {
   const scoredMessages = messages.filter(m => m.score)
   const voiceMessages = messages.filter(m => m.voiceAnalysis)
 
-  const avgConfidence = voiceMessages.length > 0
-    ? voiceMessages.filter(m => m.voiceAnalysis?.confidence === 'high').length / voiceMessages.length * 100
-    : null
-
   const avgWPM = voiceMessages.length > 0
     ? Math.round(voiceMessages.reduce((a, m) => a + (m.voiceAnalysis?.wordsPerMinute ?? 0), 0) / voiceMessages.length)
     : null
@@ -75,8 +71,7 @@ export default function ReportPage() {
           Barbar<span style={{ color: '#E85D2F' }}>os</span>
         </div>
         <span style={{ fontSize: 12, color: 'rgba(240,237,232,0.4)' }}>Performance Report</span>
-        <button
-          onClick={() => router.push('/onboarding')}
+        <button onClick={() => router.push('/onboarding')}
           style={{ background: '#E85D2F', border: 'none', color: '#fff', fontSize: 12, fontWeight: 700, padding: '7px 14px', borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit' }}>
           New Interview
         </button>
@@ -87,9 +82,7 @@ export default function ReportPage() {
 
           {/* Header */}
           <div style={{ textAlign: 'center', marginBottom: 32 }}>
-            <h1 style={{ fontSize: 28, fontWeight: 900, marginBottom: 6, letterSpacing: -0.5 }}>
-              Interview Report
-            </h1>
+            <h1 style={{ fontSize: 28, fontWeight: 900, marginBottom: 6, letterSpacing: -0.5 }}>Interview Report</h1>
             {config && (
               <p style={{ fontSize: 13, color: 'rgba(240,237,232,0.45)' }}>
                 {config.candidateName} · {config.jobTitle} · {config.institution}
@@ -202,14 +195,11 @@ export default function ReportPage() {
           {/* Upgrade CTA */}
           {config?.plan === 'free' && (
             <div style={{ background: 'linear-gradient(135deg, rgba(232,93,47,0.08), rgba(37,99,235,0.08))', border: '0.5px solid rgba(232,93,47,0.2)', borderRadius: 14, padding: '24px', marginBottom: 20, textAlign: 'center' }}>
-              <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 8 }}>
-                🎙️ Want a deeper analysis?
-              </div>
+              <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 8 }}>🎙️ Want a deeper analysis?</div>
               <div style={{ fontSize: 13, color: 'rgba(240,237,232,0.5)', marginBottom: 16, lineHeight: 1.6 }}>
                 Upgrade to voice mode and get real-time confidence scoring, hesitation detection, and a full AI-powered debrief.
               </div>
-              <button
-                onClick={() => router.push('/packages')}
+              <button onClick={() => router.push('/packages')}
                 style={{ background: '#E85D2F', border: 'none', color: '#fff', fontSize: 14, fontWeight: 700, padding: '12px 28px', borderRadius: 10, cursor: 'pointer', fontFamily: 'inherit' }}>
                 Upgrade to Voice →
               </button>
@@ -221,8 +211,7 @@ export default function ReportPage() {
             <div style={{ textAlign: 'center', padding: '40px 20px', color: 'rgba(240,237,232,0.3)' }}>
               <div style={{ fontSize: 40, marginBottom: 12 }}>📋</div>
               <div style={{ fontSize: 14 }}>No session data found.</div>
-              <button
-                onClick={() => router.push('/onboarding')}
+              <button onClick={() => router.push('/onboarding')}
                 style={{ marginTop: 16, background: '#2A5CFF', border: 'none', color: '#fff', fontSize: 13, fontWeight: 700, padding: '10px 24px', borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit' }}>
                 Start Interview →
               </button>
@@ -231,13 +220,11 @@ export default function ReportPage() {
 
           {/* Action Buttons */}
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-            <button
-              onClick={() => router.push('/onboarding')}
+            <button onClick={() => router.push('/onboarding')}
               style={{ flex: 1, padding: '13px', background: '#2A5CFF', border: 'none', borderRadius: 10, color: '#fff', fontWeight: 700, fontSize: 14, cursor: 'pointer', fontFamily: 'inherit' }}>
               Start New Interview →
             </button>
-            <button
-              onClick={() => router.push('/')}
+            <button onClick={() => router.push('/')}
               style={{ padding: '13px 20px', background: 'rgba(255,255,255,0.05)', border: '0.5px solid rgba(255,255,255,0.1)', borderRadius: 10, color: 'rgba(240,237,232,0.6)', fontWeight: 600, fontSize: 14, cursor: 'pointer', fontFamily: 'inherit' }}>
               Home
             </button>

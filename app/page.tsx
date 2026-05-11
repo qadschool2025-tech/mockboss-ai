@@ -101,29 +101,12 @@ export default function LandingPage() {
             { icon: '🎙️', title: 'Real Voice Interview', desc: 'Speak directly with Adam Reid. Your confidence is measured live.' },
             { icon: '⚡', title: 'Instant Scoring', desc: 'Every answer scored in real-time. No waiting.' },
             { icon: '📊', title: 'Full Report', desc: 'Detailed performance analysis after every session.' },
-            { icon: '🌐', title: 'Any Language', desc: 'Arabic, English, or both. You choose.' },
+            { icon: '🌐', title: 'Any Language', desc: 'English · Australian · UK · Arabic' },
           ].map((f, i) => (
             <div key={i} style={{ background: '#FFFFFF', border: '0.5px solid #E5DDD0', borderRadius: 12, padding: '20px 16px', textAlign: 'left' }}>
               <div style={{ fontSize: 24, marginBottom: 10 }}>{f.icon}</div>
               <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6, color: '#1A1A1A' }}>{f.title}</div>
               <div style={{ fontSize: 11, color: 'rgba(26,26,26,0.55)', lineHeight: 1.6 }}>{f.desc}</div>
-            </div>
-          ))}
-        </div>
-
-        {/* Plans Preview */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10, maxWidth: 700, width: '100%', marginBottom: 60 }}>
-          {[
-            { name: 'GO', price: '$2.50', note: '🎙️ Voice · 15 min · per session', border: 'rgba(204,120,92,0.4)', bg: 'rgba(204,120,92,0.08)', period: '/session' },
-            { name: 'Pro', price: '$12', note: '🎙️ Voice · 30 min · 10 sessions', border: '#E5DDD0', bg: '#FFFFFF', period: '/mo' },
-            { name: 'Expert', price: '$36', note: '🎙️ Voice · 60 min · 20 sessions', border: '#1A1A1A', bg: 'rgba(26,26,26,0.04)', period: '/mo' },
-          ].map((plan, i) => (
-            <div key={i} style={{ background: plan.bg, border: `0.5px solid ${plan.border}`, borderRadius: 10, padding: '14px 12px', textAlign: 'center' }}>
-              <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4, color: '#1A1A1A' }}>{plan.name}</div>
-              <div style={{ fontSize: 22, fontWeight: 900, marginBottom: 4, color: '#1A1A1A' }}>
-                {plan.price}<span style={{ fontSize: 11, fontWeight: 400, color: 'rgba(26,26,26,0.45)' }}>{plan.period}</span>
-              </div>
-              <div style={{ fontSize: 10, color: 'rgba(26,26,26,0.55)' }}>{plan.note}</div>
             </div>
           ))}
         </div>

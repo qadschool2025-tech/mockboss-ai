@@ -25,7 +25,7 @@ const PLANS = [
       'Standardized interview tailored to your job requirements',
       'Real Interview — AI-powered live voice session with Adam Reid',
       'Detailed Report — fair evaluation based on professional hiring standards',
-      'Language Choice — English · Arabic',
+      'Language Choice',
       'Voice confidence & hesitation analysis',
       'No commitment — pay per session',
     ],
@@ -55,7 +55,7 @@ const PLANS = [
       'Standardized interview tailored to your job requirements',
       'Real Interview — AI-powered live voice session with Adam Reid',
       'Detailed Report — fair evaluation based on professional hiring standards',
-      'Language Choice — English · Arabic',
+      'Language Choice',
       'Voice confidence & hesitation analysis',
       '10 full sessions per month',
     ],
@@ -85,7 +85,7 @@ const PLANS = [
       'Standardized interview tailored to your job requirements',
       'Real Interview — AI-powered live voice session with Adam Reid',
       'Detailed Report — fair evaluation based on professional hiring standards',
-      'Language Choice — English · Arabic',
+      'Language Choice',
       'Voice confidence & hesitation analysis',
       '20 full sessions per month',
       'Priority processing & dedicated support',
@@ -184,7 +184,7 @@ export default function PackagesPage() {
                 <span style={{ fontSize: 14, color: 'rgba(26,26,26,0.5)', marginLeft: 4 }}>{plan.period}</span>
               </div>
 
-              {/* Real Interview badge — small */}
+              {/* Real Interview badge */}
               <div style={{ marginBottom: 14 }}>
                 <span style={{ fontSize: 11, padding: '5px 11px', background: '#FFFFFF', borderRadius: 20, border: `0.5px solid ${plan.border}`, color: '#1A1A1A', fontWeight: 600, display: 'inline-block' }}>
                   {plan.mode}

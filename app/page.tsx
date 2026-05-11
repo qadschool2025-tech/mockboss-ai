@@ -27,7 +27,7 @@ export default function LandingPage() {
 
       <main style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '60px 24px', textAlign: 'center' }}>
 
-        {/* Trust Badge — moved to top in place of old badge */}
+        {/* Trust Badge */}
         <div style={{ width: '100%', maxWidth: 700, marginBottom: 32, background: '#F5F1EB', border: '0.5px solid #E5DDD0', borderRadius: 12, padding: '16px 24px', display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap', justifyContent: 'center' }}>
           <div style={{ fontSize: 20 }}>🏛️</div>
           <div style={{ textAlign: 'left' }}>
@@ -35,7 +35,7 @@ export default function LandingPage() {
               Built with certified HR professionals.
             </div>
             <div style={{ fontSize: 11, color: 'rgba(26,26,26,0.5)', lineHeight: 1.5 }}>
-              Trusted by hiring managers across the USA, Australia, Canada, UK, Middle East, South Africa, and beyond.
+              Trusted by hiring managers across the USA, Australia, Canada, UK, Europe, South Africa, and beyond.
             </div>
           </div>
         </div>
@@ -57,7 +57,7 @@ export default function LandingPage() {
         </div>
 
         {/* Subheadline */}
-        <div style={{ maxWidth: 560, margin: '0 0 40px' }}>
+        <div style={{ maxWidth: 560, margin: '0 0 24px' }}>
           <p style={{ fontSize: 17, color: '#1A1A1A', fontWeight: 700, lineHeight: 1.5, margin: '0 0 12px', letterSpacing: -0.3 }}>
             For less than the price of a coffee — we'll make sure you sip the next one with your <span style={{ color: '#CC785C' }}>new team</span>. ☕
           </p>
@@ -67,6 +67,18 @@ export default function LandingPage() {
           <p style={{ fontSize: 14, color: 'rgba(26,26,26,0.65)', lineHeight: 1.7, margin: 0, fontStyle: 'italic' }}>
             When opportunity knocks, be the one who's ready.
           </p>
+        </div>
+
+        {/* Global Reach */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 40, flexWrap: 'wrap', justifyContent: 'center' }}>
+          <span style={{ fontSize: 15 }}>🌍</span>
+          <span style={{ fontSize: 13, color: 'rgba(26,26,26,0.55)', lineHeight: 1.6, textAlign: 'center' }}>
+            Available for job seekers in the{' '}
+            <strong style={{ color: '#1A1A1A', fontWeight: 700 }}>USA, Australia, Canada, UK, Europe & beyond.</strong>
+            <br />
+            Interviews in{' '}
+            <strong style={{ color: '#CC785C', fontWeight: 700 }}>your language.</strong>
+          </span>
         </div>
 
         {/* CTA Buttons */}
@@ -101,7 +113,7 @@ export default function LandingPage() {
             { icon: '🎙️', title: 'Real Voice Interview', desc: 'Speak directly with Adam Reid. Your confidence is measured live.' },
             { icon: '⚡', title: 'Instant Scoring', desc: 'Every answer scored in real-time. No waiting.' },
             { icon: '📊', title: 'Full Report', desc: 'Detailed performance analysis after every session.' },
-            { icon: '🌐', title: 'Any Language', desc: 'English · Australian · UK · Arabic' },
+            { icon: '🌐', title: 'Any Language', desc: 'Interview in the language you\'re most confident in.' },
           ].map((f, i) => (
             <div key={i} style={{ background: '#FFFFFF', border: '0.5px solid #E5DDD0', borderRadius: 12, padding: '20px 16px', textAlign: 'left' }}>
               <div style={{ fontSize: 24, marginBottom: 10 }}>{f.icon}</div>

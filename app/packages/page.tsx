@@ -24,7 +24,7 @@ const PLANS = [
     features: [
       'Real Interview — AI-powered live voice session with Adam Reid',
       'Detailed Report — fair evaluation based on professional hiring standards',
-      'Language Choice — English · Australian · UK · Arabic · Mixed',
+      'Language Choice — English · Arabic',
       'Voice confidence & hesitation analysis',
       'Standardized interview tailored to your job requirements',
       'No commitment — pay per session',
@@ -54,7 +54,7 @@ const PLANS = [
     features: [
       'Real Interview — AI-powered live voice session with Adam Reid',
       'Detailed Report — fair evaluation based on professional hiring standards',
-      'Language Choice — English · Australian · UK · Arabic · Mixed',
+      'Language Choice — English · Arabic',
       'Voice confidence & hesitation analysis',
       'Standardized interview tailored to your job requirements',
       '10 full sessions per month',
@@ -84,7 +84,7 @@ const PLANS = [
     features: [
       'Real Interview — AI-powered live voice session with Adam Reid',
       'Detailed Report — fair evaluation based on professional hiring standards',
-      'Language Choice — English · Australian · UK · Arabic · Mixed',
+      'Language Choice — English · Arabic',
       'Voice confidence & hesitation analysis',
       'Standardized interview tailored to your job requirements',
       '20 full sessions per month',

@@ -231,7 +231,7 @@ export default function OnboardingPage() {
                 Tell us about yourself
               </h2>
               <p style={{ fontSize: 13, color: 'rgba(26,26,26,0.6)', marginBottom: 28, lineHeight: 1.6 }}>
-                Adam Reid will greet you by name and adapt the interview to you.
+                Your <strong style={{ color: '#CC785C', fontWeight: 700 }}>Certified HR Expert</strong> will greet you by name and adapt the interview to you.
               </p>
 
               <div style={{ marginBottom: 20 }}>
@@ -270,7 +270,7 @@ export default function OnboardingPage() {
                 Job you are applying for
               </h2>
               <p style={{ fontSize: 13, color: 'rgba(26,26,26,0.6)', marginBottom: 28, lineHeight: 1.6 }}>
-                The more specific you are, the sharper Adam's questions will be.
+                The more specific you are, the sharper the interview questions will be.
               </p>
 
               <div style={{ marginBottom: 20 }}>
@@ -338,7 +338,7 @@ export default function OnboardingPage() {
                 Your CV
               </h2>
               <p style={{ fontSize: 13, color: 'rgba(26,26,26,0.6)', marginBottom: 10, lineHeight: 1.6 }}>
-                Adam reads your CV before the interview begins — and will question every detail.
+                Your <strong style={{ color: '#CC785C', fontWeight: 700 }}>Certified HR Expert</strong> reads your CV before the interview begins — and will question every detail.
               </p>
 
               <div style={{
@@ -373,14 +373,14 @@ export default function OnboardingPage() {
                       {isParsingCV ? (
                         <div>
                           <div style={{ fontSize: 28, marginBottom: 10 }}>⏳</div>
-                          <div style={{ fontSize: 14, color: '#CC785C', fontWeight: 700 }}>Adam is reading your CV...</div>
+                          <div style={{ fontSize: 14, color: '#CC785C', fontWeight: 700 }}>Your HR Expert is reading your CV...</div>
                           <div style={{ fontSize: 11, color: 'rgba(26,26,26,0.5)', marginTop: 4 }}>Please wait</div>
                         </div>
                       ) : cvReady && cvFileName ? (
                         <div>
                           <div style={{ fontSize: 28, marginBottom: 8 }}>✅</div>
                           <div style={{ fontSize: 13, color: '#22C55E', fontWeight: 700 }}>{cvFileName}</div>
-                          <div style={{ fontSize: 11, color: 'rgba(26,26,26,0.5)', marginTop: 4 }}>CV ready — Adam has read your profile</div>
+                          <div style={{ fontSize: 11, color: 'rgba(26,26,26,0.5)', marginTop: 4 }}>CV ready — your HR Expert has reviewed your profile</div>
                         </div>
                       ) : cvFileName ? (
                         <div>
@@ -414,7 +414,7 @@ export default function OnboardingPage() {
                       style={{ ...inputStyle(false), resize: 'vertical', lineHeight: 1.6 }}
                     />
                     {data.cvText.trim().length > 50 && !cvFileName && (
-                      <div style={{ fontSize: 11, color: '#22C55E', marginTop: 6, fontWeight: 600 }}>✓ CV text received — Adam will read this</div>
+                      <div style={{ fontSize: 11, color: '#22C55E', marginTop: 6, fontWeight: 600 }}>✓ CV text received — your HR Expert will read this</div>
                     )}
                   </div>
 
@@ -479,7 +479,7 @@ export default function OnboardingPage() {
                   }}>
                     Add your CV later to <span style={{ color: '#CC785C', fontWeight: 700 }}>unlock deeper, personalized questions.</span>
                     <br />
-                    Adam will conduct your interview based on your role and experience.
+                    Your Certified HR Expert will conduct the interview based on your role and experience.
                   </div>
                   <button
                     onClick={() => { setCvSkipped(false); setCvReady(false); set('cvText', '') }}
@@ -508,7 +508,7 @@ export default function OnboardingPage() {
                 You are ready, {data.candidateName.split(' ')[0]}
               </h2>
               <p style={{ fontSize: 13, color: 'rgba(26,26,26,0.6)', marginBottom: 28, lineHeight: 1.7 }}>
-                Adam Reid has reviewed your profile. Hold the mic button while answering and speak clearly.
+                Your <strong style={{ color: '#CC785C', fontWeight: 700 }}>Certified HR Expert at Barbaros</strong> has reviewed your profile. Hold the mic button while answering and speak clearly.
               </p>
 
               <div style={{
@@ -526,7 +526,7 @@ export default function OnboardingPage() {
                   ['Sector', data.sector],
                   ['Experience', data.yearsExperience],
                   ['Language', { en: 'English', ar: 'Arabic', mixed: 'Mixed' }[data.language]],
-                  ['CV', cvSkipped ? '⚠️ Not provided' : data.cvText ? '✅ Provided & read by Adam' : '⚠️ Not provided'],
+                  ['CV', cvSkipped ? '⚠️ Not provided' : data.cvText ? '✅ Provided & reviewed' : '⚠️ Not provided'],
                 ] as [string, string][]).map(([k, v], i, arr) => (
                   <div key={k} style={{
                     display: 'flex',

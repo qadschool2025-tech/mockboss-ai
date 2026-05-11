@@ -7,65 +7,89 @@ const PLANS = [
     name: 'GO',
     price: '$2.50',
     period: '/session',
-    color: 'rgba(232,93,47,0.06)',
-    border: 'rgba(232,93,47,0.35)',
-    accent: '#E85D2F',
-    badge: 'TRY IT NOW',
-    mode: '🎙️ Real Voice',
+    bg: 'rgba(204,120,92,0.06)',
+    border: '#E8B8A8',
+    borderWidth: '1px',
+    accent: '#CC785C',
+    badge: 'DEFAULT',
+    badgeBg: 'rgba(204,120,92,0.15)',
+    badgeColor: '#CC785C',
+    scale: 1,
+    mode: '🎙️ Real Interview',
     duration: '15 min',
     sessions: 'Pay as you go',
+    taglineEn: 'The cost of a coffee. The value of a career.',
+    taglineAr: 'كلفة كوب قهوة. قيمة وظيفة عمر.',
     features: [
-      'Live voice interview with Adam Reid',
+      'Real Interview — AI-powered live voice session with Adam Reid',
+      'Detailed Report — fair evaluation based on professional hiring standards',
+      'Language Choice — English · Australian · UK · Arabic · Mixed',
       'Voice confidence & hesitation analysis',
       'Instant scoring per answer',
-      'Full performance report',
       'No commitment — pay per session',
     ],
     cta: 'Start Session',
-    ctaBg: '#E85D2F',
+    ctaBg: '#CC785C',
+    ctaColor: '#fff',
   },
   {
     name: 'Pro',
     price: '$12',
     period: '/mo',
-    color: 'rgba(37,99,235,0.06)',
-    border: 'rgba(37,99,235,0.35)',
-    accent: '#2563EB',
-    badge: 'MOST POPULAR',
-    mode: '🎙️ Real Voice',
+    bg: 'rgba(204,120,92,0.15)',
+    border: '#CC785C',
+    borderWidth: '2px',
+    accent: '#CC785C',
+    badge: '🔥 MOST POPULAR',
+    badgeBg: '#CC785C',
+    badgeColor: '#fff',
+    scale: 1.05,
+    mode: '🎙️ Real Interview',
     duration: '30 min',
     sessions: '10 sessions/month',
+    taglineEn: 'Ten rehearsals — before the one that changes everything.',
+    taglineAr: 'عشر مقابلات تدريبية... قبل المقابلة التي ستغيّر حياتك.',
     features: [
-      'Live voice interview with Adam Reid',
+      'Real Interview — AI-powered live voice session with Adam Reid',
+      'Detailed Report — fair evaluation based on professional hiring standards',
+      'Language Choice — English · Australian · UK · Arabic · Mixed',
       'Voice confidence & hesitation analysis',
-      'Full performance report',
       'CV-based targeted questions',
-      '10 sessions per month',
+      '10 full sessions per month',
     ],
     cta: 'Get Pro',
-    ctaBg: '#2563EB',
+    ctaBg: '#CC785C',
+    ctaColor: '#fff',
   },
   {
     name: 'Expert',
     price: '$36',
     period: '/mo',
-    color: 'rgba(139,150,255,0.06)',
-    border: 'rgba(139,150,255,0.35)',
-    accent: '#8B96FF',
-    badge: 'BEST VALUE',
-    mode: '🎙️ Real Voice',
+    bg: 'rgba(168,90,66,0.18)',
+    border: '#A85A42',
+    borderWidth: '2.5px',
+    accent: '#A85A42',
+    badge: 'PREMIUM',
+    badgeBg: '#1A1A1A',
+    badgeColor: '#F5F1EB',
+    scale: 1,
+    mode: '🎙️ Real Interview',
     duration: '60 min',
     sessions: '20 sessions/month',
+    taglineEn: 'Twenty interviews — until "you\'re hired" stops surprising you.',
+    taglineAr: 'عشرون مقابلة. حتى تصبح كلمة "مقبول" هي المتوقع — لا المفاجأة.',
     features: [
-      'Live voice interview with Adam Reid',
+      'Real Interview — AI-powered live voice session with Adam Reid',
+      'Detailed Report — fair evaluation based on professional hiring standards',
+      'Language Choice — English · Australian · UK · Arabic · Mixed',
       'Voice confidence & hesitation analysis',
-      'Full detailed performance report',
       'CV-based targeted questions',
-      '20 sessions per month',
-      'Priority processing',
+      '20 full sessions per month',
+      'Priority processing & dedicated support',
     ],
     cta: 'Go Expert',
-    ctaBg: 'linear-gradient(135deg, #8B96FF, #2563EB)',
+    ctaBg: 'linear-gradient(135deg, #A85A42, #CC785C)',
+    ctaColor: '#fff',
   },
 ]
 
@@ -73,15 +97,15 @@ export default function PackagesPage() {
   const router = useRouter()
 
   return (
-    <div style={{ fontFamily: 'system-ui, sans-serif', background: '#0B0D11', color: '#F0EDE8', minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+    <div style={{ fontFamily: 'system-ui, sans-serif', background: '#F5F1EB', color: '#1A1A1A', minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
 
       {/* Nav */}
-      <nav style={{ background: '#0F1117', borderBottom: '0.5px solid rgba(255,255,255,0.07)', padding: '14px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <nav style={{ background: '#F5F1EB', borderBottom: '0.5px solid #E5DDD0', padding: '14px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div onClick={() => router.push('/')} style={{ fontWeight: 900, fontSize: 22, letterSpacing: -0.5, cursor: 'pointer' }}>
-          Barbar<span style={{ color: '#E85D2F' }}>os</span>
+          <span style={{ color: '#1A1A1A' }}>Barbar</span><span style={{ color: '#CC785C' }}>os</span>
         </div>
         <button onClick={() => router.push('/onboarding')}
-          style={{ background: '#E85D2F', border: 'none', color: '#fff', fontSize: 13, fontWeight: 700, padding: '8px 18px', borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit' }}>
+          style={{ background: '#1A1A1A', border: 'none', color: '#F5F1EB', fontSize: 13, fontWeight: 700, padding: '8px 18px', borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit' }}>
           Get Started
         </button>
       </nav>
@@ -90,49 +114,85 @@ export default function PackagesPage() {
 
         {/* Header */}
         <div style={{ textAlign: 'center', marginBottom: 48 }}>
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'rgba(232,93,47,0.1)', border: '0.5px solid rgba(232,93,47,0.3)', borderRadius: 20, padding: '5px 14px', marginBottom: 20, fontSize: 11, color: '#E85D2F', fontWeight: 600, letterSpacing: 0.5 }}>
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'rgba(204,120,92,0.1)', border: '0.5px solid rgba(204,120,92,0.3)', borderRadius: 20, padding: '5px 14px', marginBottom: 20, fontSize: 11, color: '#CC785C', fontWeight: 600, letterSpacing: 0.5 }}>
             ● PRICING
           </div>
-          <h1 style={{ fontSize: 'clamp(28px, 5vw, 48px)', fontWeight: 900, lineHeight: 1.1, margin: '0 0 16px', letterSpacing: -1 }}>
-            Choose your <span style={{ color: '#E85D2F' }}>interview room</span>
+          <h1 style={{ fontSize: 'clamp(28px, 5vw, 48px)', fontWeight: 900, lineHeight: 1.1, margin: '0 0 16px', letterSpacing: -1, color: '#1A1A1A' }}>
+            Choose your <span style={{ color: '#CC785C' }}>interview room</span>
           </h1>
-          <p style={{ fontSize: 15, color: 'rgba(240,237,232,0.5)', maxWidth: 420, lineHeight: 1.7, margin: '0 auto' }}>
+          <p style={{ fontSize: 15, color: 'rgba(26,26,26,0.6)', maxWidth: 420, lineHeight: 1.7, margin: '0 auto' }}>
             Every plan includes real voice interviews with Adam Reid. No text-only mode.
           </p>
         </div>
 
         {/* Plans Grid */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 16, maxWidth: 900, width: '100%', marginBottom: 60 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 20, maxWidth: 1000, width: '100%', marginBottom: 60, alignItems: 'stretch' }}>
           {PLANS.map((plan) => (
-            <div key={plan.name} style={{ background: plan.color, border: `1px solid ${plan.border}`, borderRadius: 16, padding: '28px 22px', display: 'flex', flexDirection: 'column', position: 'relative', overflow: 'hidden' }}>
+            <div key={plan.name} style={{
+              background: plan.bg,
+              border: `${plan.borderWidth} solid ${plan.border}`,
+              borderRadius: 16,
+              padding: '32px 24px',
+              display: 'flex',
+              flexDirection: 'column',
+              position: 'relative',
+              overflow: 'visible',
+              transform: `scale(${plan.scale})`,
+              boxShadow: plan.scale > 1 ? '0 12px 40px rgba(204,120,92,0.25)' : '0 4px 16px rgba(26,26,26,0.06)',
+              zIndex: plan.scale > 1 ? 2 : 1,
+            }}>
 
               {/* Badge */}
               {plan.badge && (
-                <div style={{ position: 'absolute', top: 14, right: 14, background: plan.accent, color: '#fff', fontSize: 9, fontWeight: 800, letterSpacing: 1, padding: '3px 8px', borderRadius: 20 }}>
+                <div style={{
+                  position: 'absolute',
+                  top: -12,
+                  left: '50%',
+                  transform: 'translateX(-50%)',
+                  background: plan.badgeBg,
+                  color: plan.badgeColor,
+                  fontSize: 10,
+                  fontWeight: 800,
+                  letterSpacing: 1.2,
+                  padding: '5px 14px',
+                  borderRadius: 20,
+                  whiteSpace: 'nowrap',
+                  boxShadow: '0 4px 12px rgba(26,26,26,0.15)',
+                }}>
                   {plan.badge}
                 </div>
               )}
 
               {/* Plan Name */}
-              <div style={{ fontSize: 13, fontWeight: 800, color: plan.accent, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 12 }}>
+              <div style={{ fontSize: 13, fontWeight: 800, color: plan.accent, letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 12, marginTop: 8 }}>
                 {plan.name}
+              </div>
+
+              {/* Tagline (EN + AR) */}
+              <div style={{ marginBottom: 16, paddingBottom: 16, borderBottom: '0.5px solid rgba(26,26,26,0.1)' }}>
+                <p style={{ fontSize: 13, fontWeight: 700, color: '#1A1A1A', lineHeight: 1.4, margin: '0 0 6px', letterSpacing: -0.2 }}>
+                  {plan.taglineEn}
+                </p>
+                <p style={{ fontSize: 12, color: plan.accent, lineHeight: 1.6, margin: 0, fontWeight: 600, direction: 'rtl', textAlign: 'right' }}>
+                  {plan.taglineAr}
+                </p>
               </div>
 
               {/* Price */}
               <div style={{ marginBottom: 16 }}>
-                <span style={{ fontSize: 40, fontWeight: 900, letterSpacing: -1 }}>{plan.price}</span>
-                <span style={{ fontSize: 14, color: 'rgba(240,237,232,0.4)' }}>{plan.period}</span>
+                <span style={{ fontSize: 44, fontWeight: 900, letterSpacing: -1.5, color: '#1A1A1A' }}>{plan.price}</span>
+                <span style={{ fontSize: 14, color: 'rgba(26,26,26,0.5)', marginLeft: 4 }}>{plan.period}</span>
               </div>
 
-              {/* Mode + Duration */}
-              <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap' }}>
-                <span style={{ fontSize: 11, padding: '4px 10px', background: 'rgba(255,255,255,0.06)', borderRadius: 20, border: '0.5px solid rgba(255,255,255,0.1)' }}>
+              {/* Mode + Duration + Sessions */}
+              <div style={{ display: 'flex', gap: 8, marginBottom: 22, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 11, padding: '5px 11px', background: '#FFFFFF', borderRadius: 20, border: `0.5px solid ${plan.border}`, color: '#1A1A1A', fontWeight: 600 }}>
                   {plan.mode}
                 </span>
-                <span style={{ fontSize: 11, padding: '4px 10px', background: 'rgba(255,255,255,0.06)', borderRadius: 20, border: '0.5px solid rgba(255,255,255,0.1)' }}>
+                <span style={{ fontSize: 11, padding: '5px 11px', background: '#FFFFFF', borderRadius: 20, border: `0.5px solid ${plan.border}`, color: '#1A1A1A', fontWeight: 600 }}>
                   ⏱ {plan.duration}
                 </span>
-                <span style={{ fontSize: 11, padding: '4px 10px', background: 'rgba(255,255,255,0.06)', borderRadius: 20, border: '0.5px solid rgba(255,255,255,0.1)' }}>
+                <span style={{ fontSize: 11, padding: '5px 11px', background: '#FFFFFF', borderRadius: 20, border: `0.5px solid ${plan.border}`, color: '#1A1A1A', fontWeight: 600 }}>
                   🔁 {plan.sessions}
                 </span>
               </div>
@@ -140,8 +200,21 @@ export default function PackagesPage() {
               {/* Features */}
               <div style={{ flex: 1, marginBottom: 24 }}>
                 {plan.features.map((f, i) => (
-                  <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 10, fontSize: 13, color: 'rgba(240,237,232,0.75)', lineHeight: 1.5 }}>
-                    <span style={{ color: plan.accent, flexShrink: 0, marginTop: 1 }}>✓</span>
+                  <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 12, fontSize: 13, color: 'rgba(26,26,26,0.8)', lineHeight: 1.5 }}>
+                    <span style={{
+                      color: '#fff',
+                      background: plan.accent,
+                      flexShrink: 0,
+                      marginTop: 2,
+                      width: 16,
+                      height: 16,
+                      borderRadius: '50%',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: 10,
+                      fontWeight: 900,
+                    }}>✓</span>
                     {f}
                   </div>
                 ))}
@@ -150,7 +223,20 @@ export default function PackagesPage() {
               {/* CTA */}
               <button
                 onClick={() => router.push('/onboarding')}
-                style={{ width: '100%', padding: '13px', background: plan.ctaBg, border: 'none', borderRadius: 10, color: '#fff', fontWeight: 700, fontSize: 14, cursor: 'pointer', fontFamily: 'inherit' }}>
+                style={{
+                  width: '100%',
+                  padding: '14px',
+                  background: plan.ctaBg,
+                  border: 'none',
+                  borderRadius: 10,
+                  color: plan.ctaColor,
+                  fontWeight: 700,
+                  fontSize: 14,
+                  cursor: 'pointer',
+                  fontFamily: 'inherit',
+                  letterSpacing: -0.2,
+                  boxShadow: '0 4px 12px rgba(204,120,92,0.25)',
+                }}>
                 {plan.cta} →
               </button>
             </div>
@@ -158,13 +244,13 @@ export default function PackagesPage() {
         </div>
 
         {/* Bottom Quote */}
-        <div style={{ textAlign: 'center', maxWidth: 500 }}>
-          <div style={{ fontSize: 18, fontWeight: 900, letterSpacing: -0.5, marginBottom: 8 }}>
-            Anyone can practice.
+        <div style={{ textAlign: 'center', maxWidth: 500, marginTop: 20 }}>
+          <div style={{ fontSize: 20, fontWeight: 900, letterSpacing: -0.5, marginBottom: 8, color: '#1A1A1A', lineHeight: 1.4 }}>
+            Anyone can <span style={{ color: 'rgba(26,26,26,0.35)' }}>practice.</span>
             <br />
-            <span style={{ color: '#E85D2F' }}>Barbaros makes you ready.</span>
+            <span style={{ color: '#1A1A1A' }}>Barbar</span><span style={{ color: '#CC785C' }}>os</span> makes you <span style={{ color: '#CC785C' }}>ready.</span>
           </div>
-          <div style={{ fontSize: 12, color: 'rgba(240,237,232,0.25)', marginTop: 12 }}>
+          <div style={{ fontSize: 12, color: 'rgba(26,26,26,0.4)', marginTop: 12 }}>
             The closest thing to a real interview.
           </div>
         </div>
@@ -172,10 +258,12 @@ export default function PackagesPage() {
       </main>
 
       {/* Footer */}
-      <footer style={{ background: '#0D0F14', borderTop: '0.5px solid rgba(255,255,255,0.04)', padding: '16px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-        <div style={{ fontWeight: 900, fontSize: 14 }}>Barbar<span style={{ color: '#E85D2F' }}>os</span></div>
-        <div style={{ fontSize: 11, color: 'rgba(240,237,232,0.2)' }}>© 2026 Barbaros. All rights reserved.</div>
-        <div style={{ fontSize: 11, color: 'rgba(240,237,232,0.2)' }}>Powered by AI</div>
+      <footer style={{ background: '#EDE6D8', borderTop: '0.5px solid #E5DDD0', padding: '16px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+        <div style={{ fontWeight: 900, fontSize: 14 }}>
+          <span style={{ color: '#1A1A1A' }}>Barbar</span><span style={{ color: '#CC785C' }}>os</span>
+        </div>
+        <div style={{ fontSize: 11, color: 'rgba(26,26,26,0.4)' }}>© 2026 Barbaros. All rights reserved.</div>
+        <div style={{ fontSize: 11, color: 'rgba(26,26,26,0.4)' }}>Powered by AI</div>
       </footer>
 
     </div>

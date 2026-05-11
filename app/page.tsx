@@ -28,14 +28,14 @@ export default function LandingPage() {
       <main style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '60px 24px', textAlign: 'center' }}>
 
         {/* Trust Badge — moved to top in place of old badge */}
-        <div style={{ width: '100%', maxWidth: 700, marginBottom: 32, background: 'rgba(255,255,255,0.5)', border: '0.5px solid #E5DDD0', borderRadius: 12, padding: '16px 24px', display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap', justifyContent: 'center' }}>
+        <div style={{ width: '100%', maxWidth: 700, marginBottom: 32, background: '#F5F1EB', border: '0.5px solid #E5DDD0', borderRadius: 12, padding: '16px 24px', display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap', justifyContent: 'center' }}>
           <div style={{ fontSize: 20 }}>🏛️</div>
           <div style={{ textAlign: 'left' }}>
             <div style={{ fontSize: 12, fontWeight: 700, color: 'rgba(26,26,26,0.85)', marginBottom: 3 }}>
               Built with certified HR professionals.
             </div>
             <div style={{ fontSize: 11, color: 'rgba(26,26,26,0.5)', lineHeight: 1.5 }}>
-              Trusted by hiring managers across the Middle East, North America, Europe, Australia, and beyond.
+              Trusted by hiring managers across the USA, Australia, Canada, UK, Middle East, South Africa, and beyond.
             </div>
           </div>
         </div>

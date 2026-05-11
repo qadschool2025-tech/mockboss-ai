@@ -36,6 +36,14 @@ const STEPS = [
   { id: 4, label: 'Ready', icon: '🚀' },
 ]
 
+// Brand Component — used everywhere "Barbaros" appears
+const Barbaros = () => (
+  <span style={{ fontWeight: 900 }}>
+    <span style={{ color: '#1A1A1A' }}>Barbar</span>
+    <span style={{ color: '#CC785C' }}>os</span>
+  </span>
+)
+
 export default function OnboardingPage() {
   const router = useRouter()
   const fileRef = useRef<HTMLInputElement>(null)
@@ -182,8 +190,8 @@ export default function OnboardingPage() {
 
       {/* Nav — matches Landing */}
       <nav style={{ background: '#F5F1EB', borderBottom: '0.5px solid #E5DDD0', padding: '14px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div onClick={() => router.push('/')} style={{ fontWeight: 900, fontSize: 22, letterSpacing: -0.5, cursor: 'pointer' }}>
-          <span style={{ color: '#1A1A1A' }}>Barbar</span><span style={{ color: '#CC785C' }}>os</span>
+        <div onClick={() => router.push('/')} style={{ fontSize: 22, letterSpacing: -0.5, cursor: 'pointer' }}>
+          <Barbaros />
         </div>
         <div style={{ fontSize: 12, color: 'rgba(26,26,26,0.5)', fontWeight: 600 }}>
           Step {step} of 4
@@ -231,7 +239,7 @@ export default function OnboardingPage() {
                 Tell us about yourself
               </h2>
               <p style={{ fontSize: 13, color: 'rgba(26,26,26,0.6)', marginBottom: 28, lineHeight: 1.6 }}>
-                Your <strong style={{ color: '#CC785C', fontWeight: 700 }}>Certified HR Expert</strong> will greet you by name and adapt the interview to you.
+                Your <strong style={{ color: '#1A1A1A', fontWeight: 800 }}><Barbaros /> Interviewer</strong> will greet you by name and adapt the interview to you.
               </p>
 
               <div style={{ marginBottom: 20 }}>
@@ -338,7 +346,7 @@ export default function OnboardingPage() {
                 Your CV
               </h2>
               <p style={{ fontSize: 13, color: 'rgba(26,26,26,0.6)', marginBottom: 10, lineHeight: 1.6 }}>
-                Your <strong style={{ color: '#CC785C', fontWeight: 700 }}>Certified HR Expert</strong> reads your CV before the interview begins — and will question every detail.
+                Your <strong style={{ color: '#1A1A1A', fontWeight: 800 }}><Barbaros /> Interviewer</strong> reads your CV before the interview begins — and will question every detail.
               </p>
 
               <div style={{
@@ -373,14 +381,14 @@ export default function OnboardingPage() {
                       {isParsingCV ? (
                         <div>
                           <div style={{ fontSize: 28, marginBottom: 10 }}>⏳</div>
-                          <div style={{ fontSize: 14, color: '#CC785C', fontWeight: 700 }}>Your HR Expert is reading your CV...</div>
+                          <div style={{ fontSize: 14, color: '#CC785C', fontWeight: 700 }}>Your Interviewer is reading your CV...</div>
                           <div style={{ fontSize: 11, color: 'rgba(26,26,26,0.5)', marginTop: 4 }}>Please wait</div>
                         </div>
                       ) : cvReady && cvFileName ? (
                         <div>
                           <div style={{ fontSize: 28, marginBottom: 8 }}>✅</div>
                           <div style={{ fontSize: 13, color: '#22C55E', fontWeight: 700 }}>{cvFileName}</div>
-                          <div style={{ fontSize: 11, color: 'rgba(26,26,26,0.5)', marginTop: 4 }}>CV ready — your HR Expert has reviewed your profile</div>
+                          <div style={{ fontSize: 11, color: 'rgba(26,26,26,0.5)', marginTop: 4 }}>CV ready — your Interviewer has reviewed your profile</div>
                         </div>
                       ) : cvFileName ? (
                         <div>
@@ -414,7 +422,7 @@ export default function OnboardingPage() {
                       style={{ ...inputStyle(false), resize: 'vertical', lineHeight: 1.6 }}
                     />
                     {data.cvText.trim().length > 50 && !cvFileName && (
-                      <div style={{ fontSize: 11, color: '#22C55E', marginTop: 6, fontWeight: 600 }}>✓ CV text received — your HR Expert will read this</div>
+                      <div style={{ fontSize: 11, color: '#22C55E', marginTop: 6, fontWeight: 600 }}>✓ CV text received — your Interviewer will read this</div>
                     )}
                   </div>
 
@@ -479,7 +487,7 @@ export default function OnboardingPage() {
                   }}>
                     Add your CV later to <span style={{ color: '#CC785C', fontWeight: 700 }}>unlock deeper, personalized questions.</span>
                     <br />
-                    Your Certified HR Expert will conduct the interview based on your role and experience.
+                    Your <Barbaros /> Interviewer will conduct the interview based on your role and experience.
                   </div>
                   <button
                     onClick={() => { setCvSkipped(false); setCvReady(false); set('cvText', '') }}
@@ -508,7 +516,7 @@ export default function OnboardingPage() {
                 You are ready, {data.candidateName.split(' ')[0]}
               </h2>
               <p style={{ fontSize: 13, color: 'rgba(26,26,26,0.6)', marginBottom: 28, lineHeight: 1.7 }}>
-                Your <strong style={{ color: '#CC785C', fontWeight: 700 }}>Certified HR Expert at Barbaros</strong> has reviewed your profile. Hold the mic button while answering and speak clearly.
+                Your <strong style={{ color: '#1A1A1A', fontWeight: 800 }}><Barbaros /> Interviewer</strong> has reviewed your profile. Hold the mic button while answering and speak clearly.
               </p>
 
               <div style={{
@@ -619,8 +627,8 @@ export default function OnboardingPage() {
         flexWrap: 'wrap',
         gap: 8
       }}>
-        <div style={{ fontWeight: 900, fontSize: 14 }}>
-          <span style={{ color: '#1A1A1A' }}>Barbar</span><span style={{ color: '#CC785C' }}>os</span>
+        <div style={{ fontSize: 14 }}>
+          <Barbaros />
         </div>
         <div style={{ fontSize: 11, color: 'rgba(26,26,26,0.4)' }}>© 2026 Barbaros. All rights reserved.</div>
         <div style={{ fontSize: 11, color: 'rgba(26,26,26,0.4)' }}>Powered by AI</div>

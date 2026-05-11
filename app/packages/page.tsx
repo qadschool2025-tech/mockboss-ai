@@ -16,16 +16,17 @@ const PLANS = [
     badgeColor: '#CC785C',
     scale: 1,
     mode: '🎙️ Real Interview',
-    duration: '15 min',
-    sessions: 'Pay as you go',
+    duration: '15',
+    durationUnit: 'min',
+    sessions: '1',
+    sessionsLabel: 'Pay as you go',
     taglineEn: 'The cost of a coffee. The value of a career.',
-    taglineAr: 'كلفة كوب قهوة. قيمة وظيفة عمر.',
     features: [
       'Real Interview — AI-powered live voice session with Adam Reid',
       'Detailed Report — fair evaluation based on professional hiring standards',
       'Language Choice — English · Australian · UK · Arabic · Mixed',
       'Voice confidence & hesitation analysis',
-      'Instant scoring per answer',
+      'Standardized questions tailored to your job requirements',
       'No commitment — pay per session',
     ],
     cta: 'Start Session',
@@ -45,16 +46,17 @@ const PLANS = [
     badgeColor: '#fff',
     scale: 1.05,
     mode: '🎙️ Real Interview',
-    duration: '30 min',
-    sessions: '10 sessions/month',
+    duration: '30',
+    durationUnit: 'min',
+    sessions: '10',
+    sessionsLabel: 'per month',
     taglineEn: 'Ten rehearsals — before the one that changes everything.',
-    taglineAr: 'عشر مقابلات تدريبية... قبل المقابلة التي ستغيّر حياتك.',
     features: [
       'Real Interview — AI-powered live voice session with Adam Reid',
       'Detailed Report — fair evaluation based on professional hiring standards',
       'Language Choice — English · Australian · UK · Arabic · Mixed',
       'Voice confidence & hesitation analysis',
-      'CV-based targeted questions',
+      'Standardized questions tailored to your job requirements',
       '10 full sessions per month',
     ],
     cta: 'Get Pro',
@@ -74,16 +76,17 @@ const PLANS = [
     badgeColor: '#F5F1EB',
     scale: 1,
     mode: '🎙️ Real Interview',
-    duration: '60 min',
-    sessions: '20 sessions/month',
+    duration: '60',
+    durationUnit: 'min',
+    sessions: '20',
+    sessionsLabel: 'per month',
     taglineEn: 'Twenty interviews — until "you\'re hired" stops surprising you.',
-    taglineAr: 'عشرون مقابلة. حتى تصبح كلمة "مقبول" هي المتوقع — لا المفاجأة.',
     features: [
       'Real Interview — AI-powered live voice session with Adam Reid',
       'Detailed Report — fair evaluation based on professional hiring standards',
       'Language Choice — English · Australian · UK · Arabic · Mixed',
       'Voice confidence & hesitation analysis',
-      'CV-based targeted questions',
+      'Standardized questions tailored to your job requirements',
       '20 full sessions per month',
       'Priority processing & dedicated support',
     ],
@@ -168,13 +171,10 @@ export default function PackagesPage() {
                 {plan.name}
               </div>
 
-              {/* Tagline (EN + AR) */}
+              {/* Tagline (EN only) */}
               <div style={{ marginBottom: 16, paddingBottom: 16, borderBottom: '0.5px solid rgba(26,26,26,0.1)' }}>
-                <p style={{ fontSize: 13, fontWeight: 700, color: '#1A1A1A', lineHeight: 1.4, margin: '0 0 6px', letterSpacing: -0.2 }}>
+                <p style={{ fontSize: 13, fontWeight: 700, color: '#1A1A1A', lineHeight: 1.4, margin: 0, letterSpacing: -0.2 }}>
                   {plan.taglineEn}
-                </p>
-                <p style={{ fontSize: 12, color: plan.accent, lineHeight: 1.6, margin: 0, fontWeight: 600, direction: 'rtl', textAlign: 'right' }}>
-                  {plan.taglineAr}
                 </p>
               </div>
 
@@ -184,17 +184,50 @@ export default function PackagesPage() {
                 <span style={{ fontSize: 14, color: 'rgba(26,26,26,0.5)', marginLeft: 4 }}>{plan.period}</span>
               </div>
 
-              {/* Mode + Duration + Sessions */}
-              <div style={{ display: 'flex', gap: 8, marginBottom: 22, flexWrap: 'wrap' }}>
-                <span style={{ fontSize: 11, padding: '5px 11px', background: '#FFFFFF', borderRadius: 20, border: `0.5px solid ${plan.border}`, color: '#1A1A1A', fontWeight: 600 }}>
+              {/* Real Interview badge — small */}
+              <div style={{ marginBottom: 14 }}>
+                <span style={{ fontSize: 11, padding: '5px 11px', background: '#FFFFFF', borderRadius: 20, border: `0.5px solid ${plan.border}`, color: '#1A1A1A', fontWeight: 600, display: 'inline-block' }}>
                   {plan.mode}
                 </span>
-                <span style={{ fontSize: 11, padding: '5px 11px', background: '#FFFFFF', borderRadius: 20, border: `0.5px solid ${plan.border}`, color: '#1A1A1A', fontWeight: 600 }}>
-                  ⏱ {plan.duration}
-                </span>
-                <span style={{ fontSize: 11, padding: '5px 11px', background: '#FFFFFF', borderRadius: 20, border: `0.5px solid ${plan.border}`, color: '#1A1A1A', fontWeight: 600 }}>
-                  🔁 {plan.sessions}
-                </span>
+              </div>
+
+              {/* Duration + Sessions — BIG & BOLD highlight boxes */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 22 }}>
+                {/* Duration Box */}
+                <div style={{
+                  background: plan.accent,
+                  borderRadius: 12,
+                  padding: '14px 10px',
+                  textAlign: 'center',
+                  boxShadow: '0 4px 14px rgba(204,120,92,0.25)',
+                }}>
+                  <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.8)', fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 2 }}>
+                    ⏱ Duration
+                  </div>
+                  <div style={{ fontSize: 26, fontWeight: 900, color: '#fff', lineHeight: 1, letterSpacing: -1 }}>
+                    {plan.duration}
+                    <span style={{ fontSize: 13, fontWeight: 600, marginLeft: 2 }}>{plan.durationUnit}</span>
+                  </div>
+                </div>
+
+                {/* Sessions Box */}
+                <div style={{
+                  background: '#1A1A1A',
+                  borderRadius: 12,
+                  padding: '14px 10px',
+                  textAlign: 'center',
+                  boxShadow: '0 4px 14px rgba(26,26,26,0.25)',
+                }}>
+                  <div style={{ fontSize: 10, color: 'rgba(245,241,235,0.7)', fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 2 }}>
+                    🔁 Sessions
+                  </div>
+                  <div style={{ fontSize: 26, fontWeight: 900, color: '#F5F1EB', lineHeight: 1, letterSpacing: -1 }}>
+                    {plan.sessions}
+                  </div>
+                  <div style={{ fontSize: 9, color: 'rgba(245,241,235,0.6)', fontWeight: 500, marginTop: 2 }}>
+                    {plan.sessionsLabel}
+                  </div>
+                </div>
               </div>
 
               {/* Features */}
@@ -263,7 +296,6 @@ export default function PackagesPage() {
           <span style={{ color: '#1A1A1A' }}>Barbar</span><span style={{ color: '#CC785C' }}>os</span>
         </div>
         <div style={{ fontSize: 11, color: 'rgba(26,26,26,0.4)' }}>© 2026 Barbaros. All rights reserved.</div>
-        <div style={{ fontSize: 11, color: 'rgba(26,26,26,0.4)' }}>Powered by AI</div>
       </footer>
 
     </div>

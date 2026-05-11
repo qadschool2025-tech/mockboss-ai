@@ -22,11 +22,11 @@ const PLANS = [
     sessionsLabel: 'Pay as you go',
     taglineEn: 'The cost of a coffee. The value of a career.',
     features: [
+      'Standardized interview tailored to your job requirements',
       'Real Interview — AI-powered live voice session with Adam Reid',
       'Detailed Report — fair evaluation based on professional hiring standards',
       'Language Choice — English · Arabic',
       'Voice confidence & hesitation analysis',
-      'Standardized interview tailored to your job requirements',
       'No commitment — pay per session',
     ],
     cta: 'Start Session',
@@ -52,11 +52,11 @@ const PLANS = [
     sessionsLabel: 'per month',
     taglineEn: 'Ten rehearsals — before the one that changes everything.',
     features: [
+      'Standardized interview tailored to your job requirements',
       'Real Interview — AI-powered live voice session with Adam Reid',
       'Detailed Report — fair evaluation based on professional hiring standards',
       'Language Choice — English · Arabic',
       'Voice confidence & hesitation analysis',
-      'Standardized interview tailored to your job requirements',
       '10 full sessions per month',
     ],
     cta: 'Get Pro',
@@ -82,11 +82,11 @@ const PLANS = [
     sessionsLabel: 'per month',
     taglineEn: 'Twenty interviews — until "you\'re hired" stops surprising you.',
     features: [
+      'Standardized interview tailored to your job requirements',
       'Real Interview — AI-powered live voice session with Adam Reid',
       'Detailed Report — fair evaluation based on professional hiring standards',
       'Language Choice — English · Arabic',
       'Voice confidence & hesitation analysis',
-      'Standardized interview tailored to your job requirements',
       '20 full sessions per month',
       'Priority processing & dedicated support',
     ],
@@ -171,7 +171,7 @@ export default function PackagesPage() {
                 {plan.name}
               </div>
 
-              {/* Tagline (EN only) */}
+              {/* Tagline */}
               <div style={{ marginBottom: 16, paddingBottom: 16, borderBottom: '0.5px solid rgba(26,26,26,0.1)' }}>
                 <p style={{ fontSize: 13, fontWeight: 700, color: '#1A1A1A', lineHeight: 1.4, margin: 0, letterSpacing: -0.2 }}>
                   {plan.taglineEn}
@@ -191,42 +191,18 @@ export default function PackagesPage() {
                 </span>
               </div>
 
-              {/* Duration + Sessions — BIG & BOLD highlight boxes */}
+              {/* Duration + Sessions boxes */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 22 }}>
-                {/* Duration Box */}
-                <div style={{
-                  background: plan.accent,
-                  borderRadius: 12,
-                  padding: '14px 10px',
-                  textAlign: 'center',
-                  boxShadow: '0 4px 14px rgba(204,120,92,0.25)',
-                }}>
-                  <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.8)', fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 2 }}>
-                    ⏱ Duration
-                  </div>
+                <div style={{ background: plan.accent, borderRadius: 12, padding: '14px 10px', textAlign: 'center', boxShadow: '0 4px 14px rgba(204,120,92,0.25)' }}>
+                  <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.8)', fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 2 }}>⏱ Duration</div>
                   <div style={{ fontSize: 26, fontWeight: 900, color: '#fff', lineHeight: 1, letterSpacing: -1 }}>
-                    {plan.duration}
-                    <span style={{ fontSize: 13, fontWeight: 600, marginLeft: 2 }}>{plan.durationUnit}</span>
+                    {plan.duration}<span style={{ fontSize: 13, fontWeight: 600, marginLeft: 2 }}>{plan.durationUnit}</span>
                   </div>
                 </div>
-
-                {/* Sessions Box */}
-                <div style={{
-                  background: '#1A1A1A',
-                  borderRadius: 12,
-                  padding: '14px 10px',
-                  textAlign: 'center',
-                  boxShadow: '0 4px 14px rgba(26,26,26,0.25)',
-                }}>
-                  <div style={{ fontSize: 10, color: 'rgba(245,241,235,0.7)', fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 2 }}>
-                    🔁 Sessions
-                  </div>
-                  <div style={{ fontSize: 26, fontWeight: 900, color: '#F5F1EB', lineHeight: 1, letterSpacing: -1 }}>
-                    {plan.sessions}
-                  </div>
-                  <div style={{ fontSize: 9, color: 'rgba(245,241,235,0.6)', fontWeight: 500, marginTop: 2 }}>
-                    {plan.sessionsLabel}
-                  </div>
+                <div style={{ background: '#1A1A1A', borderRadius: 12, padding: '14px 10px', textAlign: 'center', boxShadow: '0 4px 14px rgba(26,26,26,0.25)' }}>
+                  <div style={{ fontSize: 10, color: 'rgba(245,241,235,0.7)', fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 2 }}>🔁 Sessions</div>
+                  <div style={{ fontSize: 26, fontWeight: 900, color: '#F5F1EB', lineHeight: 1, letterSpacing: -1 }}>{plan.sessions}</div>
+                  <div style={{ fontSize: 9, color: 'rgba(245,241,235,0.6)', fontWeight: 500, marginTop: 2 }}>{plan.sessionsLabel}</div>
                 </div>
               </div>
 

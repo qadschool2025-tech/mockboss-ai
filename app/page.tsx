@@ -57,9 +57,17 @@ export default function LandingPage() {
         </div>
 
         {/* Subheadline */}
-        <p style={{ fontSize: 16, color: 'rgba(26,26,26,0.6)', maxWidth: 480, lineHeight: 1.7, margin: '0 0 40px' }}>
-          Practice with Adam Reid — your AI interview evaluator. Real questions. Real voice. Real feedback.
-        </p>
+        <div style={{ maxWidth: 560, margin: '0 0 40px' }}>
+          <p style={{ fontSize: 17, color: '#1A1A1A', fontWeight: 700, lineHeight: 1.5, margin: '0 0 12px', letterSpacing: -0.3 }}>
+            For less than the price of a coffee — we'll make sure you sip the next one with your <span style={{ color: '#CC785C' }}>new team</span>. ☕
+          </p>
+          <p style={{ fontSize: 14, color: 'rgba(26,26,26,0.65)', lineHeight: 1.7, margin: '0 0 8px' }}>
+            Real interviews. Real standards. Detailed reports.
+          </p>
+          <p style={{ fontSize: 14, color: 'rgba(26,26,26,0.65)', lineHeight: 1.7, margin: 0, fontStyle: 'italic' }}>
+            When opportunity knocks, be the one who's ready.
+          </p>
+        </div>
 
         {/* CTA Buttons */}
         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', justifyContent: 'center', marginBottom: 60 }}>

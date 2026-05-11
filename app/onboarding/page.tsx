@@ -21,7 +21,12 @@ const SECTORS = [
 ]
 
 const EXPERIENCE_LEVELS = [
-  'Less than 1 year', '1-3 years', '3-5 years', '5-10 years', '10+ years'
+  'Fresh Graduate',
+  'Less than 1 year',
+  '1-3 years',
+  '3-5 years',
+  '5-10 years',
+  '10+ years'
 ]
 
 const STEPS = [
@@ -317,7 +322,7 @@ export default function OnboardingPage() {
                       onClick={() => set('yearsExperience', lvl)}
                       style={{ ...chipStyle, ...(data.yearsExperience === lvl ? chipActive : {}), fontSize: 11 }}
                     >
-                      {lvl}
+                      {lvl === 'Fresh Graduate' ? '🎓 ' + lvl : lvl}
                     </button>
                   ))}
                 </div>
@@ -447,18 +452,34 @@ export default function OnboardingPage() {
                 </>
               )}
 
-              {/* Skipped CV State */}
+              {/* Skipped CV State — Option C */}
               {cvSkipped && (
                 <div style={{
                   textAlign: 'center',
-                  padding: '24px 20px',
-                  background: 'rgba(220,38,38,0.05)',
-                  border: '0.5px solid rgba(220,38,38,0.25)',
-                  borderRadius: 12
+                  padding: '28px 22px',
+                  background: 'linear-gradient(135deg, rgba(204,120,92,0.08), rgba(204,120,92,0.03))',
+                  border: '0.5px solid rgba(204,120,92,0.3)',
+                  borderRadius: 14
                 }}>
-                  <div style={{ fontSize: 24, marginBottom: 10 }}>⚠️</div>
-                  <div style={{ fontSize: 13, color: 'rgba(26,26,26,0.7)', lineHeight: 1.6, marginBottom: 14 }}>
-                    No CV provided. Adam will conduct a general interview — but a CV would have made this 3x more targeted.
+                  <div style={{ fontSize: 28, marginBottom: 12 }}>🚀</div>
+                  <div style={{
+                    fontSize: 15,
+                    color: '#1A1A1A',
+                    fontWeight: 800,
+                    marginBottom: 8,
+                    letterSpacing: -0.3,
+                  }}>
+                    You're ready to start.
+                  </div>
+                  <div style={{
+                    fontSize: 13,
+                    color: 'rgba(26,26,26,0.65)',
+                    lineHeight: 1.7,
+                    marginBottom: 16,
+                  }}>
+                    Add your CV later to <span style={{ color: '#CC785C', fontWeight: 700 }}>unlock deeper, personalized questions.</span>
+                    <br />
+                    Adam will conduct your interview based on your role and experience.
                   </div>
                   <button
                     onClick={() => { setCvSkipped(false); setCvReady(false); set('cvText', '') }}
@@ -472,7 +493,7 @@ export default function OnboardingPage() {
                       fontFamily: 'inherit',
                       fontWeight: 700,
                     }}>
-                    Add CV instead
+                    Add CV now instead
                   </button>
                 </div>
               )}

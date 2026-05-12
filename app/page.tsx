@@ -1,327 +1,151 @@
 'use client'
 
-import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 
-interface ScoreData {
-  score: number
-  clarity: number
-  confidence: number
-  relevance: number
-  technical_depth: number
-  structure: number
-  communication: number
-  problem_solving: number
-  leadership: number
-  hesitation_signals: number
-  question_type: string
-  coaching_note: string
-  notes: string
-}
-
-interface Message {
-  role: 'user' | 'assistant'
-  content: string
-  score?: ScoreData
-  coaching_note?: string
-  question_type?: string
-}
-
-const Barbaros = ({ size = 22 }: { size?: number }) => (
-  <span style={{ fontWeight: 900, fontSize: size }}>
-    <span style={{ color: '#1A1A1A' }}>Barbar</span>
-    <span style={{ color: '#CC785C' }}>os</span>
-  </span>
-)
-
-function ScoreCircle({ score }: { score: number }) {
-  const radius = 54
-  const circumference = 2 * Math.PI * radius
-  const offset = circumference - (score / 100) * circumference
-  const color = score >= 70 ? '#22C55E' : score >= 50 ? '#F59E0B' : '#EF4444'
-
-  return (
-    <div style={{ position: 'relative', width: 140, height: 140, margin: '0 auto' }}>
-      <svg width="140" height="140" style={{ transform: 'rotate(-90deg)' }}>
-        <circle cx="70" cy="70" r={radius} fill="none" stroke="#E5DDD0" strokeWidth="10" />
-        <circle
-          cx="70" cy="70" r={radius} fill="none"
-          stroke={color} strokeWidth="10"
-          strokeDasharray={circumference}
-          strokeDashoffset={offset}
-          strokeLinecap="round"
-          style={{ transition: 'stroke-dashoffset 1s ease' }}
-        />
-      </svg>
-      <div style={{
-        position: 'absolute', top: '50%', left: '50%',
-        transform: 'translate(-50%, -50%)',
-        textAlign: 'center'
-      }}>
-        <div style={{ fontSize: 32, fontWeight: 900, color, lineHeight: 1 }}>{score}</div>
-        <div style={{ fontSize: 11, color: 'rgba(26,26,26,0.45)', fontWeight: 600 }}>/100</div>
-      </div>
-    </div>
-  )
-}
-
-function getReadiness(score: number): { label: string; color: string; bg: string; border: string; icon: string; message: string } {
-  if (score >= 70) return {
-    label: 'Ready for Interview',
-    color: '#16A34A',
-    bg: 'rgba(34,197,94,0.08)',
-    border: 'rgba(34,197,94,0.3)',
-    icon: '✅',
-    message: 'Your performance meets professional hiring standards. You are prepared to face a real interview.'
-  }
-  if (score >= 50) return {
-    label: 'Borderline',
-    color: '#D97706',
-    bg: 'rgba(245,158,11,0.08)',
-    border: 'rgba(245,158,11,0.3)',
-    icon: '⚠️',
-    message: 'You have the foundation but need sharper answers. Review your weak areas before the real interview.'
-  }
-  return {
-    label: 'Not Ready',
-    color: '#DC2626',
-    bg: 'rgba(220,38,38,0.08)',
-    border: 'rgba(220,38,38,0.3)',
-    icon: '❌',
-    message: 'Significant gaps were detected in your performance. More practice is needed before you are interview-ready.'
-  }
-}
-
-export default function SessionEndPage() {
+export default function LandingPage() {
   const router = useRouter()
-  const [score, setScore] = useState<number>(0)
-  const [messages, setMessages] = useState<Message[]>([])
-  const [config, setConfig] = useState<any>(null)
-  const [questionCount, setQuestionCount] = useState(0)
-  const [topStrengths, setTopStrengths] = useState<string[]>([])
-  const [topWeaknesses, setTopWeaknesses] = useState<string[]>([])
-
-  useEffect(() => {
-    try {
-      const savedScore = sessionStorage.getItem('barbaros_score')
-      const savedMessages = sessionStorage.getItem('barbaros_messages')
-      const savedConfig = sessionStorage.getItem('barbaros_config')
-
-      if (savedScore) setScore(Number(savedScore))
-      if (savedMessages) {
-        const msgs: Message[] = JSON.parse(savedMessages)
-        setMessages(msgs)
-
-        const scored = msgs.filter(m => m.score && typeof m.score.score === 'number')
-        setQuestionCount(scored.length)
-
-        // Detect strengths and weaknesses from scores
-        const criteria = ['clarity', 'confidence', 'relevance', 'technical_depth', 'structure', 'communication', 'problem_solving', 'leadership']
-        const averages: Record<string, number> = {}
-        criteria.forEach(c => {
-          const vals = scored.map((m: any) => m.score?.[c] ?? 0).filter((v: number) => v > 0)
-          averages[c] = vals.length ? Math.round(vals.reduce((a: number, b: number) => a + b, 0) / vals.length) : 0
-        })
-
-        const sorted = Object.entries(averages).sort((a, b) => b[1] - a[1])
-        setTopStrengths(sorted.slice(0, 2).map(([k]) => k.replace('_', ' ')))
-        setTopWeaknesses(sorted.slice(-2).map(([k]) => k.replace('_', ' ')))
-      }
-      if (savedConfig) setConfig(JSON.parse(savedConfig))
-    } catch {}
-  }, [])
-
-  const readiness = getReadiness(score)
-
-  const formatCriteria = (s: string) =>
-    s.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
 
   return (
-    <div style={{
-      fontFamily: 'system-ui, sans-serif',
-      background: '#F5F1EB',
-      color: '#1A1A1A',
-      minHeight: '100vh',
-      display: 'flex',
-      flexDirection: 'column'
-    }}>
+    <div style={{ fontFamily: 'system-ui, sans-serif', background: '#F5F1EB', color: '#1A1A1A', minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
 
       {/* Nav */}
-      <nav style={{
-        background: '#F5F1EB',
-        borderBottom: '0.5px solid #E5DDD0',
-        padding: '14px 24px',
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center'
-      }}>
-        <div onClick={() => router.push('/')} style={{ cursor: 'pointer' }}>
-          <Barbaros size={22} />
+      <nav style={{ background: '#F5F1EB', borderBottom: '0.5px solid #E5DDD0', padding: '14px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ fontWeight: 900, fontSize: 22, letterSpacing: -0.5 }}>
+          <span style={{ color: '#1A1A1A' }}>Barbar</span><span style={{ color: '#CC785C' }}>os</span>
         </div>
-        <div style={{ fontSize: 12, color: 'rgba(26,26,26,0.5)', fontWeight: 600 }}>
-          Session Complete
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+          <button onClick={() => router.push('/packages')}
+            style={{ background: 'none', border: 'none', color: 'rgba(26,26,26,0.6)', fontSize: 13, cursor: 'pointer', fontFamily: 'inherit' }}>
+            Pricing
+          </button>
+          <button onClick={() => router.push('/onboarding')}
+            style={{ background: '#1A1A1A', border: 'none', color: '#F5F1EB', fontSize: 13, fontWeight: 700, padding: '8px 18px', borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit' }}>
+            Get Started
+          </button>
         </div>
-        <div style={{ width: 60 }} />
       </nav>
 
-      <main style={{
-        flex: 1,
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        padding: '40px 16px 60px'
-      }}>
-        <div style={{ width: '100%', maxWidth: 520 }}>
+      <main style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '60px 24px', textAlign: 'center' }}>
 
-          {/* Header */}
-          <div style={{ textAlign: 'center', marginBottom: 32 }}>
-            <div style={{ fontSize: 48, marginBottom: 12 }}>🎯</div>
-            <h1 style={{ fontSize: 26, fontWeight: 900, color: '#1A1A1A', letterSpacing: -0.5, margin: '0 0 8px' }}>
-              Interview Complete
-            </h1>
-            {config && (
-              <p style={{ fontSize: 13, color: 'rgba(26,26,26,0.55)', margin: 0 }}>
-                {config.candidateName} · {config.jobTitle} · {config.institution}
-              </p>
-            )}
-          </div>
-
-          {/* Score Circle */}
-          <div style={{
-            background: '#FFFFFF',
-            border: '0.5px solid #E5DDD0',
-            borderRadius: 20,
-            padding: '32px 24px',
-            textAlign: 'center',
-            marginBottom: 16,
-            boxShadow: '0 1px 4px rgba(0,0,0,0.06)'
-          }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: 'rgba(26,26,26,0.45)', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 20 }}>
-              Overall Performance Score
+        {/* Trust Badge */}
+        <div style={{ width: '100%', maxWidth: 700, marginBottom: 32, background: '#F5F1EB', border: '0.5px solid #E5DDD0', borderRadius: 12, padding: '16px 24px', display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap', justifyContent: 'center' }}>
+          <div style={{ fontSize: 20 }}>🏛️</div>
+          <div style={{ textAlign: 'left' }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'rgba(26,26,26,0.85)', marginBottom: 3 }}>
+              Built with certified HR professionals.
             </div>
-            <ScoreCircle score={score} />
-            <div style={{ fontSize: 12, color: 'rgba(26,26,26,0.45)', marginTop: 16 }}>
-              Based on {questionCount} evaluated {questionCount === 1 ? 'answer' : 'answers'}
+            <div style={{ fontSize: 11, color: 'rgba(26,26,26,0.5)', lineHeight: 1.5 }}>
+              Trusted by hiring managers across the USA, Australia, Canada, UK, Europe, South Africa, and beyond.
             </div>
           </div>
-
-          {/* Readiness Badge */}
-          <div style={{
-            background: readiness.bg,
-            border: `0.5px solid ${readiness.border}`,
-            borderRadius: 16,
-            padding: '20px 24px',
-            marginBottom: 16,
-            textAlign: 'center'
-          }}>
-            <div style={{ fontSize: 28, marginBottom: 8 }}>{readiness.icon}</div>
-            <div style={{ fontSize: 16, fontWeight: 900, color: readiness.color, marginBottom: 8, letterSpacing: -0.3 }}>
-              {readiness.label}
-            </div>
-            <div style={{ fontSize: 13, color: 'rgba(26,26,26,0.65)', lineHeight: 1.6 }}>
-              {readiness.message}
-            </div>
-          </div>
-
-          {/* Strengths & Weaknesses */}
-          {(topStrengths.length > 0 || topWeaknesses.length > 0) && (
-            <div style={{
-              background: '#FFFFFF',
-              border: '0.5px solid #E5DDD0',
-              borderRadius: 16,
-              padding: '20px 24px',
-              marginBottom: 16,
-              display: 'grid',
-              gridTemplateColumns: '1fr 1fr',
-              gap: 16
-            }}>
-              <div>
-                <div style={{ fontSize: 11, fontWeight: 700, color: '#16A34A', letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: 10 }}>
-                  Top Strengths
-                </div>
-                {topStrengths.map((s, i) => (
-                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                    <span style={{ color: '#22C55E', fontSize: 13 }}>↑</span>
-                    <span style={{ fontSize: 12, fontWeight: 600, color: '#1A1A1A' }}>{formatCriteria(s)}</span>
-                  </div>
-                ))}
-              </div>
-              <div>
-                <div style={{ fontSize: 11, fontWeight: 700, color: '#DC2626', letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: 10 }}>
-                  Needs Work
-                </div>
-                {topWeaknesses.map((w, i) => (
-                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                    <span style={{ color: '#EF4444', fontSize: 13 }}>↓</span>
-                    <span style={{ fontSize: 12, fontWeight: 600, color: '#1A1A1A' }}>{formatCriteria(w)}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Interviewer Message */}
-          <div style={{
-            background: 'linear-gradient(135deg, rgba(204,120,92,0.08), rgba(204,120,92,0.03))',
-            border: '0.5px solid rgba(204,120,92,0.25)',
-            borderRadius: 16,
-            padding: '20px 24px',
-            marginBottom: 28
-          }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: '#CC785C', letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: 10 }}>
-              From Your <Barbaros size={11} /> Interviewer
-            </div>
-            <div style={{ fontSize: 13, color: '#1A1A1A', lineHeight: 1.7 }}>
-              {score >= 70
-                ? `Strong performance, ${config?.candidateName?.split(' ')[0] || 'candidate'}. Your full report contains the details that will take you from good to exceptional. Review it carefully.`
-                : score >= 50
-                ? `You showed potential, ${config?.candidateName?.split(' ')[0] || 'candidate'}, but there are clear gaps. Your full report will show exactly where and how to improve.`
-                : `There is work to do, ${config?.candidateName?.split(' ')[0] || 'candidate'}. Your full report identifies every weak point. Use it — that is what it is for.`
-              }
-            </div>
-          </div>
-
-          {/* Action Buttons */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <button
-              onClick={() => router.push('/report')}
-              style={{
-                width: '100%', padding: '15px',
-                background: '#CC785C', border: 'none', borderRadius: 12,
-                color: '#FFFFFF', fontWeight: 800, fontSize: 15,
-                cursor: 'pointer', fontFamily: 'inherit', letterSpacing: -0.3
-              }}>
-              View Full Report →
-            </button>
-            <button
-              onClick={() => router.push('/onboarding')}
-              style={{
-                width: '100%', padding: '14px',
-                background: 'transparent',
-                border: '0.5px solid #E5DDD0',
-                borderRadius: 12, color: '#1A1A1A',
-                fontWeight: 600, fontSize: 14,
-                cursor: 'pointer', fontFamily: 'inherit'
-              }}>
-              Start New Interview
-            </button>
-          </div>
-
         </div>
+
+        {/* Headline */}
+        <h1 style={{ fontSize: 'clamp(32px, 6vw, 64px)', fontWeight: 900, lineHeight: 1.1, margin: '0 0 20px', letterSpacing: -1, maxWidth: 700, color: '#1A1A1A' }}>
+          Walk into your next interview
+          <span style={{ color: '#CC785C' }}> ready to get hired.</span>
+        </h1>
+
+        {/* Quote 1 */}
+        <div style={{ width: '100%', maxWidth: 600, marginBottom: 32, background: 'linear-gradient(135deg, rgba(204,120,92,0.08), rgba(204,120,92,0.03))', border: '0.5px solid rgba(204,120,92,0.25)', borderRadius: 16, padding: '24px' }}>
+          <div style={{ fontSize: 11, color: '#CC785C', fontWeight: 700, letterSpacing: 2, marginBottom: 12, textTransform: 'uppercase' }}>Why Barbaros?</div>
+          <div style={{ fontSize: 'clamp(16px, 2.5vw, 22px)', fontWeight: 900, lineHeight: 1.5, letterSpacing: -0.5, color: '#1A1A1A' }}>
+            ChatGPT will <span style={{ color: 'rgba(26,26,26,0.35)', textDecoration: 'line-through' }}>chat</span> with you.
+            <br />
+            <span style={{ color: '#1A1A1A' }}>Barbar</span><span style={{ color: '#CC785C' }}>os</span> will <span style={{ color: '#CC785C' }}>hire</span> you.
+          </div>
+        </div>
+
+        {/* Subheadline */}
+        <div style={{ maxWidth: 560, margin: '0 0 24px' }}>
+          <p style={{ fontSize: 17, color: '#1A1A1A', fontWeight: 700, lineHeight: 1.5, margin: '0 0 12px', letterSpacing: -0.3 }}>
+            For less than the price of a coffee — we'll make sure you sip the next one with your <span style={{ color: '#CC785C' }}>new team</span>. ☕
+          </p>
+          <p style={{ fontSize: 14, color: 'rgba(26,26,26,0.65)', lineHeight: 1.7, margin: '0 0 8px' }}>
+            Real interviews. Real standards. Detailed reports.
+          </p>
+          <p style={{ fontSize: 14, color: 'rgba(26,26,26,0.65)', lineHeight: 1.7, margin: 0, fontStyle: 'italic' }}>
+            When opportunity knocks, be the one who's ready.
+          </p>
+        </div>
+
+        {/* Global Reach */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 40, flexWrap: 'wrap', justifyContent: 'center' }}>
+          <span style={{ fontSize: 15 }}>🌍</span>
+          <span style={{ fontSize: 13, color: 'rgba(26,26,26,0.55)', lineHeight: 1.6, textAlign: 'center' }}>
+            Available for job seekers in the{' '}
+            <strong style={{ color: '#1A1A1A', fontWeight: 700 }}>USA, Australia, Canada, UK, Europe & beyond.</strong>
+            <br />
+            Interviews in{' '}
+            <strong style={{ color: '#CC785C', fontWeight: 700 }}>your language.</strong>
+          </span>
+        </div>
+
+        {/* CTA Buttons */}
+        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', justifyContent: 'center', marginBottom: 60 }}>
+          <button onClick={() => router.push('/onboarding')}
+            style={{ background: '#CC785C', border: 'none', color: '#fff', fontSize: 15, fontWeight: 800, padding: '14px 32px', borderRadius: 10, cursor: 'pointer', fontFamily: 'inherit', letterSpacing: -0.3 }}>
+            Get Started →
+          </button>
+          <button onClick={() => router.push('/packages')}
+            style={{ background: 'transparent', border: '0.5px solid #E5DDD0', color: '#1A1A1A', fontSize: 15, fontWeight: 600, padding: '14px 32px', borderRadius: 10, cursor: 'pointer', fontFamily: 'inherit' }}>
+            View Plans
+          </button>
+        </div>
+
+        {/* Stats */}
+        <div style={{ display: 'flex', gap: 40, flexWrap: 'wrap', justifyContent: 'center', marginBottom: 60 }}>
+          {[
+            { value: '10K+', label: 'Interviews conducted' },
+            { value: '94%', label: 'Success rate' },
+            { value: '4.9★', label: 'User rating' },
+          ].map((stat, i) => (
+            <div key={i} style={{ textAlign: 'center' }}>
+              <div style={{ fontSize: 26, fontWeight: 900, color: '#1A1A1A' }}>{stat.value}</div>
+              <div style={{ fontSize: 11, color: 'rgba(26,26,26,0.45)', marginTop: 2 }}>{stat.label}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Features */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12, maxWidth: 700, width: '100%', marginBottom: 60 }}>
+          {[
+            { icon: '🎙️', title: 'Real Voice Interview', desc: 'Speak directly with Adam Reid. Your confidence is measured live.' },
+            { icon: '⚡', title: 'Instant Scoring', desc: 'Every answer scored in real-time. No waiting.' },
+            { icon: '📊', title: 'Full Report', desc: 'Detailed performance analysis after every session.' },
+            { icon: '🌐', title: 'Any Language', desc: 'Interview in the language you\'re most confident in.' },
+          ].map((f, i) => (
+            <div key={i} style={{ background: '#FFFFFF', border: '0.5px solid #E5DDD0', borderRadius: 12, padding: '20px 16px', textAlign: 'left' }}>
+              <div style={{ fontSize: 24, marginBottom: 10 }}>{f.icon}</div>
+              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6, color: '#1A1A1A' }}>{f.title}</div>
+              <div style={{ fontSize: 11, color: 'rgba(26,26,26,0.55)', lineHeight: 1.6 }}>{f.desc}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Quote 2 */}
+        <div style={{ width: '100%', maxWidth: 700, marginBottom: 40, background: 'linear-gradient(135deg, rgba(204,120,92,0.06), rgba(204,120,92,0.02))', border: '0.5px solid #E5DDD0', borderRadius: 16, padding: '32px 24px' }}>
+          <div style={{ fontSize: 'clamp(18px, 3vw, 26px)', fontWeight: 900, lineHeight: 1.4, letterSpacing: -0.5, marginBottom: 8, color: '#1A1A1A' }}>
+            Anyone can <span style={{ color: 'rgba(26,26,26,0.35)' }}>practice.</span>
+            <br />
+            <span style={{ color: '#1A1A1A' }}>Barbar</span><span style={{ color: '#CC785C' }}>os</span> makes you <span style={{ color: '#CC785C' }}>ready.</span>
+          </div>
+          <div style={{ fontSize: 12, color: 'rgba(26,26,26,0.4)', marginTop: 12 }}>The closest thing to a real interview.</div>
+        </div>
+
+        {/* Final CTA */}
+        <button onClick={() => router.push('/onboarding')}
+          style={{ background: '#CC785C', border: 'none', color: '#fff', fontSize: 16, fontWeight: 800, padding: '16px 40px', borderRadius: 12, cursor: 'pointer', fontFamily: 'inherit', letterSpacing: -0.3, marginBottom: 60 }}>
+          Get Started →
+        </button>
+
       </main>
 
       {/* Footer */}
-      <footer style={{
-        background: '#EDE6D8',
-        borderTop: '0.5px solid #E5DDD0',
-        padding: '16px 24px',
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        flexWrap: 'wrap',
-        gap: 8
-      }}>
-        <Barbaros size={14} />
+      <footer style={{ background: '#EDE6D8', borderTop: '0.5px solid #E5DDD0', padding: '16px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+        <div style={{ fontWeight: 900, fontSize: 14 }}>
+          <span style={{ color: '#1A1A1A' }}>Barbar</span><span style={{ color: '#CC785C' }}>os</span>
+        </div>
         <div style={{ fontSize: 11, color: 'rgba(26,26,26,0.4)' }}>© 2026 Barbaros. All rights reserved.</div>
         <div style={{ fontSize: 11, color: 'rgba(26,26,26,0.4)' }}>Powered by AI</div>
       </footer>

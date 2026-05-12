@@ -3,8 +3,6 @@
 import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-
 interface MessageScore {
   score: number;
   clarity: number;
@@ -24,8 +22,10 @@ interface MessageScore {
 interface Message {
   role: "user" | "assistant";
   content: string;
-  score?: MessageScore;
+  score?: MessageScore | null;
   rebuilt?: string;
+  coaching_note?: string;
+  question_type?: string;
 }
 
 interface BarbarosConfig {
@@ -65,8 +65,6 @@ interface ReportData {
   readiness: number;
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
 const CRITERIA_LABELS: Record<string, string> = {
   clarity: "Clarity",
   confidence: "Confidence",
@@ -90,8 +88,9 @@ const CRITERIA_ICONS: Record<string, string> = {
 };
 
 function avg(arr: number[]): number {
-  if (!arr.length) return 0;
-  return Math.round(arr.reduce((a, b) => a + b, 0) / arr.length);
+  const valid = arr.filter((v) => typeof v === "number" && !isNaN(v));
+  if (!valid.length) return 0;
+  return Math.round(valid.reduce((a, b) => a + b, 0) / valid.length);
 }
 
 function scoreColor(score: number): string {
@@ -116,8 +115,6 @@ function readinessLabel(pct: number): string {
   return "Not Ready Yet";
 }
 
-// ─── Build Report from sessionStorage ────────────────────────────────────────
-
 function buildReport(): ReportData | null {
   try {
     const rawConfig = sessionStorage.getItem("barbaros_config");
@@ -130,79 +127,74 @@ function buildReport(): ReportData | null {
     const config: BarbarosConfig = JSON.parse(rawConfig);
     const messages: Message[] = JSON.parse(rawMessages);
     const overallScore: number = rawScore ? parseInt(rawScore) : 0;
-    const rebuiltMap: Record<string, string> = rawRebuilt
-      ? JSON.parse(rawRebuilt)
-      : {};
+    const rebuiltMap: Record<string, string> = rawRebuilt ? JSON.parse(rawRebuilt) : {};
 
-    // User answers with scores
-    const scoredAnswers = messages.filter(
-      (m) => m.role === "user" && m.score && m.score.score > 0
+    // ✅ Scores are on assistant messages
+    const scoredAssistant = messages.filter(
+      (m) => m.role === "assistant" && m.score && (m.score as MessageScore).score > 0
     );
 
-    if (!scoredAnswers.length) return null;
+    if (!scoredAssistant.length) return null;
 
-    // Compute per-criteria averages
     const criteriaKeys = [
-      "clarity",
-      "confidence",
-      "relevance",
-      "technical_depth",
-      "structure",
-      "communication",
-      "problem_solving",
-      "leadership",
+      "clarity", "confidence", "relevance", "technical_depth",
+      "structure", "communication", "problem_solving", "leadership",
     ] as const;
 
     const criteria: Record<string, number> = {};
     criteriaKeys.forEach((key) => {
       criteria[key] = avg(
-        scoredAnswers
-          .map((m) => (m.score as MessageScore)[key])
-          .filter((v) => v > 0)
+        scoredAssistant.map((m) => (m.score as MessageScore)[key]).filter((v) => v > 0)
       );
     });
 
-    // Strongest / Weakest
-    const sorted = [...scoredAnswers].sort(
-      (a, b) => (b.score?.score ?? 0) - (a.score?.score ?? 0)
-    );
-    const strongestMsg = sorted[0];
-    const weakestMsg = sorted[sorted.length - 1];
-
-    const getQuestion = (msg: Message): string => {
-      const idx = messages.indexOf(msg);
+    // For strongest/weakest: pair each scored assistant msg with the preceding user msg
+    const pairs: { question: string; answer: string; score: number }[] = [];
+    scoredAssistant.forEach((assistantMsg) => {
+      const idx = messages.indexOf(assistantMsg);
+      // Find the user message just before this assistant message
+      let userAnswer = "";
       for (let i = idx - 1; i >= 0; i--) {
-        if (messages[i].role === "assistant") return messages[i].content;
+        if (messages[i].role === "user") {
+          userAnswer = messages[i].content;
+          break;
+        }
       }
-      return "Interview Question";
-    };
+      // Find the assistant question before the user answer
+      let question = "Interview Question";
+      const userIdx = messages.findIndex((m, i) => i < idx && m.role === "user" && m.content === userAnswer);
+      for (let i = userIdx - 1; i >= 0; i--) {
+        if (messages[i].role === "assistant") {
+          question = messages[i].content;
+          break;
+        }
+      }
+      pairs.push({
+        question,
+        answer: userAnswer,
+        score: (assistantMsg.score as MessageScore).score,
+      });
+    });
 
-    // Filler words / hesitation
+    const sortedPairs = [...pairs].sort((a, b) => b.score - a.score);
+    const strongestAnswer = sortedPairs[0] || { question: "", answer: "", score: 0 };
+    const weakestAnswer = sortedPairs[sortedPairs.length - 1] || { question: "", answer: "", score: 0 };
+
+    // Filler / hesitation
     const fillerWords = avg(
-      scoredAnswers.map((m) => m.score?.hesitation_signals ?? 0)
+      scoredAssistant.map((m) => (m.score as MessageScore).hesitation_signals ?? 0)
     );
 
     // Repeated mistakes from coaching_notes
-    const coachingNotes = scoredAnswers
-      .map((m) => m.score?.coaching_note ?? "")
+    const coachingNotes = scoredAssistant
+      .map((m) => (m.score as MessageScore).coaching_note ?? m.coaching_note ?? "")
       .filter(Boolean);
+
     const mistakeCounts: Record<string, number> = {};
     coachingNotes.forEach((note) => {
       const lower = note.toLowerCase();
-      const patterns = [
-        "vague",
-        "no example",
-        "too short",
-        "off-topic",
-        "filler",
-        "unclear",
-        "repetitive",
-        "structure",
-        "confidence",
-        "eye contact",
-        "pause",
-      ];
-      patterns.forEach((p) => {
+      ["vague", "no example", "too short", "off-topic", "filler", "unclear",
+       "repetitive", "structure", "confidence", "pause"].forEach((p) => {
         if (lower.includes(p)) mistakeCounts[p] = (mistakeCounts[p] || 0) + 1;
       });
     });
@@ -214,51 +206,44 @@ function buildReport(): ReportData | null {
 
     // Hiring risks
     const hiringRisks: string[] = [];
-    if ((criteria.confidence ?? 0) < 55)
-      hiringRisks.push("Low confidence under pressure");
-    if ((criteria.technical_depth ?? 0) < 50)
-      hiringRisks.push("Insufficient technical depth");
-    if ((criteria.structure ?? 0) < 55)
-      hiringRisks.push("Unstructured responses");
+    if ((criteria.confidence ?? 0) < 55) hiringRisks.push("Low confidence under pressure");
+    if ((criteria.technical_depth ?? 0) < 50) hiringRisks.push("Insufficient technical depth");
+    if ((criteria.structure ?? 0) < 55) hiringRisks.push("Unstructured responses");
     if (fillerWords > 60) hiringRisks.push("Excessive filler words");
-    if ((criteria.relevance ?? 0) < 55)
-      hiringRisks.push("Answers lack focus and relevance");
+    if ((criteria.relevance ?? 0) < 55) hiringRisks.push("Answers lack focus and relevance");
     if (!hiringRisks.length) hiringRisks.push("No critical risks identified");
 
     // Improvement plan
     const improvementPlan: string[] = [];
+    const plans: Record<string, string> = {
+      clarity: "Practice the STAR method — Situation, Task, Action, Result",
+      confidence: "Record yourself answering aloud; reduce hedging language",
+      relevance: "Before answering, pause 3 seconds and align to the question",
+      technical_depth: "Prepare 3 deep technical examples from your career",
+      structure: "Use signposting: 'First... Then... Finally...'",
+      communication: "Simplify vocabulary; speak in shorter, clearer sentences",
+      problem_solving: "Prepare case-study examples that show your process",
+      leadership: "Identify and rehearse 2 leadership moments from your experience",
+    };
     criteriaKeys.forEach((key) => {
-      const val = criteria[key] ?? 0;
-      if (val < 60) {
-        const plans: Record<string, string> = {
-          clarity: "Practice the STAR method — Situation, Task, Action, Result",
-          confidence: "Record yourself answering aloud; reduce hedging language",
-          relevance:
-            "Before answering, pause 3 seconds and align to the question",
-          technical_depth: "Prepare 3 deep technical examples from your career",
-          structure: "Use signposting: 'First... Then... Finally...'",
-          communication: "Simplify vocabulary; speak in shorter, clearer sentences",
-          problem_solving: "Prepare case-study examples that show your process",
-          leadership:
-            "Identify and rehearse 2 leadership moments from your experience",
-        };
-        if (plans[key]) improvementPlan.push(plans[key]);
-      }
+      if ((criteria[key] ?? 0) < 60 && plans[key]) improvementPlan.push(plans[key]);
     });
     if (!improvementPlan.length)
-      improvementPlan.push(
-        "Excellent foundation — focus on refining technical depth with concrete examples"
-      );
+      improvementPlan.push("Excellent foundation — focus on refining technical depth with concrete examples");
 
-    // Rebuilt examples
-    const rebuiltExamples = scoredAnswers
+    // Rebuilt examples — match user answers to rebuiltMap
+    const userAnswers = messages.filter((m) => m.role === "user" && !m.content.startsWith("["));
+    const rebuiltExamples = userAnswers
       .filter((m) => rebuiltMap[m.content])
       .slice(0, 3)
-      .map((m) => ({
-        original: m.content,
-        improved: rebuiltMap[m.content],
-        question: getQuestion(m),
-      }));
+      .map((m) => {
+        const idx = messages.indexOf(m);
+        let question = "Interview Question";
+        for (let i = idx - 1; i >= 0; i--) {
+          if (messages[i].role === "assistant") { question = messages[i].content; break; }
+        }
+        return { original: m.content, improved: rebuiltMap[m.content], question };
+      });
 
     // Recruiter evaluation
     const s = overallScore;
@@ -272,40 +257,23 @@ function buildReport(): ReportData | null {
     else
       recruiterEvaluation = `${config.candidateName} would benefit significantly from structured interview preparation. Key competencies were not sufficiently demonstrated. Not recommended for this position at this stage.`;
 
-    const readiness = Math.min(
-      100,
-      Math.round(
-        s * 0.5 +
-          (criteria.confidence ?? 0) * 0.15 +
-          (criteria.technical_depth ?? 0) * 0.2 +
-          (criteria.structure ?? 0) * 0.15
-      )
-    );
+    const readiness = Math.min(100, Math.round(
+      s * 0.5 +
+      (criteria.confidence ?? 0) * 0.15 +
+      (criteria.technical_depth ?? 0) * 0.2 +
+      (criteria.structure ?? 0) * 0.15
+    ));
 
     return {
-      config,
-      messages,
-      overallScore,
+      config, messages, overallScore,
       criteria: criteria as ReportData["criteria"],
-      strongestAnswer: {
-        question: getQuestion(strongestMsg),
-        answer: strongestMsg.content,
-        score: strongestMsg.score?.score ?? 0,
-      },
-      weakestAnswer: {
-        question: getQuestion(weakestMsg),
-        answer: weakestMsg.content,
-        score: weakestMsg.score?.score ?? 0,
-      },
-      repeatedMistakes,
-      fillerWords,
-      hiringRisks,
-      improvementPlan,
-      rebuiltExamples,
-      recruiterEvaluation,
-      readiness,
+      strongestAnswer, weakestAnswer,
+      repeatedMistakes, fillerWords,
+      hiringRisks, improvementPlan, rebuiltExamples,
+      recruiterEvaluation, readiness,
     };
-  } catch {
+  } catch (e) {
+    console.error("buildReport error:", e);
     return null;
   }
 }
@@ -326,156 +294,60 @@ function ScoreCircle({ score, size = 140 }: { score: number; size?: number }) {
   const circumference = 2 * Math.PI * radius;
   const dashOffset = circumference - (score / 100) * circumference;
   const color = scoreColor(score);
-
   return (
-    <div
-      style={{
-        position: "relative",
-        width: size,
-        height: size,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-      }}
-    >
+    <div style={{ position: "relative", width: size, height: size, display: "flex", alignItems: "center", justifyContent: "center" }}>
       <svg width={size} height={size} style={{ position: "absolute", transform: "rotate(-90deg)" }}>
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          fill="none"
-          stroke="#E5DDD0"
-          strokeWidth={8}
-        />
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          fill="none"
-          stroke={color}
-          strokeWidth={8}
-          strokeDasharray={circumference}
-          strokeDashoffset={dashOffset}
-          strokeLinecap="round"
-          style={{ transition: "stroke-dashoffset 1.2s ease" }}
-        />
+        <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke="#E5DDD0" strokeWidth={8} />
+        <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke={color} strokeWidth={8}
+          strokeDasharray={circumference} strokeDashoffset={dashOffset} strokeLinecap="round"
+          style={{ transition: "stroke-dashoffset 1.2s ease" }} />
       </svg>
       <div style={{ textAlign: "center", zIndex: 1 }}>
-        <div style={{ fontSize: size > 100 ? "2rem" : "1.4rem", fontWeight: 800, color: "#1A1A1A", lineHeight: 1 }}>
-          {score}
-        </div>
-        <div style={{ fontSize: "0.65rem", color: "#666", fontWeight: 500, marginTop: 2 }}>
-          / 100
-        </div>
+        <div style={{ fontSize: size > 100 ? "2rem" : "1.4rem", fontWeight: 800, color: "#1A1A1A", lineHeight: 1 }}>{score}</div>
+        <div style={{ fontSize: "0.65rem", color: "#666", fontWeight: 500, marginTop: 2 }}>/ 100</div>
       </div>
     </div>
   );
 }
 
-function CriteriaBar({
-  label,
-  icon,
-  value,
-  delay = 0,
-}: {
-  label: string;
-  icon: string;
-  value: number;
-  delay?: number;
-}) {
+function CriteriaBar({ label, icon, value, delay = 0 }: { label: string; icon: string; value: number; delay?: number }) {
   const [width, setWidth] = useState(0);
   const color = scoreColor(value);
-
   useEffect(() => {
     const t = setTimeout(() => setWidth(value), 200 + delay);
     return () => clearTimeout(t);
   }, [value, delay]);
-
   return (
     <div style={{ marginBottom: "0.85rem" }}>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginBottom: "0.3rem",
-        }}
-      >
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.3rem" }}>
         <span style={{ fontSize: "0.82rem", color: "#1A1A1A", fontWeight: 500, display: "flex", alignItems: "center", gap: "0.35rem" }}>
-          <span style={{ color: "#CC785C", fontSize: "0.9rem" }}>{icon}</span>
-          {label}
+          <span style={{ color: "#CC785C", fontSize: "0.9rem" }}>{icon}</span>{label}
         </span>
         <span style={{ fontSize: "0.82rem", fontWeight: 700, color }}>
-          {value}
-          <span style={{ fontWeight: 400, color: "#999", fontSize: "0.72rem" }}>/100</span>
+          {value}<span style={{ fontWeight: 400, color: "#999", fontSize: "0.72rem" }}>/100</span>
         </span>
       </div>
-      <div
-        style={{
-          height: 7,
-          background: "#E5DDD0",
-          borderRadius: 999,
-          overflow: "hidden",
-        }}
-      >
-        <div
-          style={{
-            height: "100%",
-            width: `${width}%`,
-            background: `linear-gradient(90deg, ${color}88, ${color})`,
-            borderRadius: 999,
-            transition: "width 0.9s cubic-bezier(0.4, 0, 0.2, 1)",
-          }}
-        />
+      <div style={{ height: 7, background: "#E5DDD0", borderRadius: 999, overflow: "hidden" }}>
+        <div style={{
+          height: "100%", width: `${width}%`,
+          background: `linear-gradient(90deg, ${color}88, ${color})`,
+          borderRadius: 999, transition: "width 0.9s cubic-bezier(0.4, 0, 0.2, 1)",
+        }} />
       </div>
     </div>
   );
 }
 
-function SectionCard({
-  title,
-  icon,
-  children,
-  accent = false,
-}: {
-  title: string;
-  icon: string;
-  children: React.ReactNode;
-  accent?: boolean;
-}) {
+function SectionCard({ title, icon, children, accent = false }: { title: string; icon: string; children: React.ReactNode; accent?: boolean }) {
   return (
-    <div
-      style={{
-        background: accent ? "rgba(204, 120, 92, 0.04)" : "#FDFAF6",
-        border: `1px solid ${accent ? "rgba(204, 120, 92, 0.25)" : "#E5DDD0"}`,
-        borderRadius: 12,
-        padding: "1.4rem 1.6rem",
-        marginBottom: "1.2rem",
-      }}
-    >
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: "0.5rem",
-          marginBottom: "1rem",
-          paddingBottom: "0.75rem",
-          borderBottom: "1px solid #E5DDD0",
-        }}
-      >
+    <div style={{
+      background: accent ? "rgba(204, 120, 92, 0.04)" : "#FDFAF6",
+      border: `1px solid ${accent ? "rgba(204, 120, 92, 0.25)" : "#E5DDD0"}`,
+      borderRadius: 12, padding: "1.4rem 1.6rem", marginBottom: "1.2rem",
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "1rem", paddingBottom: "0.75rem", borderBottom: "1px solid #E5DDD0" }}>
         <span style={{ fontSize: "1.1rem" }}>{icon}</span>
-        <h2
-          style={{
-            fontSize: "0.95rem",
-            fontWeight: 700,
-            color: "#1A1A1A",
-            letterSpacing: "0.04em",
-            textTransform: "uppercase",
-            margin: 0,
-          }}
-        >
-          {title}
-        </h2>
+        <h2 style={{ fontSize: "0.95rem", fontWeight: 700, color: "#1A1A1A", letterSpacing: "0.04em", textTransform: "uppercase", margin: 0 }}>{title}</h2>
       </div>
       {children}
     </div>
@@ -489,7 +361,6 @@ export default function ReportPage() {
   const [report, setReport] = useState<ReportData | null>(null);
   const [loading, setLoading] = useState(true);
   const [expandedRebuilt, setExpandedRebuilt] = useState<number | null>(null);
-  const printRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const data = buildReport();
@@ -499,30 +370,10 @@ export default function ReportPage() {
 
   if (loading) {
     return (
-      <div
-        style={{
-          minHeight: "100vh",
-          background: "#F5F1EB",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
+      <div style={{ minHeight: "100vh", background: "#F5F1EB", display: "flex", alignItems: "center", justifyContent: "center" }}>
         <div style={{ textAlign: "center" }}>
-          <div
-            style={{
-              width: 40,
-              height: 40,
-              border: "3px solid #E5DDD0",
-              borderTopColor: "#CC785C",
-              borderRadius: "50%",
-              animation: "spin 0.8s linear infinite",
-              margin: "0 auto 1rem",
-            }}
-          />
-          <p style={{ color: "#666", fontSize: "0.9rem" }}>
-            Generating your report…
-          </p>
+          <div style={{ width: 40, height: 40, border: "3px solid #E5DDD0", borderTopColor: "#CC785C", borderRadius: "50%", animation: "spin 0.8s linear infinite", margin: "0 auto 1rem" }} />
+          <p style={{ color: "#666", fontSize: "0.9rem" }}>Generating your report…</p>
           <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
         </div>
       </div>
@@ -531,30 +382,9 @@ export default function ReportPage() {
 
   if (!report) {
     return (
-      <div
-        style={{
-          minHeight: "100vh",
-          background: "#F5F1EB",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          flexDirection: "column",
-          gap: "1rem",
-        }}
-      >
+      <div style={{ minHeight: "100vh", background: "#F5F1EB", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: "1rem" }}>
         <p style={{ color: "#666" }}>No interview data found.</p>
-        <button
-          onClick={() => router.push("/onboarding")}
-          style={{
-            background: "#CC785C",
-            color: "#fff",
-            border: "none",
-            borderRadius: 8,
-            padding: "0.6rem 1.4rem",
-            cursor: "pointer",
-            fontWeight: 600,
-          }}
-        >
+        <button onClick={() => router.push("/onboarding")} style={{ background: "#CC785C", color: "#fff", border: "none", borderRadius: 8, padding: "0.6rem 1.4rem", cursor: "pointer", fontWeight: 600 }}>
           Start an Interview
         </button>
       </div>
@@ -566,208 +396,61 @@ export default function ReportPage() {
 
   return (
     <div
-      ref={printRef}
       dir={isArabic ? "rtl" : "ltr"}
-      style={{
-        minHeight: "100vh",
-        background: "#F5F1EB",
-        fontFamily:
-          '"Geist", "DM Sans", ui-sans-serif, system-ui, -apple-system, sans-serif',
-        color: "#1A1A1A",
-      }}
+      style={{ minHeight: "100vh", background: "#F5F1EB", fontFamily: '"DM Sans", ui-sans-serif, system-ui, sans-serif', color: "#1A1A1A" }}
     >
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;0,9..40,800;0,9..40,900&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700;800;900&display=swap');
         * { box-sizing: border-box; }
-        @media print {
-          .no-print { display: none !important; }
-          body { background: white; }
-        }
-        @keyframes fadeUp {
-          from { opacity: 0; transform: translateY(16px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
+        @media print { .no-print { display: none !important; } }
+        @keyframes fadeUp { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
         .fade-up { animation: fadeUp 0.5s ease both; }
       `}</style>
 
-      {/* ── Header ── */}
-      <header
-        style={{
-          background: "#1A1A1A",
-          padding: "1rem 2rem",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-        }}
-      >
+      {/* Header */}
+      <header style={{ background: "#1A1A1A", padding: "1rem 2rem", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <BrandLogo />
-        <span
-          style={{
-            fontSize: "0.75rem",
-            color: "#888",
-            letterSpacing: "0.08em",
-            textTransform: "uppercase",
-          }}
-        >
-          Interview Report
-        </span>
+        <span style={{ fontSize: "0.75rem", color: "#888", letterSpacing: "0.08em", textTransform: "uppercase" }}>Interview Report</span>
         <div className="no-print" style={{ display: "flex", gap: "0.5rem" }}>
-          <button
-            onClick={() => window.print()}
-            style={{
-              background: "transparent",
-              border: "1px solid #444",
-              color: "#aaa",
-              borderRadius: 6,
-              padding: "0.35rem 0.9rem",
-              fontSize: "0.78rem",
-              cursor: "pointer",
-            }}
-          >
-            Print
-          </button>
-          <button
-            onClick={() => router.push("/onboarding")}
-            style={{
-              background: "#CC785C",
-              border: "none",
-              color: "#fff",
-              borderRadius: 6,
-              padding: "0.35rem 0.9rem",
-              fontSize: "0.78rem",
-              cursor: "pointer",
-              fontWeight: 600,
-            }}
-          >
-            New Interview
-          </button>
+          <button onClick={() => window.print()} style={{ background: "transparent", border: "1px solid #444", color: "#aaa", borderRadius: 6, padding: "0.35rem 0.9rem", fontSize: "0.78rem", cursor: "pointer" }}>Print</button>
+          <button onClick={() => router.push("/onboarding")} style={{ background: "#CC785C", border: "none", color: "#fff", borderRadius: 6, padding: "0.35rem 0.9rem", fontSize: "0.78rem", cursor: "pointer", fontWeight: 600 }}>New Interview</button>
         </div>
       </header>
 
-      {/* ── Body ── */}
       <main style={{ maxWidth: 860, margin: "0 auto", padding: "2rem 1.25rem 4rem" }}>
 
-        {/* ── Hero: Score + Readiness ── */}
-        <div
-          className="fade-up"
-          style={{
-            background: "#FDFAF6",
-            border: "1px solid #E5DDD0",
-            borderRadius: 16,
-            padding: "2rem",
-            marginBottom: "1.5rem",
-            display: "flex",
-            flexWrap: "wrap",
-            gap: "2rem",
-            alignItems: "center",
-          }}
-        >
-          {/* Score circle */}
+        {/* Hero */}
+        <div className="fade-up" style={{ background: "#FDFAF6", border: "1px solid #E5DDD0", borderRadius: 16, padding: "2rem", marginBottom: "1.5rem", display: "flex", flexWrap: "wrap", gap: "2rem", alignItems: "center" }}>
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "0.5rem" }}>
             <ScoreCircle score={overallScore} size={140} />
-            <span
-              style={{
-                fontSize: "0.78rem",
-                fontWeight: 700,
-                letterSpacing: "0.06em",
-                textTransform: "uppercase",
-                color: scoreColor(overallScore),
-              }}
-            >
+            <span style={{ fontSize: "0.78rem", fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: scoreColor(overallScore) }}>
               {scoreLabel(overallScore)}
             </span>
           </div>
 
-          {/* Info */}
           <div style={{ flex: 1, minWidth: 200 }}>
-            <h1
-              style={{
-                fontSize: "1.5rem",
-                fontWeight: 800,
-                margin: "0 0 0.25rem",
-                color: "#1A1A1A",
-              }}
-            >
-              {config.candidateName}
-            </h1>
-            <p
-              style={{
-                margin: "0 0 1rem",
-                color: "#555",
-                fontSize: "0.9rem",
-              }}
-            >
-              {config.jobTitle}
-              {config.institution ? ` · ${config.institution}` : ""}
-              {config.country ? ` · ${config.country}` : ""}
+            <h1 style={{ fontSize: "1.5rem", fontWeight: 800, margin: "0 0 0.25rem", color: "#1A1A1A" }}>{config.candidateName}</h1>
+            <p style={{ margin: "0 0 1rem", color: "#555", fontSize: "0.9rem" }}>
+              {config.jobTitle}{config.institution ? ` · ${config.institution}` : ""}{config.country ? ` · ${config.country}` : ""}
             </p>
-
-            {/* Readiness bar */}
             <div>
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  marginBottom: "0.4rem",
-                }}
-              >
-                <span style={{ fontSize: "0.8rem", color: "#555", fontWeight: 500 }}>
-                  Job Readiness
-                </span>
-                <span
-                  style={{
-                    fontSize: "0.8rem",
-                    fontWeight: 700,
-                    color: scoreColor(readiness),
-                  }}
-                >
-                  {readiness}% — {readinessLabel(readiness)}
-                </span>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.4rem" }}>
+                <span style={{ fontSize: "0.8rem", color: "#555", fontWeight: 500 }}>Job Readiness</span>
+                <span style={{ fontSize: "0.8rem", fontWeight: 700, color: scoreColor(readiness) }}>{readiness}% — {readinessLabel(readiness)}</span>
               </div>
-              <div
-                style={{
-                  height: 10,
-                  background: "#E5DDD0",
-                  borderRadius: 999,
-                  overflow: "hidden",
-                }}
-              >
-                <div
-                  style={{
-                    height: "100%",
-                    width: `${readiness}%`,
-                    background: `linear-gradient(90deg, #CC785C88, #CC785C)`,
-                    borderRadius: 999,
-                    transition: "width 1.4s cubic-bezier(0.4, 0, 0.2, 1)",
-                  }}
-                />
+              <div style={{ height: 10, background: "#E5DDD0", borderRadius: 999, overflow: "hidden" }}>
+                <div style={{ height: "100%", width: `${readiness}%`, background: "linear-gradient(90deg, #CC785C88, #CC785C)", borderRadius: 999, transition: "width 1.4s cubic-bezier(0.4, 0, 0.2, 1)" }} />
               </div>
             </div>
           </div>
 
-          {/* Stats chips */}
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: "0.6rem",
-              minWidth: 130,
-            }}
-          >
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.6rem", minWidth: 130 }}>
             {[
-              { label: "Questions", value: report.messages.filter((m) => m.role === "user" && m.score).length },
+              { label: "Questions", value: report.messages.filter((m) => m.role === "assistant" && m.score).length },
               { label: "Plan", value: config.plan.charAt(0).toUpperCase() + config.plan.slice(1) },
-              { label: "Experience", value: config.experienceLevel || "—" },
+              { label: "Experience", value: (config as any).yearsExperience || config.experienceLevel || "—" },
             ].map(({ label, value }) => (
-              <div
-                key={label}
-                style={{
-                  background: "#F0EBE3",
-                  borderRadius: 8,
-                  padding: "0.45rem 0.8rem",
-                  fontSize: "0.78rem",
-                }}
-              >
+              <div key={label} style={{ background: "#F0EBE3", borderRadius: 8, padding: "0.45rem 0.8rem", fontSize: "0.78rem" }}>
                 <span style={{ color: "#888" }}>{label}: </span>
                 <span style={{ fontWeight: 700 }}>{value}</span>
               </div>
@@ -775,283 +458,119 @@ export default function ReportPage() {
           </div>
         </div>
 
-        {/* ── 8 Criteria ── */}
+        {/* 8 Criteria */}
         <SectionCard title="Performance Criteria" icon="◈">
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))",
-              gap: "0 2.5rem",
-            }}
-          >
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: "0 2.5rem" }}>
             {Object.entries(criteria).map(([key, val], i) => (
-              <CriteriaBar
-                key={key}
-                label={CRITERIA_LABELS[key] || key}
-                icon={CRITERIA_ICONS[key] || "●"}
-                value={val as number}
-                delay={i * 80}
-              />
+              <CriteriaBar key={key} label={CRITERIA_LABELS[key] || key} icon={CRITERIA_ICONS[key] || "●"} value={val as number} delay={i * 80} />
             ))}
           </div>
         </SectionCard>
 
-        {/* ── Strongest + Weakest ── */}
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fill, minmax(360px, 1fr))",
-            gap: "1.2rem",
-            marginBottom: "1.2rem",
-          }}
-        >
-          {/* Strongest */}
-          <div
-            style={{
-              background: "rgba(76, 175, 122, 0.05)",
-              border: "1px solid rgba(76, 175, 122, 0.3)",
-              borderRadius: 12,
-              padding: "1.3rem 1.5rem",
-            }}
-          >
+        {/* Strongest + Weakest */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(360px, 1fr))", gap: "1.2rem", marginBottom: "1.2rem" }}>
+          <div style={{ background: "rgba(76, 175, 122, 0.05)", border: "1px solid rgba(76, 175, 122, 0.3)", borderRadius: 12, padding: "1.3rem 1.5rem" }}>
             <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.75rem" }}>
-              <span style={{ fontSize: "1rem" }}>✦</span>
-              <span style={{ fontSize: "0.8rem", fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", color: "#4CAF7A" }}>
-                Strongest Answer
-              </span>
-              <span style={{ marginLeft: "auto", fontWeight: 800, color: "#4CAF7A", fontSize: "0.9rem" }}>
-                {report.strongestAnswer.score}/100
-              </span>
+              <span>✦</span>
+              <span style={{ fontSize: "0.8rem", fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", color: "#4CAF7A" }}>Strongest Answer</span>
+              <span style={{ marginLeft: "auto", fontWeight: 800, color: "#4CAF7A", fontSize: "0.9rem" }}>{report.strongestAnswer.score}/100</span>
             </div>
-            <p style={{ fontSize: "0.78rem", color: "#888", marginBottom: "0.5rem", fontStyle: "italic" }}>
-              "{report.strongestAnswer.question.slice(0, 100)}…"
-            </p>
+            {report.strongestAnswer.question && (
+              <p style={{ fontSize: "0.78rem", color: "#888", marginBottom: "0.5rem", fontStyle: "italic" }}>
+                "{report.strongestAnswer.question.slice(0, 100)}{report.strongestAnswer.question.length > 100 ? "…" : ""}"
+              </p>
+            )}
             <p style={{ fontSize: "0.84rem", color: "#1A1A1A", lineHeight: 1.55 }}>
-              {report.strongestAnswer.answer.slice(0, 220)}
-              {report.strongestAnswer.answer.length > 220 ? "…" : ""}
+              {report.strongestAnswer.answer.slice(0, 220)}{report.strongestAnswer.answer.length > 220 ? "…" : ""}
             </p>
           </div>
 
-          {/* Weakest */}
-          <div
-            style={{
-              background: "rgba(200, 75, 75, 0.04)",
-              border: "1px solid rgba(200, 75, 75, 0.25)",
-              borderRadius: 12,
-              padding: "1.3rem 1.5rem",
-            }}
-          >
+          <div style={{ background: "rgba(200, 75, 75, 0.04)", border: "1px solid rgba(200, 75, 75, 0.25)", borderRadius: 12, padding: "1.3rem 1.5rem" }}>
             <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.75rem" }}>
-              <span style={{ fontSize: "1rem" }}>⚠</span>
-              <span style={{ fontSize: "0.8rem", fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", color: "#C84B4B" }}>
-                Weakest Answer
-              </span>
-              <span style={{ marginLeft: "auto", fontWeight: 800, color: "#C84B4B", fontSize: "0.9rem" }}>
-                {report.weakestAnswer.score}/100
-              </span>
+              <span>⚠</span>
+              <span style={{ fontSize: "0.8rem", fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", color: "#C84B4B" }}>Weakest Answer</span>
+              <span style={{ marginLeft: "auto", fontWeight: 800, color: "#C84B4B", fontSize: "0.9rem" }}>{report.weakestAnswer.score}/100</span>
             </div>
-            <p style={{ fontSize: "0.78rem", color: "#888", marginBottom: "0.5rem", fontStyle: "italic" }}>
-              "{report.weakestAnswer.question.slice(0, 100)}…"
-            </p>
+            {report.weakestAnswer.question && (
+              <p style={{ fontSize: "0.78rem", color: "#888", marginBottom: "0.5rem", fontStyle: "italic" }}>
+                "{report.weakestAnswer.question.slice(0, 100)}{report.weakestAnswer.question.length > 100 ? "…" : ""}"
+              </p>
+            )}
             <p style={{ fontSize: "0.84rem", color: "#1A1A1A", lineHeight: 1.55 }}>
-              {report.weakestAnswer.answer.slice(0, 220)}
-              {report.weakestAnswer.answer.length > 220 ? "…" : ""}
+              {report.weakestAnswer.answer.slice(0, 220)}{report.weakestAnswer.answer.length > 220 ? "…" : ""}
             </p>
           </div>
         </div>
 
-        {/* ── Repeated Mistakes + Filler Words ── */}
+        {/* Patterns & Filler */}
         <SectionCard title="Patterns & Filler Words" icon="⟲">
           <div style={{ display: "flex", flexWrap: "wrap", gap: "1.5rem" }}>
             <div style={{ flex: 1, minWidth: 200 }}>
-              <p style={{ fontSize: "0.8rem", color: "#888", marginBottom: "0.6rem", fontWeight: 500 }}>
-                Repeated Patterns
-              </p>
+              <p style={{ fontSize: "0.8rem", color: "#888", marginBottom: "0.6rem", fontWeight: 500 }}>Repeated Patterns</p>
               {report.repeatedMistakes.length ? (
                 <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem" }}>
                   {report.repeatedMistakes.map((m) => (
-                    <span
-                      key={m}
-                      style={{
-                        background: "rgba(200,75,75,0.08)",
-                        color: "#C84B4B",
-                        border: "1px solid rgba(200,75,75,0.2)",
-                        borderRadius: 6,
-                        padding: "0.25rem 0.6rem",
-                        fontSize: "0.78rem",
-                        fontWeight: 600,
-                      }}
-                    >
-                      {m}
-                    </span>
+                    <span key={m} style={{ background: "rgba(200,75,75,0.08)", color: "#C84B4B", border: "1px solid rgba(200,75,75,0.2)", borderRadius: 6, padding: "0.25rem 0.6rem", fontSize: "0.78rem", fontWeight: 600 }}>{m}</span>
                   ))}
                 </div>
               ) : (
-                <span style={{ fontSize: "0.82rem", color: "#666" }}>
-                  No consistent issues detected ✓
-                </span>
+                <span style={{ fontSize: "0.82rem", color: "#666" }}>No consistent issues detected ✓</span>
               )}
             </div>
-
             <div style={{ minWidth: 160, textAlign: "center" }}>
-              <p style={{ fontSize: "0.8rem", color: "#888", marginBottom: "0.5rem", fontWeight: 500 }}>
-                Hesitation Index
-              </p>
-              <div
-                style={{
-                  width: 72,
-                  height: 72,
-                  borderRadius: "50%",
-                  background:
-                    report.fillerWords > 60
-                      ? "rgba(200,75,75,0.1)"
-                      : "rgba(76,175,122,0.1)",
-                  border: `2px solid ${report.fillerWords > 60 ? "#C84B4B" : "#4CAF7A"}`,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  margin: "0 auto",
-                  flexDirection: "column",
-                }}
-              >
-                <span
-                  style={{
-                    fontSize: "1.4rem",
-                    fontWeight: 800,
-                    color: report.fillerWords > 60 ? "#C84B4B" : "#4CAF7A",
-                    lineHeight: 1,
-                  }}
-                >
-                  {report.fillerWords}
-                </span>
+              <p style={{ fontSize: "0.8rem", color: "#888", marginBottom: "0.5rem", fontWeight: 500 }}>Hesitation Index</p>
+              <div style={{ width: 72, height: 72, borderRadius: "50%", background: report.fillerWords > 60 ? "rgba(200,75,75,0.1)" : "rgba(76,175,122,0.1)", border: `2px solid ${report.fillerWords > 60 ? "#C84B4B" : "#4CAF7A"}`, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto", flexDirection: "column" }}>
+                <span style={{ fontSize: "1.4rem", fontWeight: 800, color: report.fillerWords > 60 ? "#C84B4B" : "#4CAF7A", lineHeight: 1 }}>{report.fillerWords}</span>
                 <span style={{ fontSize: "0.6rem", color: "#888" }}>avg/answer</span>
               </div>
             </div>
           </div>
         </SectionCard>
 
-        {/* ── Hiring Risk Factors ── */}
+        {/* Hiring Risks */}
         <SectionCard title="Hiring Risk Factors" icon="⚑" accent>
           <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
             {report.hiringRisks.map((risk, i) => (
-              <div
-                key={i}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "0.6rem",
-                  fontSize: "0.86rem",
-                  color: risk.startsWith("No critical") ? "#4CAF7A" : "#1A1A1A",
-                }}
-              >
-                <span
-                  style={{
-                    width: 6,
-                    height: 6,
-                    borderRadius: "50%",
-                    background: risk.startsWith("No critical") ? "#4CAF7A" : "#C84B4B",
-                    flexShrink: 0,
-                  }}
-                />
+              <div key={i} style={{ display: "flex", alignItems: "center", gap: "0.6rem", fontSize: "0.86rem", color: risk.startsWith("No critical") ? "#4CAF7A" : "#1A1A1A" }}>
+                <span style={{ width: 6, height: 6, borderRadius: "50%", background: risk.startsWith("No critical") ? "#4CAF7A" : "#C84B4B", flexShrink: 0 }} />
                 {risk}
               </div>
             ))}
           </div>
         </SectionCard>
 
-        {/* ── Improvement Plan ── */}
+        {/* Improvement Plan */}
         <SectionCard title="Suggested Improvement Plan" icon="◎">
           <div style={{ display: "flex", flexDirection: "column", gap: "0.6rem" }}>
             {report.improvementPlan.map((item, i) => (
-              <div
-                key={i}
-                style={{
-                  display: "flex",
-                  gap: "0.75rem",
-                  alignItems: "flex-start",
-                  fontSize: "0.86rem",
-                  lineHeight: 1.5,
-                }}
-              >
-                <span
-                  style={{
-                    background: "#CC785C",
-                    color: "#fff",
-                    borderRadius: "50%",
-                    width: 20,
-                    height: 20,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    fontSize: "0.65rem",
-                    fontWeight: 800,
-                    flexShrink: 0,
-                    marginTop: 1,
-                  }}
-                >
-                  {i + 1}
-                </span>
+              <div key={i} style={{ display: "flex", gap: "0.75rem", alignItems: "flex-start", fontSize: "0.86rem", lineHeight: 1.5 }}>
+                <span style={{ background: "#CC785C", color: "#fff", borderRadius: "50%", width: 20, height: 20, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.65rem", fontWeight: 800, flexShrink: 0, marginTop: 1 }}>{i + 1}</span>
                 <span>{item}</span>
               </div>
             ))}
           </div>
         </SectionCard>
 
-        {/* ── Rebuilt Answer Examples ── */}
+        {/* Rebuilt Examples */}
         {report.rebuiltExamples.length > 0 && (
           <SectionCard title="Example Improved Answers" icon="✦">
             <div style={{ display: "flex", flexDirection: "column", gap: "0.8rem" }}>
               {report.rebuiltExamples.map((ex, i) => (
-                <div
-                  key={i}
-                  style={{
-                    border: "1px solid #E5DDD0",
-                    borderRadius: 10,
-                    overflow: "hidden",
-                  }}
-                >
-                  <button
-                    onClick={() => setExpandedRebuilt(expandedRebuilt === i ? null : i)}
-                    style={{
-                      width: "100%",
-                      background: "#F5F1EB",
-                      border: "none",
-                      padding: "0.75rem 1rem",
-                      textAlign: "left",
-                      cursor: "pointer",
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      fontSize: "0.82rem",
-                      color: "#1A1A1A",
-                      fontWeight: 600,
-                    }}
-                  >
-                    <span>
-                      Q{i + 1}: {ex.question.slice(0, 80)}…
-                    </span>
-                    <span style={{ color: "#CC785C", fontSize: "1rem" }}>
-                      {expandedRebuilt === i ? "−" : "+"}
-                    </span>
+                <div key={i} style={{ border: "1px solid #E5DDD0", borderRadius: 10, overflow: "hidden" }}>
+                  <button onClick={() => setExpandedRebuilt(expandedRebuilt === i ? null : i)}
+                    style={{ width: "100%", background: "#F5F1EB", border: "none", padding: "0.75rem 1rem", textAlign: "left", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "0.82rem", color: "#1A1A1A", fontWeight: 600 }}>
+                    <span>Q{i + 1}: {ex.question.slice(0, 80)}…</span>
+                    <span style={{ color: "#CC785C", fontSize: "1rem" }}>{expandedRebuilt === i ? "−" : "+"}</span>
                   </button>
-
                   {expandedRebuilt === i && (
                     <div style={{ padding: "1rem" }}>
                       <div style={{ marginBottom: "0.75rem" }}>
-                        <p style={{ fontSize: "0.72rem", color: "#999", marginBottom: "0.35rem", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                          Your Answer
-                        </p>
-                        <p style={{ fontSize: "0.84rem", color: "#555", lineHeight: 1.55, background: "#F5F1EB", padding: "0.6rem 0.8rem", borderRadius: 6 }}>
-                          {ex.original}
-                        </p>
+                        <p style={{ fontSize: "0.72rem", color: "#999", marginBottom: "0.35rem", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>Your Answer</p>
+                        <p style={{ fontSize: "0.84rem", color: "#555", lineHeight: 1.55, background: "#F5F1EB", padding: "0.6rem 0.8rem", borderRadius: 6 }}>{ex.original}</p>
                       </div>
                       <div>
-                        <p style={{ fontSize: "0.72rem", color: "#CC785C", marginBottom: "0.35rem", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                          Improved Version
-                        </p>
-                        <p style={{ fontSize: "0.84rem", color: "#1A1A1A", lineHeight: 1.6, background: "rgba(204,120,92,0.06)", padding: "0.6rem 0.8rem", borderRadius: 6, borderLeft: "3px solid #CC785C" }}>
-                          {ex.improved}
-                        </p>
+                        <p style={{ fontSize: "0.72rem", color: "#CC785C", marginBottom: "0.35rem", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>Improved Version</p>
+                        <p style={{ fontSize: "0.84rem", color: "#1A1A1A", lineHeight: 1.6, background: "rgba(204,120,92,0.06)", padding: "0.6rem 0.8rem", borderRadius: 6, borderLeft: "3px solid #CC785C" }}>{ex.improved}</p>
                       </div>
                     </div>
                   )}
@@ -1061,114 +580,38 @@ export default function ReportPage() {
           </SectionCard>
         )}
 
-        {/* ── Recruiter Style Evaluation ── */}
-        <div
-          style={{
-            background: "#1A1A1A",
-            borderRadius: 12,
-            padding: "1.5rem 1.8rem",
-            marginBottom: "1.2rem",
-          }}
-        >
+        {/* Recruiter Evaluation */}
+        <div style={{ background: "#1A1A1A", borderRadius: 12, padding: "1.5rem 1.8rem", marginBottom: "1.2rem" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.85rem" }}>
-            <span style={{ fontSize: "1rem" }}>👔</span>
-            <span
-              style={{
-                fontSize: "0.8rem",
-                fontWeight: 700,
-                letterSpacing: "0.06em",
-                textTransform: "uppercase",
-                color: "#CC785C",
-              }}
-            >
-              Recruiter Evaluation
-            </span>
+            <span>👔</span>
+            <span style={{ fontSize: "0.8rem", fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "#CC785C" }}>Recruiter Evaluation</span>
           </div>
-          <p
-            style={{
-              fontSize: "0.92rem",
-              color: "#E5DDD0",
-              lineHeight: 1.7,
-              margin: 0,
-              fontStyle: "italic",
-            }}
-          >
-            "{report.recruiterEvaluation}"
-          </p>
-          <div
-            style={{
-              marginTop: "1rem",
-              paddingTop: "0.75rem",
-              borderTop: "1px solid #333",
-              display: "flex",
-              alignItems: "center",
-              gap: "0.4rem",
-            }}
-          >
+          <p style={{ fontSize: "0.92rem", color: "#E5DDD0", lineHeight: 1.7, margin: 0, fontStyle: "italic" }}>"{report.recruiterEvaluation}"</p>
+          <div style={{ marginTop: "1rem", paddingTop: "0.75rem", borderTop: "1px solid #333", display: "flex", alignItems: "center", gap: "0.4rem" }}>
             <span style={{ fontWeight: 900, fontSize: "0.85rem" }}>
-              <span style={{ color: "#fff" }}>Barbar</span>
-              <span style={{ color: "#CC785C" }}>os</span>
+              <span style={{ color: "#fff" }}>Barbar</span><span style={{ color: "#CC785C" }}>os</span>
             </span>
-            <span style={{ fontSize: "0.75rem", color: "#666" }}>
-              Interview Intelligence
-            </span>
+            <span style={{ fontSize: "0.75rem", color: "#666" }}>Interview Intelligence</span>
           </div>
         </div>
 
-        {/* ── CTA ── */}
+        {/* CTA */}
         <div className="no-print" style={{ textAlign: "center", paddingTop: "1rem" }}>
           <button
             onClick={() => router.push("/onboarding")}
-            style={{
-              background: "#CC785C",
-              color: "#fff",
-              border: "none",
-              borderRadius: 10,
-              padding: "0.85rem 2.4rem",
-              fontSize: "0.95rem",
-              fontWeight: 700,
-              cursor: "pointer",
-              letterSpacing: "0.02em",
-              boxShadow: "0 4px 20px rgba(204,120,92,0.35)",
-              transition: "transform 0.15s, box-shadow 0.15s",
-            }}
-            onMouseEnter={(e) => {
-              (e.target as HTMLElement).style.transform = "translateY(-2px)";
-              (e.target as HTMLElement).style.boxShadow = "0 6px 24px rgba(204,120,92,0.45)";
-            }}
-            onMouseLeave={(e) => {
-              (e.target as HTMLElement).style.transform = "translateY(0)";
-              (e.target as HTMLElement).style.boxShadow = "0 4px 20px rgba(204,120,92,0.35)";
-            }}
+            style={{ background: "#CC785C", color: "#fff", border: "none", borderRadius: 10, padding: "0.85rem 2.4rem", fontSize: "0.95rem", fontWeight: 700, cursor: "pointer", letterSpacing: "0.02em", boxShadow: "0 4px 20px rgba(204,120,92,0.35)" }}
           >
             Practice Again →
           </button>
-          <p style={{ fontSize: "0.78rem", color: "#aaa", marginTop: "0.6rem" }}>
-            Each session brings you closer to the offer.
-          </p>
+          <p style={{ fontSize: "0.78rem", color: "#aaa", marginTop: "0.6rem" }}>Each session brings you closer to the offer.</p>
         </div>
       </main>
 
-      {/* ── Footer ── */}
-      <footer
-        style={{
-          background: "#EDE6D8",
-          borderTop: "1px solid #E5DDD0",
-          padding: "1.2rem 2rem",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          flexWrap: "wrap",
-          gap: "0.5rem",
-        }}
-      >
+      {/* Footer */}
+      <footer style={{ background: "#EDE6D8", borderTop: "1px solid #E5DDD0", padding: "1.2rem 2rem", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "0.5rem" }}>
         <BrandLogo />
-        <span style={{ fontSize: "0.75rem", color: "#999" }}>
-          AI-powered interview intelligence · mockboss-ai.vercel.app
-        </span>
-        <span style={{ fontSize: "0.75rem", color: "#bbb" }}>
-          © {new Date().getFullYear()} Barbaros
-        </span>
+        <span style={{ fontSize: "0.75rem", color: "#999" }}>AI-powered interview intelligence · mockboss-ai.vercel.app</span>
+        <span style={{ fontSize: "0.75rem", color: "#bbb" }}>© {new Date().getFullYear()} Barbaros</span>
       </footer>
     </div>
   );

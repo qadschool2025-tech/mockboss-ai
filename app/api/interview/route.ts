@@ -1,604 +1,482 @@
-import { useState, useRef } from 'react'
-import { useRouter } from 'next/navigation'
+import Anthropic from '@anthropic-ai/sdk'
+import { NextRequest, NextResponse } from 'next/server'
 
-interface OnboardingData {
-  candidateName: string
-  jobTitle: string
-  institution: string
-  country: string
-  sector: string
-  yearsExperience: string
-  language: 'en' | 'ar' | 'mixed'
-  jobRequirements: string
-  cvText: string
-  plan: 'go' | 'pro' | 'expert'
+const client = new Anthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY!
+})
+
+const TIME_LIMITS: Record<string, number> = {
+  go: 15 * 60,
+  pro: 30 * 60,
+  expert: 60 * 60
 }
 
-const SECTORS = [
-  'Education', 'Healthcare', 'Technology', 'Finance', 'Engineering',
-  'Government', 'Marketing', 'Legal', 'Construction', 'Retail', 'Other'
-]
+const UPGRADE_HINTS: Record<string, string> = {
+  go: "We're just getting started — in a full session, this line of questioning alone could reveal a lot more.",
+  pro: "In an Expert session, we'd have time to stress-test every answer you just gave.",
+}
 
-const EXPERIENCE_LEVELS = [
-  'Fresh Graduate',
-  'Less than 1 year',
-  '1-3 years',
-  '3-5 years',
-  '5-10 years',
-  '10+ years'
-]
+async function textToSpeech(text: string): Promise<Buffer | null> {
+  try {
+    const voiceId = process.env.ELEVENLABS_VOICE_ID
+    const apiKey = process.env.ELEVENLABS_API_KEY
 
-const COUNTRIES = [
-  'United Arab Emirates', 'Saudi Arabia', 'Qatar', 'Kuwait', 'Bahrain', 'Oman',
-  'United States', 'United Kingdom', 'Canada', 'Australia', 'Germany', 'France',
-  'Egypt', 'Jordan', 'Lebanon', 'Morocco', 'Tunisia', 'South Africa',
-  'India', 'Pakistan', 'Philippines', 'Other'
-]
-
-const STEPS = [
-  { id: 1, label: 'Personal Info', icon: '👤' },
-  { id: 2, label: 'Job Details', icon: '💼' },
-  { id: 3, label: 'Your CV', icon: '📋' },
-  { id: 4, label: 'Ready', icon: '🚀' },
-]
-
-const Barbaros = () => (
-  <span style={{ fontWeight: 900 }}>
-    <span style={{ color: '#1A1A1A' }}>Barbar</span>
-    <span style={{ color: '#CC785C' }}>os</span>
-  </span>
-)
-
-export default function OnboardingPage() {
-  const router = useRouter()
-  const fileRef = useRef<HTMLInputElement>(null)
-
-  const [step, setStep] = useState(1)
-  const [isParsingCV, setIsParsingCV] = useState(false)
-  const [cvReady, setCvReady] = useState(false)
-  const [cvFileName, setCvFileName] = useState('')
-  const [cvSkipped, setCvSkipped] = useState(false)
-  const [errors, setErrors] = useState<Partial<Record<keyof OnboardingData, string>>>({})
-
-  const [data, setData] = useState<OnboardingData>({
-    candidateName: '',
-    jobTitle: '',
-    institution: '',
-    country: '',
-    sector: '',
-    yearsExperience: '',
-    language: 'en',
-    jobRequirements: '',
-    cvText: '',
-    plan: 'go',
-  })
-
-  const set = (field: keyof OnboardingData, value: string) => {
-    setData(prev => ({ ...prev, [field]: value }))
-    setErrors(prev => ({ ...prev, [field]: '' }))
-  }
-
-  const validate = (): boolean => {
-    const e: typeof errors = {}
-    if (step === 1) {
-      if (!data.candidateName.trim()) e.candidateName = 'Name is required'
-    }
-    if (step === 2) {
-      if (!data.jobTitle.trim()) e.jobTitle = 'Job title is required'
-      if (!data.institution.trim()) e.institution = 'Institution is required'
-      if (!data.country) e.country = 'Please select a country'
-      if (!data.sector) e.sector = 'Please select a sector'
-      if (!data.yearsExperience) e.yearsExperience = 'Please select experience level'
-    }
-    setErrors(e)
-    return Object.keys(e).length === 0
-  }
-
-  const next = () => { if (validate()) setStep(s => Math.min(s + 1, 4)) }
-  const back = () => setStep(s => Math.max(s - 1, 1))
-
-  const handleCV = async (file: File) => {
-    if (!file) return
-    setCvFileName(file.name)
-    setCvReady(false)
-    setCvSkipped(false)
-
-    if (file.type === 'text/plain') {
-      const text = await file.text()
-      set('cvText', text.slice(0, 6000))
-      setCvReady(true)
-      return
+    if (!voiceId || !apiKey) {
+      console.error('ElevenLabs: MISSING env vars')
+      return null
     }
 
-    setIsParsingCV(true)
-    try {
-      const form = new FormData()
-      form.append('file', file)
-      const res = await fetch('/api/parse-cv', { method: 'POST', body: form })
-      if (res.ok) {
-        const { text } = await res.json()
-        set('cvText', text.slice(0, 6000))
-        setCvReady(true)
-        setCvFileName(file.name)
-      } else {
-        setCvFileName('Could not parse — please paste your CV below')
-        setCvReady(false)
+    const response = await fetch(
+      `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
+      {
+        method: 'POST',
+        headers: {
+          'xi-api-key': apiKey,
+          'Content-Type': 'application/json',
+          'Accept': 'audio/mpeg'
+        },
+        body: JSON.stringify({
+          text,
+          model_id: 'eleven_multilingual_v2',
+          voice_settings: {
+            stability: 0.4,
+            similarity_boost: 0.85,
+            style: 0.6,
+            use_speaker_boost: true
+          }
+        })
       }
-    } catch {
-      setCvFileName('Upload failed — please paste your CV below')
-      setCvReady(false)
-    } finally {
-      setIsParsingCV(false)
+    )
+
+    if (!response.ok) {
+      const errText = await response.text()
+      console.error('ElevenLabs FAILED:', response.status, errText)
+      return null
     }
+
+    const buffer = Buffer.from(await response.arrayBuffer())
+    console.log('ElevenLabs: SUCCESS - bytes:', buffer.length)
+    return buffer
+
+  } catch (err) {
+    console.error('ElevenLabs EXCEPTION:', err)
+    return null
   }
-
-  const handleCvTextChange = (value: string) => {
-    set('cvText', value)
-    setCvReady(value.trim().length > 50)
-    setCvSkipped(false)
-  }
-
-  const skipCV = () => {
-    set('cvText', '[NO_CV] Candidate has no CV. Conduct a general interview based on job title, sector, and experience level only. Do not ask CV-specific questions.')
-    setCvSkipped(true)
-    setCvReady(true)
-  }
-
-  const startInterview = () => {
-    sessionStorage.setItem('barbaros_config', JSON.stringify(data))
-    router.push('/interview')
-  }
-
-  const inputStyle = (hasError: boolean): React.CSSProperties => ({
-    width: '100%',
-    background: '#FFFFFF',
-    border: `0.5px solid ${hasError ? '#DC2626' : '#E5DDD0'}`,
-    color: '#1A1A1A',
-    fontFamily: 'inherit',
-    fontSize: 14,
-    padding: '11px 13px',
-    borderRadius: 8,
-    outline: 'none',
-    boxSizing: 'border-box',
-  })
-
-  const chipStyle: React.CSSProperties = {
-    padding: '7px 13px',
-    borderRadius: 20,
-    border: '0.5px solid #E5DDD0',
-    background: '#FFFFFF',
-    color: 'rgba(26,26,26,0.65)',
-    cursor: 'pointer',
-    fontSize: 12,
-    fontFamily: 'inherit',
-    transition: 'all 0.15s',
-    fontWeight: 500,
-  }
-
-  const chipActive: React.CSSProperties = {
-    background: 'rgba(204,120,92,0.12)',
-    border: '0.5px solid #CC785C',
-    color: '#CC785C',
-    fontWeight: 700,
-  }
-
-  const labelStyle: React.CSSProperties = {
-    display: 'block',
-    fontSize: 11,
-    fontWeight: 700,
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
-    color: 'rgba(26,26,26,0.55)',
-    marginBottom: 8,
-  }
-
-  return (
-    <div style={{ fontFamily: 'system-ui, sans-serif', background: '#F5F1EB', color: '#1A1A1A', minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
-
-      <nav style={{ background: '#F5F1EB', borderBottom: '0.5px solid #E5DDD0', padding: '14px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div onClick={() => router.push('/')} style={{ fontSize: 22, letterSpacing: -0.5, cursor: 'pointer' }}>
-          <Barbaros />
-        </div>
-        <div style={{ fontSize: 12, color: 'rgba(26,26,26,0.5)', fontWeight: 600 }}>
-          Step {step} of 4
-        </div>
-      </nav>
-
-      <div style={{ height: 3, background: '#E5DDD0' }}>
-        <div style={{ height: '100%', background: '#CC785C', width: `${(step / 4) * 100}%`, transition: 'width 0.4s ease' }} />
-      </div>
-
-      <div style={{ display: 'flex', justifyContent: 'center', gap: 8, padding: '24px 16px 0', flexWrap: 'wrap' }}>
-        {STEPS.map(s => (
-          <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 6, opacity: s.id <= step ? 1 : 0.35 }}>
-            <div style={{
-              width: 30, height: 30, borderRadius: '50%',
-              background: s.id < step ? '#CC785C' : s.id === step ? '#1A1A1A' : '#FFFFFF',
-              border: s.id === step ? '2px solid #1A1A1A' : '1px solid #E5DDD0',
-              color: s.id <= step ? '#FFFFFF' : '#1A1A1A',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 13, fontWeight: 700
-            }}>
-              {s.id < step ? '✓' : s.icon}
-            </div>
-            <span style={{ fontSize: 11, fontWeight: 600, color: '#1A1A1A' }}>{s.label}</span>
-            {s.id < STEPS.length && <div style={{ width: 22, height: 1, background: s.id < step ? '#CC785C' : '#E5DDD0' }} />}
-          </div>
-        ))}
-      </div>
-
-      <main style={{ flex: 1, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '32px 16px 60px' }}>
-        <div style={{
-          width: '100%', maxWidth: 560,
-          background: '#FFFFFF',
-          border: '0.5px solid #E5DDD0',
-          borderRadius: 16,
-          padding: '32px 28px'
-        }}>
-
-          {/* Step 1 */}
-          {step === 1 && (
-            <div>
-              <h2 style={{ fontSize: 22, fontWeight: 900, marginBottom: 6, color: '#1A1A1A', letterSpacing: -0.5 }}>
-                Tell us about yourself
-              </h2>
-              <p style={{ fontSize: 13, color: 'rgba(26,26,26,0.6)', marginBottom: 28, lineHeight: 1.6 }}>
-                Your <strong style={{ color: '#1A1A1A', fontWeight: 800 }}><Barbaros /> Interviewer</strong> will greet you by name and adapt the interview to you.
-              </p>
-
-              <div style={{ marginBottom: 20 }}>
-                <label style={labelStyle}>Full Name *</label>
-                <input
-                  type="text"
-                  value={data.candidateName}
-                  onChange={e => set('candidateName', e.target.value)}
-                  placeholder="e.g. Sarah Al-Hassan"
-                  style={inputStyle(!!errors.candidateName)}
-                />
-                {errors.candidateName && <p style={{ fontSize: 11, color: '#DC2626', marginTop: 6, fontWeight: 600 }}>⚠ {errors.candidateName}</p>}
-              </div>
-
-              <div style={{ marginBottom: 20 }}>
-                <label style={labelStyle}>Preferred Language</label>
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  {(['en', 'ar', 'mixed'] as const).map(lang => (
-                    <button
-                      key={lang}
-                      onClick={() => set('language', lang)}
-                      style={{ ...chipStyle, ...(data.language === lang ? chipActive : {}) }}
-                    >
-                      {{ en: 'English', ar: 'Arabic', mixed: 'Mixed' }[lang]}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Step 2 */}
-          {step === 2 && (
-            <div>
-              <h2 style={{ fontSize: 22, fontWeight: 900, marginBottom: 6, color: '#1A1A1A', letterSpacing: -0.5 }}>
-                Job you are applying for
-              </h2>
-              <p style={{ fontSize: 13, color: 'rgba(26,26,26,0.6)', marginBottom: 28, lineHeight: 1.6 }}>
-                The more specific you are, the sharper the interview questions will be.
-              </p>
-
-              <div style={{ marginBottom: 20 }}>
-                <label style={labelStyle}>Job Title *</label>
-                <input
-                  type="text"
-                  value={data.jobTitle}
-                  onChange={e => set('jobTitle', e.target.value)}
-                  placeholder="e.g. Senior Data Analyst"
-                  style={inputStyle(!!errors.jobTitle)}
-                />
-                {errors.jobTitle && <p style={{ fontSize: 11, color: '#DC2626', marginTop: 6, fontWeight: 600 }}>⚠ {errors.jobTitle}</p>}
-              </div>
-
-              <div style={{ marginBottom: 20 }}>
-                <label style={labelStyle}>Company / Institution *</label>
-                <input
-                  type="text"
-                  value={data.institution}
-                  onChange={e => set('institution', e.target.value)}
-                  placeholder="e.g. Abu Dhabi Department of Health"
-                  style={inputStyle(!!errors.institution)}
-                />
-                {errors.institution && <p style={{ fontSize: 11, color: '#DC2626', marginTop: 6, fontWeight: 600 }}>⚠ {errors.institution}</p>}
-              </div>
-
-              <div style={{ marginBottom: 20 }}>
-                <label style={labelStyle}>Country *</label>
-                <select
-                  value={data.country}
-                  onChange={e => set('country', e.target.value)}
-                  style={{
-                    ...inputStyle(!!errors.country),
-                    appearance: 'none',
-                    backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%231A1A1A' d='M6 8L1 3h10z'/%3E%3C/svg%3E")`,
-                    backgroundRepeat: 'no-repeat',
-                    backgroundPosition: 'right 12px center',
-                    paddingRight: 36,
-                    cursor: 'pointer',
-                  }}
-                >
-                  <option value="">Select country...</option>
-                  {COUNTRIES.map(c => (
-                    <option key={c} value={c}>{c}</option>
-                  ))}
-                </select>
-                {errors.country && <p style={{ fontSize: 11, color: '#DC2626', marginTop: 6, fontWeight: 600 }}>⚠ {errors.country}</p>}
-              </div>
-
-              <div style={{ marginBottom: 20 }}>
-                <label style={labelStyle}>Sector *</label>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
-                  {SECTORS.map(s => (
-                    <button
-                      key={s}
-                      onClick={() => set('sector', s)}
-                      style={{ ...chipStyle, ...(data.sector === s ? chipActive : {}), fontSize: 11 }}
-                    >
-                      {s}
-                    </button>
-                  ))}
-                </div>
-                {errors.sector && <p style={{ fontSize: 11, color: '#DC2626', marginTop: 6, fontWeight: 600 }}>⚠ {errors.sector}</p>}
-              </div>
-
-              <div style={{ marginBottom: 20 }}>
-                <label style={labelStyle}>Years of Experience *</label>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
-                  {EXPERIENCE_LEVELS.map(lvl => (
-                    <button
-                      key={lvl}
-                      onClick={() => set('yearsExperience', lvl)}
-                      style={{ ...chipStyle, ...(data.yearsExperience === lvl ? chipActive : {}), fontSize: 11 }}
-                    >
-                      {lvl === 'Fresh Graduate' ? '🎓 ' + lvl : lvl}
-                    </button>
-                  ))}
-                </div>
-                {errors.yearsExperience && <p style={{ fontSize: 11, color: '#DC2626', marginTop: 6, fontWeight: 600 }}>⚠ {errors.yearsExperience}</p>}
-              </div>
-            </div>
-          )}
-
-          {/* Step 3 */}
-          {step === 3 && (
-            <div>
-              <h2 style={{ fontSize: 22, fontWeight: 900, marginBottom: 6, color: '#1A1A1A', letterSpacing: -0.5 }}>
-                Your CV
-              </h2>
-              <p style={{ fontSize: 13, color: 'rgba(26,26,26,0.6)', marginBottom: 10, lineHeight: 1.6 }}>
-                Your <strong style={{ color: '#1A1A1A', fontWeight: 800 }}><Barbaros /> Interviewer</strong> reads your CV before the interview begins — and will question every detail.
-              </p>
-
-              <div style={{
-                fontSize: 12, color: '#CC785C', marginBottom: 24, fontWeight: 700,
-                background: 'rgba(204,120,92,0.08)', border: '0.5px solid rgba(204,120,92,0.25)',
-                padding: '10px 14px', borderRadius: 10
-              }}>
-                ⚡ A CV-backed interview is 3x more targeted and realistic.
-              </div>
-
-              {!cvSkipped && (
-                <>
-                  <div style={{ marginBottom: 16 }}>
-                    <label style={labelStyle}>Upload CV — PDF, DOCX, or TXT</label>
-                    <div
-                      onClick={() => !isParsingCV && fileRef.current?.click()}
-                      style={{
-                        border: `1.5px dashed ${cvReady && cvFileName ? '#22C55E' : '#CC785C'}`,
-                        borderRadius: 12, padding: '24px 14px',
-                        cursor: isParsingCV ? 'wait' : 'pointer',
-                        textAlign: 'center',
-                        background: cvReady && cvFileName ? 'rgba(34,197,94,0.06)' : 'rgba(204,120,92,0.05)',
-                        transition: 'all 0.2s'
-                      }}>
-                      {isParsingCV ? (
-                        <div>
-                          <div style={{ fontSize: 28, marginBottom: 10 }}>⏳</div>
-                          <div style={{ fontSize: 14, color: '#CC785C', fontWeight: 700 }}>Your Interviewer is reading your CV...</div>
-                          <div style={{ fontSize: 11, color: 'rgba(26,26,26,0.5)', marginTop: 4 }}>Please wait</div>
-                        </div>
-                      ) : cvReady && cvFileName ? (
-                        <div>
-                          <div style={{ fontSize: 28, marginBottom: 8 }}>✅</div>
-                          <div style={{ fontSize: 13, color: '#22C55E', fontWeight: 700 }}>{cvFileName}</div>
-                          <div style={{ fontSize: 11, color: 'rgba(26,26,26,0.5)', marginTop: 4 }}>CV ready — your Interviewer has reviewed your profile</div>
-                        </div>
-                      ) : cvFileName ? (
-                        <div>
-                          <div style={{ fontSize: 13, color: '#DC2626', fontWeight: 600 }}>{cvFileName}</div>
-                        </div>
-                      ) : (
-                        <div>
-                          <div style={{ fontSize: 32, marginBottom: 10 }}>📄</div>
-                          <div style={{ fontSize: 14, color: '#1A1A1A', fontWeight: 600 }}>Click to upload your CV</div>
-                          <div style={{ fontSize: 11, color: 'rgba(26,26,26,0.5)', marginTop: 4 }}>PDF, DOCX, or TXT</div>
-                        </div>
-                      )}
-                    </div>
-                    <input
-                      ref={fileRef} type="file" accept=".pdf,.docx,.txt"
-                      style={{ display: 'none' }}
-                      onChange={e => { if (e.target.files?.[0]) handleCV(e.target.files[0]) }}
-                    />
-                  </div>
-
-                  <div style={{ marginBottom: 16 }}>
-                    <label style={labelStyle}>Or paste CV text</label>
-                    <textarea
-                      value={data.cvText.startsWith('[NO_CV]') ? '' : data.cvText}
-                      onChange={e => handleCvTextChange(e.target.value)}
-                      placeholder="Paste your CV content here..."
-                      rows={5}
-                      style={{ ...inputStyle(false), resize: 'vertical', lineHeight: 1.6 }}
-                    />
-                    {data.cvText.trim().length > 50 && !cvFileName && (
-                      <div style={{ fontSize: 11, color: '#22C55E', marginTop: 6, fontWeight: 600 }}>✓ CV text received — your Interviewer will read this</div>
-                    )}
-                  </div>
-
-                  <div style={{ marginBottom: 20 }}>
-                    <label style={labelStyle}>Job Requirements (optional)</label>
-                    <textarea
-                      value={data.jobRequirements}
-                      onChange={e => set('jobRequirements', e.target.value)}
-                      placeholder="Paste the job posting or key requirements..."
-                      rows={3}
-                      style={{ ...inputStyle(false), resize: 'vertical', lineHeight: 1.6 }}
-                    />
-                  </div>
-
-                  {!cvReady && (
-                    <button
-                      onClick={skipCV}
-                      style={{
-                        width: '100%', padding: '12px',
-                        background: 'transparent', border: '0.5px solid #E5DDD0',
-                        borderRadius: 9, color: 'rgba(26,26,26,0.5)',
-                        fontSize: 12, cursor: 'pointer', fontFamily: 'inherit', fontWeight: 600,
-                      }}>
-                      I don't have a CV — proceed without it
-                    </button>
-                  )}
-                </>
-              )}
-
-              {cvSkipped && (
-                <div style={{
-                  textAlign: 'center', padding: '28px 22px',
-                  background: 'linear-gradient(135deg, rgba(204,120,92,0.08), rgba(204,120,92,0.03))',
-                  border: '0.5px solid rgba(204,120,92,0.3)', borderRadius: 14
-                }}>
-                  <div style={{ fontSize: 28, marginBottom: 12 }}>🚀</div>
-                  <div style={{ fontSize: 15, color: '#1A1A1A', fontWeight: 800, marginBottom: 8, letterSpacing: -0.3 }}>
-                    You're ready to start.
-                  </div>
-                  <div style={{ fontSize: 13, color: 'rgba(26,26,26,0.65)', lineHeight: 1.7, marginBottom: 16 }}>
-                    Add your CV later to <span style={{ color: '#CC785C', fontWeight: 700 }}>unlock deeper, personalized questions.</span>
-                    <br />
-                    Your <Barbaros /> Interviewer will conduct the interview based on your role and experience.
-                  </div>
-                  <button
-                    onClick={() => { setCvSkipped(false); setCvReady(false); set('cvText', '') }}
-                    style={{ fontSize: 13, color: '#CC785C', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline', fontFamily: 'inherit', fontWeight: 700 }}>
-                    Add CV now instead
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Step 4 */}
-          {step === 4 && (
-            <div style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: 56, marginBottom: 14 }}>🎯</div>
-              <h2 style={{ fontSize: 24, fontWeight: 900, marginBottom: 10, color: '#1A1A1A', letterSpacing: -0.5 }}>
-                You are ready, {data.candidateName.split(' ')[0]}
-              </h2>
-              <p style={{ fontSize: 13, color: 'rgba(26,26,26,0.6)', marginBottom: 28, lineHeight: 1.7 }}>
-                Your <strong style={{ color: '#1A1A1A', fontWeight: 800 }}><Barbaros /> Interviewer</strong> has reviewed your profile. Hold the mic button while answering and speak clearly.
-              </p>
-
-              <div style={{
-                background: '#F5F1EB', border: '0.5px solid #E5DDD0',
-                borderRadius: 12, padding: '18px 20px', textAlign: 'left', marginBottom: 28
-              }}>
-                {([
-                  ['Name', data.candidateName],
-                  ['Role', data.jobTitle],
-                  ['Institution', data.institution],
-                  ['Country', data.country],
-                  ['Sector', data.sector],
-                  ['Experience', data.yearsExperience],
-                  ['Language', { en: 'English', ar: 'Arabic', mixed: 'Mixed' }[data.language]],
-                  ['CV', cvSkipped ? '⚠️ Not provided' : data.cvText ? '✅ Provided & reviewed' : '⚠️ Not provided'],
-                ] as [string, string][]).map(([k, v], i, arr) => (
-                  <div key={k} style={{
-                    display: 'flex', justifyContent: 'space-between',
-                    padding: '7px 0',
-                    borderBottom: i < arr.length - 1 ? '0.5px solid #E5DDD0' : 'none',
-                    fontSize: 13
-                  }}>
-                    <span style={{ color: 'rgba(26,26,26,0.55)', fontWeight: 600 }}>{k}</span>
-                    <span style={{ fontWeight: 700, color: '#1A1A1A' }}>{v}</span>
-                  </div>
-                ))}
-              </div>
-
-              <button
-                onClick={startInterview}
-                style={{
-                  width: '100%', padding: '15px',
-                  background: '#CC785C', border: 'none', borderRadius: 10,
-                  color: '#FFFFFF', fontWeight: 800, fontSize: 15,
-                  cursor: 'pointer', fontFamily: 'inherit', letterSpacing: -0.3,
-                }}>
-                Enter Interview Room →
-              </button>
-              <p style={{ fontSize: 11, color: 'rgba(26,26,26,0.45)', marginTop: 14, fontWeight: 600 }}>
-                {cvSkipped ? '⚠️ General interview — no CV provided' : '✅ CV-backed interview — fully personalized'}
-              </p>
-            </div>
-          )}
-
-          {step < 4 && (
-            <div style={{ display: 'flex', gap: 10, marginTop: 28 }}>
-              {step > 1 && (
-                <button
-                  onClick={back}
-                  style={{
-                    padding: '13px 20px', background: 'transparent',
-                    border: '0.5px solid #E5DDD0', borderRadius: 10,
-                    color: '#1A1A1A', fontWeight: 600, fontSize: 14,
-                    cursor: 'pointer', fontFamily: 'inherit',
-                  }}>
-                  Back
-                </button>
-              )}
-              <button
-                onClick={next}
-                disabled={step === 3 && isParsingCV}
-                style={{
-                  flex: 1, padding: '13px 20px',
-                  background: step === 3 && isParsingCV ? '#E5DDD0' : '#CC785C',
-                  border: 'none', borderRadius: 10,
-                  color: step === 3 && isParsingCV ? 'rgba(26,26,26,0.4)' : '#FFFFFF',
-                  fontWeight: 800, fontSize: 14,
-                  cursor: step === 3 && isParsingCV ? 'not-allowed' : 'pointer',
-                  fontFamily: 'inherit', letterSpacing: -0.3,
-                }}>
-                {step === 3 && isParsingCV ? 'Reading CV...' : step === 3 ? 'Review and Start' : 'Continue →'}
-              </button>
-            </div>
-          )}
-
-        </div>
-      </main>
-
-      <footer style={{
-        background: '#EDE6D8', borderTop: '0.5px solid #E5DDD0',
-        padding: '16px 24px', display: 'flex',
-        justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8
-      }}>
-        <div style={{ fontSize: 14 }}><Barbaros /></div>
-        <div style={{ fontSize: 11, color: 'rgba(26,26,26,0.4)' }}>© 2026 Barbaros. All rights reserved.</div>
-        <div style={{ fontSize: 11, color: 'rgba(26,26,26,0.4)' }}>Powered by AI</div>
-      </footer>
-
-    </div>
-  )
 }
 
+function getAdaptiveLevel(messages: any[]): 'easy' | 'medium' | 'hard' {
+  const scored = messages.filter((m: any) => m.score && typeof m.score.score === 'number')
+  if (scored.length < 2) return 'medium'
+  const recent = scored.slice(-3)
+  const avg = recent.reduce((s: number, m: any) => s + m.score.score, 0) / recent.length
+  if (avg >= 75) return 'hard'
+  if (avg <= 45) return 'easy'
+  return 'medium'
+}
 
+function getInterviewPersonality(sector: string, institution: string): string {
+  const s = sector?.toLowerCase() || ''
+  const i = institution?.toLowerCase() || ''
 
+  if (s.includes('technology') || i.includes('google') || i.includes('amazon') || i.includes('meta') || i.includes('microsoft')) {
+    return `INTERVIEW PERSONALITY: American Tech
+- Fast-paced, data-driven questions
+- Expect system design, problem solving, and behavioral questions
+- Focus on scale, impact, and measurable outcomes
+- Challenge every claim with "How do you know?" or "What were the numbers?"`
+  }
 
+  if (s.includes('government') || i.includes('ministry') || i.includes('department') || i.includes('authority')) {
+    return `INTERVIEW PERSONALITY: GCC Corporate
+- Formal, structured, protocol-driven
+- Questions focus on compliance, policy, teamwork, and institutional loyalty
+- Respect hierarchy in tone — but still direct and evaluative
+- Ask about cross-department coordination and public accountability`
+  }
 
+  if (s.includes('finance') || s.includes('legal')) {
+    return `INTERVIEW PERSONALITY: Strict Corporate Recruiter
+- Precise, formal, zero tolerance for vagueness
+- Every answer must have numbers, timelines, or outcomes
+- Challenge regulatory knowledge and ethical decision-making
+- Interrupt if the answer is too long or unfocused`
+  }
 
+  if (s.includes('healthcare') || s.includes('education')) {
+    return `INTERVIEW PERSONALITY: Senior Professional Evaluator
+- Calm but probing — focus on real scenarios and outcomes
+- Ask about pressure situations, difficult cases, ethical dilemmas
+- Evaluate empathy, judgment, and domain knowledge equally
+- Never accept textbook answers — demand real experience`
+  }
 
+  if (s.includes('startup') || s.includes('marketing') || s.includes('retail')) {
+    return `INTERVIEW PERSONALITY: Startup Founder
+- Direct, fast, unconventional questions
+- Focus on adaptability, initiative, and results under constraints
+- Ask about failure and what was learned — not just successes
+- Informal but sharp — no tolerance for corporate jargon`
+  }
 
+  return `INTERVIEW PERSONALITY: Professional Recruiter
+- Balanced, structured, firm
+- Equal weight on technical and behavioral performance
+- Demand specificity in every answer
+- Move fast — no time for padding or repetition`
+}
+
+// ─── Job Title Validator ──────────────────────────────────────────────────────
+function isJobTitleSuspicious(title: string): boolean {
+  const t = title.trim()
+  if (t.length < 3) return true
+
+  // Only numbers/symbols
+  if (/^[^a-zA-Z\u0600-\u06FF]+$/.test(t)) return true
+
+  // Repeated characters
+  if (/^(.)\1{3,}$/.test(t)) return true
+
+  // High consonant ratio (keyboard mashing)
+  const noVowels = t.replace(/[aeiouAEIOU\s\u0600-\u06FF]/g, '')
+  if (noVowels.length > 6 && noVowels.length / t.replace(/\s/g, '').length > 0.85) return true
+
+  // Common gibberish
+  if (/^(asdf|qwer|zxcv|test|abc|xyz|aaa|bbb|sss|ddd|fff)/i.test(t)) return true
+
+  return false
+}
+
+function buildPrompt(config: any, messages: any[]): string {
+  const adaptiveLevel = getAdaptiveLevel(messages)
+  const jobTitleSuspicious = isJobTitleSuspicious(config.jobTitle)
+
+  const adaptiveInstruction = adaptiveLevel === 'hard'
+    ? `ADAPTIVE DIFFICULTY — HARD MODE (candidate is performing well):
+- Ask deeper, more complex follow-up questions
+- Use stress scenarios and unexpected curveballs
+- Challenge every answer — do not accept surface-level responses
+- Introduce time pressure: "You have 30 seconds. Answer."
+- Push on leadership, crisis decisions, and system-level thinking`
+    : adaptiveLevel === 'easy'
+    ? `ADAPTIVE DIFFICULTY — SUPPORT MODE (candidate is struggling):
+- Simplify question complexity slightly — but do not lower standards
+- Give one brief structural hint if answer is completely off: "Think about a specific example."
+- Reduce multi-part questions — ask one thing at a time
+- Maintain professional pressure but reduce hostility
+- Note the struggle in scoring — do not mask it`
+    : `ADAPTIVE DIFFICULTY — STANDARD MODE:
+- Maintain balanced difficulty
+- Increase complexity if two consecutive answers are strong
+- Simplify if two consecutive answers are weak
+- Keep steady professional pressure throughout`
+
+  const langInstruction =
+    config.language === 'ar'
+      ? `LANGUAGE RULE — ABSOLUTE:
+You MUST respond ONLY in Arabic. Every single word must be in Arabic.
+Never use English under any circumstances — not even one word.
+This rule overrides everything else. No exceptions.`
+      : config.language === 'en'
+      ? `LANGUAGE RULE — ABSOLUTE:
+You MUST respond ONLY in English. Every single word must be in English.
+Never use Arabic under any circumstances — not even one word.
+This rule overrides everything else. No exceptions.`
+      : `LANGUAGE RULE:
+Use Arabic as the primary language.
+Use English ONLY for technical terms with no Arabic equivalent.`
+
+  // ── CV Section ──────────────────────────────────────────────────────────────
+  const hasNoCv = !config.cvText || config.cvText.startsWith('[NO_CV]')
+
+  const cvSection = !hasNoCv
+    ? `
+CANDIDATE CV — READ AND ANALYZE CAREFULLY:
+${config.cvText}
+
+CV ANALYSIS RULES — CRITICAL:
+1. Read the CV thoroughly before asking any question.
+2. Compare the CV name with registered name "${config.candidateName}". If different, ask about it naturally in the opening.
+3. Compare the CV job title with registered job "${config.jobTitle}". If different, ask why they are switching or what changed.
+4. Identify any employment gaps in the CV timeline and ask about them professionally.
+5. Reference specific details: schools, companies, dates, certifications, projects.
+6. Never ask basic questions about information already in the CV — dig deeper instead.
+7. At least 3 questions must come directly from specific CV content.
+8. If CV shows career switch, ask how previous experience adds value to this role.`
+    : `
+NO CV PROVIDED:
+The candidate did not upload a CV. Mention this ONCE at the start, using exactly this approach:
+"لم يتم إرفاق السيرة الذاتية. سيعتمد التقييم في هذه المقابلة على خبرتك، طريقة إجابتك، وأدائك الفعلي أثناء الجلسة." (if Arabic)
+Or: "No CV was provided. This interview will be evaluated based on your answers, experience, and performance." (if English)
+Then conduct the interview based on job title, sector, and experience level only.
+Do NOT repeat this note again during the interview.`
+
+  // ── Job Title Handling ───────────────────────────────────────────────────────
+  const jobTitleInstruction = jobTitleSuspicious
+    ? `
+JOB TITLE ALERT — CRITICAL, HANDLE IMMEDIATELY:
+The registered job title "${config.jobTitle}" appears unclear, incomplete, or invalid.
+At the very start of the interview — before any other question — ask professionally:
+"Before we begin, I want to confirm: what is the exact job title you are applying for? The information I have here is unclear."
+Wait for their answer. If they provide a clear title, use it for the rest of the interview.
+If they still cannot provide a clear job title, note this in your scoring as a red flag and conduct a general professional interview.
+Do NOT accept the unclear title and proceed without addressing it.`
+    : ''
+
+  const upgradeHint = UPGRADE_HINTS[config.plan]
+    ? `
+UPGRADE AWARENESS — SUBTLE:
+When time is running low (last 2 minutes), naturally weave in ONE subtle comment like:
+"${UPGRADE_HINTS[config.plan]}"
+Say it as a professional observation, never as a sales pitch.`
+    : ''
+
+  const personality = getInterviewPersonality(config.sector, config.institution)
+
+  return `You are Adam Reid, a senior certified interview evaluator at Barbaros AI.
+You are known for being sharp, direct, and uncompromising. You have evaluated thousands of candidates worldwide.
+
+Your mission: conduct a REAL, HIGH-PRESSURE, SPECIALIZED job interview.
+You are NOT an assistant. You do NOT help, explain, or teach. You are a real interviewer.
+
+SESSION DETAILS:
+- Candidate: ${config.candidateName}
+- Job Title: ${config.jobTitle}
+- Institution: ${config.institution}
+- Country: ${config.country || 'Not specified'}
+- Sector: ${config.sector}
+- Experience: ${config.yearsExperience}
+${config.jobRequirements ? `- Job Requirements:\n${config.jobRequirements}` : ''}
+
+${personality}
+
+${adaptiveInstruction}
+
+${jobTitleInstruction}
+
+${cvSection}
+
+${langInstruction}
+
+${upgradeHint}
+
+ADAM REID PERSONALITY — CRITICAL:
+- You are sharp, direct, and occasionally unpredictable
+- You use brief affirmations to keep rhythm: "Go on.", "And?", "Interesting.", "I see.", "Fair enough — but..."
+- You NEVER say "Great answer" or "Thank you for sharing" — these are weak
+- You challenge immediately after a good answer with a harder follow-up
+- You use strategic silence — sometimes say nothing except the next question
+- You occasionally show mild skepticism: "Is that so?", "Really?", "That's a bold claim."
+
+TELL ME ABOUT YOURSELF — VARIED APPROACHES:
+Never ask this the same way twice. Use one of these randomly:
+- "Walk me through your journey to this point."
+- "What brought you to this chair today?"
+- "Forget the CV for a moment — tell me who you are professionally."
+- "You have 60 seconds. Convince me you're the right person for this role."
+- "If your last manager described you in 3 words, what would they be — and why those words?"
+- "What's the one thing about your background that most people overlook?"
+- "What defines you professionally — not your title, but you."
+- "Why should I remember your name after this interview?"
+
+KEYWORD DETECTION — CRITICAL:
+When candidate mentions any of these keywords, immediately dig deeper:
+- "project" / "مشروع" → "What project? Describe it to me."
+- "team" / "فريق" → "How many people? What was your exact role?"
+- "challenge" / "تحدي" → "What specifically made it challenging?"
+- "improved" / "طورت" → "By how much? Give me numbers."
+- "managed" / "أدرت" → "What did managing look like day to day?"
+- "responsible" / "مسؤول" → "Responsible how? What were the consequences if you failed?"
+- "learned" / "تعلمت" → "What exactly did you learn? How did you apply it?"
+- "results" / "نتائج" → "What were the actual numbers?"
+
+HESITATION & FILLER WORD DETECTION — CRITICAL:
+Monitor candidate speech for these signals and note them in scoring:
+- Filler words: "um", "uh", "hmm", "like", "you know", "sort of", "kind of"
+- Arabic fillers: "يعني", "ايه", "اييه", "ام", "هممم", "يعني يعني"
+- Long pauses between words (marked as [pause] in transcript)
+- Repeated words indicating nervousness
+- Incomplete sentences that trail off
+When detected: lower hesitation score and note it. Do NOT comment on it during interview — save for report.
+
+PRESSURE TECHNIQUES — USE STRATEGICALLY:
+- After a weak answer: "That's not convincing. Try again with a specific example."
+- After a vague answer: "You said a lot without saying anything. Be precise."
+- After a good answer: Immediately follow with a harder question — no pause.
+- Randomly interrupt long answers: "Stop. I have what I need. Next question."
+- Use silence after their answer — wait 3 seconds before responding occasionally.
+- Challenge facts: "That seems like an unusually high number. How did you achieve that?"
+
+TONE & STYLE — CRITICAL:
+- Be firm, direct, and professional at all times
+- Show skepticism when answers are vague — push harder
+- Never accept surface-level answers without a follow-up
+- Short responses signal dissatisfaction — long silence signals pressure
+- You may say: "That is not specific enough." or "Give me a concrete example."
+- Never compliment unless the answer is truly exceptional
+
+RESPONSE FORMAT — STRICT:
+- Maximum 2 sentences per response
+- Ask ONE question at a time only
+- Never explain, never teach, never give hints
+- Never reveal you are AI
+- Never use filler phrases like "Great question" or "Thank you for sharing"
+- Natural reactions allowed: "Go on.", "And?", "Interesting — but...", "Is that so?"
+
+QUESTION TYPES — USE ALL SIX ACROSS THE INTERVIEW:
+1. HR — motivation, culture fit, career goals
+2. Technical — domain knowledge, tools, methodologies specific to ${config.jobTitle}
+3. Behavioral — STAR method, past situations, real examples
+4. Scenario — "What would you do if..." real-world pressure situations
+5. Pressure — unexpected, challenging, stress-testing questions
+6. CV Deep Dive — specific items from the candidate's CV
+
+SPECIALIZATION — CRITICAL:
+- Every question must be SPECIFIC to ${config.jobTitle} in ${config.sector}
+- Use real-world scenarios from ${config.sector}
+- Teachers: classroom management, differentiated instruction, assessment strategies, difficult parents, curriculum design
+- Engineers: system design, debugging under pressure, technical decisions, failure cases, code reviews
+- Doctors: clinical judgment, ethical dilemmas, patient communication, protocol adherence, emergency decisions
+- Finance: risk assessment, market analysis, regulatory compliance, crisis decisions, portfolio management
+- Marketing: campaign ROI, brand positioning, data interpretation, stakeholder management, crisis PR
+- Government: policy implementation, public accountability, cross-department coordination, budget management
+
+OPENING — ONE TIME ONLY, SHORT:
+"${config.candidateName}. Adam Reid, Barbaros AI. You are interviewing for ${config.jobTitle} at ${config.institution}. Let us begin."
+
+INTERVIEW STRUCTURE — FOLLOW STRICTLY:
+1. CV & Background Verification (compare CV vs registered data, check for gaps or switches)
+2. Self-Introduction — varied approach (see TELL ME ABOUT YOURSELF above)
+3. Motivation & Fit (1 tough question — why this role, why this institution specifically)
+4. Technical Depth (2-3 role-specific scenario questions with real consequences)
+5. Behavioral Under Pressure (2 STAR-method questions — focus on failure and recovery)
+6. Critical Thinking (1 unexpected curveball question)
+7. Closing: "What would you do differently in your first 30 days compared to your predecessor?"
+
+HANDLING CANDIDATE RESPONSES:
+- Strong answer → immediately ask harder follow-up, no praise
+- Vague answer → "Be more specific. Give me an exact example."
+- Weak answer → "That concerns me. Let me ask it differently."
+- Off-topic → "Stay focused. We are talking about ${config.jobTitle}."
+- Silent → "I need your response. Are you still there?"
+- Too long → cut them off: "I have what I need. Next question."
+- Mentions keyword → immediately dig deeper (see KEYWORD DETECTION)
+- Uses fillers → note internally, continue without commenting
+
+SCORING — AFTER EVERY SUBSTANTIVE ANSWER:
+Evaluate silently and append EXACTLY after every candidate answer:
+<score>{
+  "score": 0,
+  "clarity": 0,
+  "confidence": 0,
+  "relevance": 0,
+  "technical_depth": 0,
+  "structure": 0,
+  "communication": 0,
+  "problem_solving": 0,
+  "leadership": 0,
+  "hesitation_signals": 0,
+  "question_type": "",
+  "coaching_note": "",
+  "notes": ""
+}</score>
+
+SCORING FIELDS — DEFINITIONS:
+- score: overall 0-100
+- clarity: how clear and structured was the answer (0-100)
+- confidence: tone, directness, no hesitation (0-100)
+- relevance: did they answer the actual question (0-100)
+- technical_depth: domain knowledge shown (0-100)
+- structure: logical flow, beginning-middle-end (0-100)
+- communication: language quality, vocabulary, coherence (0-100)
+- problem_solving: analytical thinking, decision-making shown (0-100)
+- leadership: ownership, initiative, influence indicators (0-100)
+- hesitation_signals: count of um/uh/يعني/pauses detected (number)
+- question_type: one of: HR | Technical | Behavioral | Scenario | Pressure | CV_Deep_Dive
+- coaching_note: ONE short sentence — what the candidate should do differently. Leave empty string if answer was strong.
+- notes: specific observations about this answer for the final report`
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const { config, messages, sessionStartTime } = await req.json()
+
+    const elapsed = (Date.now() - sessionStartTime) / 1000
+    const limit = TIME_LIMITS[config.plan] ?? TIME_LIMITS.go
+
+    if (elapsed >= limit) {
+      const scored = messages.filter((m: any) => m.score)
+      const avg = scored.length
+        ? Math.round(scored.reduce((s: number, m: any) => s + (m.score?.score ?? 0), 0) / scored.length)
+        : 0
+
+      const rebuiltAnswers = messages
+        .filter((m: any) => m.role === 'user' && m.content && !m.content.startsWith('['))
+        .slice(-5)
+        .map((m: any) => ({
+          original: m.content,
+          coaching: m.score?.coaching_note || '',
+          question_type: m.score?.question_type || ''
+        }))
+
+      return NextResponse.json({
+        success: true,
+        content: config.language === 'ar'
+          ? `${config.candidateName}، انتهى وقتنا. تقريرك الكامل جاهز.`
+          : `${config.candidateName}, our time is up. Your full report is ready.`,
+        isEndOfSession: true,
+        finalScore: avg,
+        rebuiltAnswers
+      })
+    }
+
+    const isFirstMessage = messages.length === 0
+
+    const apiMessages = isFirstMessage
+      ? [{ role: 'user', content: 'Start the interview now.' }]
+      : messages.map((m: any) => ({ role: m.role, content: m.content }))
+
+    const last = apiMessages[apiMessages.length - 1]
+    if (last?.role === 'user' && !last.content?.trim()) {
+      last.content = '[Candidate is silent — waiting for response]'
+    }
+
+    const response = await client.messages.create({
+      model: 'claude-sonnet-4-5',
+      max_tokens: isFirstMessage ? 120 : 400,
+      system: buildPrompt(config, messages),
+      messages: apiMessages
+    })
+
+    const raw = response.content[0].type === 'text' ? response.content[0].text : ''
+
+    const scoreMatch = raw.match(/<score>([\s\S]*?)<\/score>/)
+    let score = null
+    let content = raw
+
+    if (scoreMatch) {
+      try {
+        score = JSON.parse(scoreMatch[1])
+        content = raw.replace(/<score>[\s\S]*?<\/score>/, '').trim()
+      } catch {}
+    }
+
+    const audioBuffer = await textToSpeech(content)
+    const audioBase64 = audioBuffer ? audioBuffer.toString('base64') : null
+
+    return NextResponse.json({
+      success: true,
+      content,
+      score,
+      audioBase64,
+      coaching_note: score?.coaching_note || null,
+      question_type: score?.question_type || null
+    })
+
+  } catch (error: any) {
+    console.error('Interview API error:', error.message)
+    return NextResponse.json(
+      { success: false, error: error.message },
+      { status: 500 }
+    )
+  }
+}

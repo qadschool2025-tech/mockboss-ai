@@ -35,7 +35,7 @@ const highlightHesitation = (text: string, lang: string) => {
   let result = text
   words.forEach(word => {
     const regex = new RegExp(`\\b${word}\\b`, 'gi')
-    result = result.replace(regex, `<mark style="background:rgba(204,120,92,0.25);color:#CC785C;borderRadius:3px;padding:0 2px;fontWeight:700">${word}</mark>`)
+    result = result.replace(regex, `<mark style="background:rgba(204,120,92,0.25);color:#CC785C;border-radius:3px;padding:0 2px;font-weight:700">${word}</mark>`)
   })
   return result
 }
@@ -43,7 +43,6 @@ const highlightHesitation = (text: string, lang: string) => {
 const translations = {
   en: {
     basedOn: 'Based on highest hiring standards',
-    evaluator: 'Barbaros Interviewer',
     speaking: '● Speaking...',
     listening: '○ Listening',
     processing: 'Processing...',
@@ -73,7 +72,6 @@ const translations = {
   },
   ar: {
     basedOn: 'وفق أعلى معايير التوظيف',
-    evaluator: 'Barbaros Interviewer',
     speaking: '● يتحدث...',
     listening: '○ يستمع',
     processing: 'جاري المعالجة...',
@@ -103,7 +101,6 @@ const translations = {
   }
 }
 
-// Barbaros Brand Component
 const Barbaros = ({ size = 22 }: { size?: number }) => (
   <span style={{ fontWeight: 900, fontSize: size }}>
     <span style={{ color: '#1A1A1A' }}>Barbar</span>
@@ -283,22 +280,18 @@ export default function InterviewPage() {
         audioRef.current = null
         setInterviewerSpeaking(false)
       }
-
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' })
       mediaRecorderRef.current = mediaRecorder
       audioChunksRef.current = []
-
       mediaRecorder.ondataavailable = e => {
         if (e.data.size > 0) audioChunksRef.current.push(e.data)
       }
-
       mediaRecorder.onstop = async () => {
         stream.getTracks().forEach(t => t.stop())
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
         await transcribeAudio(audioBlob)
       }
-
       mediaRecorder.start()
       setIsRecording(true)
     } catch (err: any) {
@@ -319,11 +312,9 @@ export default function InterviewPage() {
       const formData = new FormData()
       formData.append('audio', audioBlob, 'recording.webm')
       formData.append('language', CONFIG.language === 'ar' ? 'ar' : CONFIG.language === 'mixed' ? 'ar' : 'en')
-
       const res = await fetch('/api/transcribe', { method: 'POST', body: formData })
       const data = await res.json()
       if (!data.success) throw new Error(data.error)
-
       if (data.text?.trim()) {
         const userMsg: Message = { role: 'user', content: data.text.trim(), voiceAnalysis: data.analysis }
         const newMessages = [...messagesRef.current, userMsg]
@@ -381,14 +372,11 @@ export default function InterviewPage() {
       })
       const data = await res.json()
       if (!data.success) throw new Error(data.error)
-
       const newMsg: Message = { role: 'assistant', content: data.content, score: data.score }
       const updatedMsgs = [...msgs, newMsg]
       setMessages(updatedMsgs)
       setLastInterviewerText(data.content)
-
       if (data.audioBase64) playAudio(data.audioBase64)
-
       let latestScore = overallScoreRef.current
       if (data.score) {
         const all = [...msgs.filter(m => m.score).map(m => m.score.score), data.score.score]
@@ -396,7 +384,6 @@ export default function InterviewPage() {
         setOverallScore(latestScore)
         setQuestionCount(prev => prev + 1)
       }
-
       if (data.isEndOfSession) {
         endSession(updatedMsgs, latestScore)
       } else {
@@ -434,7 +421,6 @@ export default function InterviewPage() {
     }
   }
 
-  // شاشة البداية
   if (!started) {
     return (
       <div
@@ -451,20 +437,16 @@ export default function InterviewPage() {
         }}
       >
         <div style={{ textAlign: 'center', padding: '24px' }}>
-
           <div style={{ fontSize: 72, marginBottom: 24 }}>🎯</div>
-
           <div style={{ fontSize: 28, marginBottom: 8 }}>
             <Barbaros size={28} />
           </div>
-
           <div style={{ fontSize: 14, color: 'rgba(26,26,26,0.55)', marginBottom: 6, fontWeight: 600 }}>
             {CONFIG.candidateName} · {CONFIG.jobTitle}
           </div>
           <div style={{ fontSize: 12, color: 'rgba(26,26,26,0.4)', marginBottom: 48 }}>
             {CONFIG.institution}
           </div>
-
           <button
             onClick={handleStart}
             style={{
@@ -482,7 +464,6 @@ export default function InterviewPage() {
             }}>
             {t.startBtn}
           </button>
-
           <div style={{ fontSize: 11, color: 'rgba(26,26,26,0.35)' }}>
             {t.startHint}
           </div>
@@ -514,26 +495,23 @@ export default function InterviewPage() {
         alignItems: 'center'
       }}>
         <Barbaros size={20} />
-
         <div style={{ textAlign: 'center' }}>
           <div style={{ fontSize: 12, fontWeight: 700, color: '#1A1A1A' }}>
             {CONFIG.jobTitle} · {CONFIG.institution}
           </div>
           <div style={{ fontSize: 10, color: 'rgba(26,26,26,0.45)' }}>{t.basedOn}</div>
         </div>
-
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <button
             onClick={toggleMute}
             style={{
-              background: 'none',
+              background: '#FFFFFF',
               border: '0.5px solid #E5DDD0',
               borderRadius: 6,
               color: '#1A1A1A',
               padding: '3px 8px',
               cursor: 'pointer',
               fontSize: 14,
-              background: '#FFFFFF',
             }}>
             {isMuted ? '🔇' : '🔊'}
           </button>
@@ -581,7 +559,6 @@ export default function InterviewPage() {
           transition: 'all 0.3s',
           boxShadow: interviewerSpeaking ? '0 0 24px rgba(204,120,92,0.15)' : '0 1px 4px rgba(0,0,0,0.06)'
         }}>
-
           <div style={{
             width: 80,
             height: 80,
@@ -598,20 +575,20 @@ export default function InterviewPage() {
             🎯
           </div>
 
-          <div style={{ fontSize: 15, fontWeight: 900, marginBottom: 4, color: '#1A1A1A' }}>
+          <div style={{ fontSize: 15, marginBottom: 4 }}>
             <span style={{ fontWeight: 900 }}>
               <span style={{ color: '#1A1A1A' }}>Barbar</span>
               <span style={{ color: '#CC785C' }}>os</span>
             </span>
             {' '}
-            <span style={{ color: '#1A1A1A', fontWeight: 600 }}>Interviewer</span>
+            <span style={{ color: '#1A1A1A', fontWeight: 400 }}>Interviewer</span>
           </div>
 
           <div style={{ fontSize: 11, color: 'rgba(26,26,26,0.45)', marginBottom: 20 }}>
             {t.basedOn}
           </div>
 
-          {/* Interviewer Voice Waves */}
+          {/* Voice Waves */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, height: 44, marginBottom: 8 }}>
             {interviewerSpeaking ? (
               [16, 28, 36, 32, 36, 24, 16].map((h, i) => (
@@ -680,7 +657,6 @@ export default function InterviewPage() {
           transition: 'all 0.3s',
           boxShadow: isRecording ? '0 0 20px rgba(220,38,38,0.08)' : '0 1px 4px rgba(0,0,0,0.06)'
         }}>
-
           <div style={{
             width: 56,
             height: 56,
@@ -698,15 +674,12 @@ export default function InterviewPage() {
           }}>
             {CONFIG.candidateName?.charAt(0).toUpperCase()}
           </div>
-
           <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 2, color: '#1A1A1A' }}>
             {CONFIG.candidateName}
           </div>
           <div style={{ fontSize: 10, color: 'rgba(26,26,26,0.45)', marginBottom: 14 }}>
             {t.candidate} · {CONFIG.yearsExperience}
           </div>
-
-          {/* Candidate Waves */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, height: 32 }}>
             {isRecording ? (
               [12, 22, 28, 22, 12].map((h, i) => (
@@ -727,7 +700,6 @@ export default function InterviewPage() {
               </div>
             )}
           </div>
-
           {isRecording && (
             <div style={{ fontSize: 10, color: '#DC2626', marginTop: 8, fontWeight: 700 }}>
               {t.keepHolding}
@@ -768,10 +740,18 @@ export default function InterviewPage() {
               maxHeight: 280,
               overflowY: 'auto',
             }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: 'rgba(26,26,26,0.45)', letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: 12 }}>
+              <div style={{
+                fontSize: 11,
+                fontWeight: 700,
+                color: 'rgba(26,26,26,0.45)',
+                letterSpacing: 0.5,
+                textTransform: 'uppercase',
+                marginBottom: 12
+              }}>
                 {t.transcript}
               </div>
-              {messages.filter(m => !m.content.startsWith('['))
+              {messages
+                .filter(m => !m.content.startsWith('['))
                 .map((msg, i) => (
                   <div key={i} style={{
                     marginBottom: 12,
@@ -823,19 +803,16 @@ export default function InterviewPage() {
               ⚠ {micError}
             </div>
           )}
-
           {!isRecording && !isLoading && !isTranscribing && (
             <div style={{ fontSize: 11, color: 'rgba(26,26,26,0.4)', textAlign: 'center', marginBottom: 8 }}>
               🎤 {t.holdHint}
             </div>
           )}
-
           {isRecording && (
             <div style={{ fontSize: 11, color: '#DC2626', textAlign: 'center', marginBottom: 8, fontWeight: 700 }}>
               {t.recording}
             </div>
           )}
-
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <button
               onMouseDown={startRecording}
@@ -858,7 +835,6 @@ export default function InterviewPage() {
               }}>
               {isTranscribing ? '⏳' : isRecording ? '⏹' : '🎤'}
             </button>
-
             <textarea
               ref={inputRef}
               value={input}
@@ -881,7 +857,6 @@ export default function InterviewPage() {
                 resize: 'none'
               }}
             />
-
             <button
               onClick={sendMessage}
               disabled={isLoading || !input.trim() || isRecording || isTranscribing}
@@ -944,7 +919,6 @@ export default function InterviewPage() {
         <div style={{ fontSize: 10, color: 'rgba(26,26,26,0.45)', fontWeight: 600 }}>
           {t.question}{questionCount} · {getPlanLabel(CONFIG.plan)}
         </div>
-
         <div style={{
           background: 'rgba(204,120,92,0.1)',
           border: '0.5px solid rgba(204,120,92,0.25)',
@@ -959,8 +933,6 @@ export default function InterviewPage() {
             {overallScore ?? '—'}
           </div>
         </div>
-
-        {/* End Button — أكبر قليلاً */}
         <button
           onClick={() => { if (confirm(t.endConfirm)) endSession(messagesRef.current, overallScoreRef.current) }}
           style={{

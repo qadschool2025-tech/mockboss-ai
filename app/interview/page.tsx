@@ -16,6 +16,8 @@ interface Message {
   content: string
   score?: any
   voiceAnalysis?: VoiceAnalysis
+  coaching_note?: string
+  question_type?: string
 }
 
 const getPlanTime = (plan: string) => {
@@ -38,6 +40,15 @@ const highlightHesitation = (text: string, lang: string) => {
     result = result.replace(regex, `<mark style="background:rgba(204,120,92,0.25);color:#CC785C;border-radius:3px;padding:0 2px;font-weight:700">${word}</mark>`)
   })
   return result
+}
+
+const QUESTION_TYPE_COLORS: Record<string, { bg: string; color: string }> = {
+  HR:           { bg: 'rgba(59,130,246,0.1)',  color: '#3B82F6' },
+  Technical:    { bg: 'rgba(16,185,129,0.1)',  color: '#10B981' },
+  Behavioral:   { bg: 'rgba(139,92,246,0.1)',  color: '#8B5CF6' },
+  Scenario:     { bg: 'rgba(245,158,11,0.1)',  color: '#F59E0B' },
+  Pressure:     { bg: 'rgba(239,68,68,0.1)',   color: '#EF4444' },
+  CV_Deep_Dive: { bg: 'rgba(204,120,92,0.1)',  color: '#CC785C' },
 }
 
 const translations = {
@@ -69,6 +80,7 @@ const translations = {
     showTranscript: 'Show Transcript',
     hideTranscript: 'Hide Transcript',
     transcript: 'Conversation',
+    recruiterNote: 'Recruiter Note',
   },
   ar: {
     basedOn: 'وفق أعلى معايير التوظيف',
@@ -98,6 +110,7 @@ const translations = {
     showTranscript: 'عرض المحادثة',
     hideTranscript: 'إخفاء المحادثة',
     transcript: 'المحادثة',
+    recruiterNote: 'ملاحظة المحاور',
   }
 }
 
@@ -117,6 +130,7 @@ export default function InterviewPage() {
         candidateName: 'Candidate',
         jobTitle: 'Professional',
         institution: 'Company',
+        country: '',
         sector: 'General',
         yearsExperience: '1–3 years',
         language: 'en',
@@ -133,6 +147,7 @@ export default function InterviewPage() {
       candidateName: 'Candidate',
       jobTitle: 'Professional',
       institution: 'Company',
+      country: '',
       sector: 'General',
       yearsExperience: '1–3 years',
       language: 'en',
@@ -171,6 +186,8 @@ export default function InterviewPage() {
   const [micError, setMicError] = useState<string | null>(null)
   const [interviewerSpeaking, setInterviewerSpeaking] = useState(false)
   const [lastInterviewerText, setLastInterviewerText] = useState('')
+  const [lastQuestionType, setLastQuestionType] = useState<string | null>(null)
+  const [lastCoachingNote, setLastCoachingNote] = useState<string | null>(null)
   const [showTranscript, setShowTranscript] = useState(false)
 
   const inputRef = useRef<HTMLTextAreaElement>(null)
@@ -372,11 +389,24 @@ export default function InterviewPage() {
       })
       const data = await res.json()
       if (!data.success) throw new Error(data.error)
-      const newMsg: Message = { role: 'assistant', content: data.content, score: data.score }
+
+      const newMsg: Message = {
+        role: 'assistant',
+        content: data.content,
+        score: data.score,
+        coaching_note: data.coaching_note,
+        question_type: data.question_type,
+      }
       const updatedMsgs = [...msgs, newMsg]
       setMessages(updatedMsgs)
       setLastInterviewerText(data.content)
+
+      if (data.question_type) setLastQuestionType(data.question_type)
+      if (data.coaching_note) setLastCoachingNote(data.coaching_note)
+      else setLastCoachingNote(null)
+
       if (data.audioBase64) playAudio(data.audioBase64)
+
       let latestScore = overallScoreRef.current
       if (data.score) {
         const all = [...msgs.filter(m => m.score).map(m => m.score.score), data.score.score]
@@ -384,7 +414,11 @@ export default function InterviewPage() {
         setOverallScore(latestScore)
         setQuestionCount(prev => prev + 1)
       }
+
       if (data.isEndOfSession) {
+        if (data.rebuiltAnswers) {
+          sessionStorage.setItem('barbaros_rebuilt', JSON.stringify(data.rebuiltAnswers))
+        }
         endSession(updatedMsgs, latestScore)
       } else {
         resetSilenceTimer()
@@ -560,17 +594,12 @@ export default function InterviewPage() {
           boxShadow: interviewerSpeaking ? '0 0 24px rgba(204,120,92,0.15)' : '0 1px 4px rgba(0,0,0,0.06)'
         }}>
           <div style={{
-            width: 80,
-            height: 80,
+            width: 80, height: 80,
             background: interviewerSpeaking ? '#CC785C' : '#F5F1EB',
             border: `2px solid ${interviewerSpeaking ? '#CC785C' : '#E5DDD0'}`,
             borderRadius: '50%',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontSize: 36,
-            margin: '0 auto 16px',
-            transition: 'all 0.3s',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 36, margin: '0 auto 16px', transition: 'all 0.3s',
           }}>
             🎯
           </div>
@@ -584,32 +613,43 @@ export default function InterviewPage() {
             <span style={{ color: '#1A1A1A', fontWeight: 400 }}>Interviewer</span>
           </div>
 
-          <div style={{ fontSize: 11, color: 'rgba(26,26,26,0.45)', marginBottom: 20 }}>
+          <div style={{ fontSize: 11, color: 'rgba(26,26,26,0.45)', marginBottom: 16 }}>
             {t.basedOn}
           </div>
+
+          {/* Question Type Badge */}
+          {lastQuestionType && (
+            <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'center' }}>
+              <span style={{
+                fontSize: 10,
+                fontWeight: 700,
+                letterSpacing: 0.5,
+                padding: '4px 10px',
+                borderRadius: 20,
+                background: QUESTION_TYPE_COLORS[lastQuestionType]?.bg || 'rgba(26,26,26,0.06)',
+                color: QUESTION_TYPE_COLORS[lastQuestionType]?.color || '#1A1A1A',
+                textTransform: 'uppercase',
+              }}>
+                {lastQuestionType.replace('_', ' ')}
+              </span>
+            </div>
+          )}
 
           {/* Voice Waves */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, height: 44, marginBottom: 8 }}>
             {interviewerSpeaking ? (
               [16, 28, 36, 32, 36, 24, 16].map((h, i) => (
                 <div key={i} style={{
-                  width: 4,
-                  borderRadius: 4,
-                  background: '#CC785C',
+                  width: 4, borderRadius: 4, background: '#CC785C',
                   animation: 'wave 0.8s ease-in-out infinite',
-                  animationDelay: `${i * 0.1}s`,
-                  height: `${h}px`
+                  animationDelay: `${i * 0.1}s`, height: `${h}px`
                 }} />
               ))
             ) : isLoading ? (
               [0, 1, 2].map(i => (
                 <div key={i} style={{
-                  width: 8,
-                  height: 8,
-                  background: '#CC785C',
-                  borderRadius: '50%',
-                  animation: `pulse 1.2s infinite ${i * 0.2}s`,
-                  opacity: 0.5
+                  width: 8, height: 8, background: '#CC785C', borderRadius: '50%',
+                  animation: `pulse 1.2s infinite ${i * 0.2}s`, opacity: 0.5
                 }} />
               ))
             ) : (
@@ -625,15 +665,12 @@ export default function InterviewPage() {
             </div>
           )}
 
-          {/* نص المحاور يظهر دائماً */}
+          {/* Interviewer Text */}
           {lastInterviewerText && (
             <div style={{
-              marginTop: 14,
-              padding: '14px 16px',
-              background: '#F5F1EB',
-              border: '0.5px solid #E5DDD0',
-              borderRadius: 12,
-              textAlign: isRTL ? 'right' : 'left'
+              marginTop: 14, padding: '14px 16px',
+              background: '#F5F1EB', border: '0.5px solid #E5DDD0',
+              borderRadius: 12, textAlign: isRTL ? 'right' : 'left'
             }}>
               <div
                 style={{ fontSize: 13, color: '#1A1A1A', lineHeight: 1.7 }}
@@ -643,34 +680,41 @@ export default function InterviewPage() {
               />
             </div>
           )}
+
+          {/* Coaching Note */}
+          {lastCoachingNote && (
+            <div style={{
+              marginTop: 10,
+              padding: '10px 14px',
+              background: 'rgba(204,120,92,0.06)',
+              border: '0.5px solid rgba(204,120,92,0.3)',
+              borderRadius: 10,
+              textAlign: isRTL ? 'right' : 'left',
+            }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: '#CC785C', marginBottom: 4, letterSpacing: 0.5, textTransform: 'uppercase' }}>
+                {t.recruiterNote}
+              </div>
+              <div style={{ fontSize: 12, color: '#1A1A1A', lineHeight: 1.6 }}>
+                {lastCoachingNote}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Candidate Card */}
         <div style={{
-          width: '100%',
-          maxWidth: 440,
+          width: '100%', maxWidth: 440,
           background: '#FFFFFF',
           border: `1px solid ${isRecording ? 'rgba(220,38,38,0.5)' : isTranscribing ? 'rgba(204,120,92,0.3)' : '#E5DDD0'}`,
-          borderRadius: 20,
-          padding: '20px 24px',
-          textAlign: 'center',
+          borderRadius: 20, padding: '20px 24px', textAlign: 'center',
           transition: 'all 0.3s',
           boxShadow: isRecording ? '0 0 20px rgba(220,38,38,0.08)' : '0 1px 4px rgba(0,0,0,0.06)'
         }}>
           <div style={{
-            width: 56,
-            height: 56,
-            background: '#F5F1EB',
+            width: 56, height: 56, background: '#F5F1EB',
             border: `2px solid ${isRecording ? '#DC2626' : '#E5DDD0'}`,
-            borderRadius: '50%',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontWeight: 800,
-            fontSize: 20,
-            margin: '0 auto 10px',
-            transition: 'all 0.3s',
-            color: '#1A1A1A'
+            borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontWeight: 800, fontSize: 20, margin: '0 auto 10px', transition: 'all 0.3s', color: '#1A1A1A'
           }}>
             {CONFIG.candidateName?.charAt(0).toUpperCase()}
           </div>
@@ -684,12 +728,9 @@ export default function InterviewPage() {
             {isRecording ? (
               [12, 22, 28, 22, 12].map((h, i) => (
                 <div key={i} style={{
-                  width: 4,
-                  borderRadius: 4,
-                  background: '#DC2626',
+                  width: 4, borderRadius: 4, background: '#DC2626',
                   animation: 'wave 0.6s ease-in-out infinite',
-                  animationDelay: `${i * 0.1}s`,
-                  height: `${h}px`
+                  animationDelay: `${i * 0.1}s`, height: `${h}px`
                 }} />
               ))
             ) : isTranscribing ? (
@@ -712,66 +753,72 @@ export default function InterviewPage() {
           <button
             onClick={() => setShowTranscript(prev => !prev)}
             style={{
-              width: '100%',
-              padding: '10px',
-              background: '#FFFFFF',
-              border: '0.5px solid #E5DDD0',
-              borderRadius: 10,
-              color: '#1A1A1A',
-              fontSize: 12,
-              fontWeight: 600,
-              cursor: 'pointer',
-              fontFamily: 'inherit',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 6
+              width: '100%', padding: '10px', background: '#FFFFFF',
+              border: '0.5px solid #E5DDD0', borderRadius: 10,
+              color: '#1A1A1A', fontSize: 12, fontWeight: 600,
+              cursor: 'pointer', fontFamily: 'inherit',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6
             }}>
             {showTranscript ? '▲' : '▼'} {showTranscript ? t.hideTranscript : t.showTranscript}
           </button>
 
           {showTranscript && (
             <div style={{
-              marginTop: 8,
-              background: '#FFFFFF',
-              border: '0.5px solid #E5DDD0',
-              borderRadius: 12,
-              padding: '16px',
-              maxHeight: 280,
-              overflowY: 'auto',
+              marginTop: 8, background: '#FFFFFF',
+              border: '0.5px solid #E5DDD0', borderRadius: 12,
+              padding: '16px', maxHeight: 280, overflowY: 'auto',
             }}>
               <div style={{
-                fontSize: 11,
-                fontWeight: 700,
-                color: 'rgba(26,26,26,0.45)',
-                letterSpacing: 0.5,
-                textTransform: 'uppercase',
-                marginBottom: 12
+                fontSize: 11, fontWeight: 700, color: 'rgba(26,26,26,0.45)',
+                letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: 12
               }}>
                 {t.transcript}
               </div>
               {messages
                 .filter(m => !m.content.startsWith('['))
                 .map((msg, i) => (
-                  <div key={i} style={{
-                    marginBottom: 12,
-                    textAlign: msg.role === 'user' ? (isRTL ? 'left' : 'right') : (isRTL ? 'right' : 'left')
-                  }}>
+                  <div key={i} style={{ marginBottom: 12, textAlign: msg.role === 'user' ? (isRTL ? 'left' : 'right') : (isRTL ? 'right' : 'left') }}>
+                    {/* Question Type badge in transcript */}
+                    {msg.role === 'assistant' && msg.question_type && (
+                      <div style={{ marginBottom: 4 }}>
+                        <span style={{
+                          fontSize: 9, fontWeight: 700, letterSpacing: 0.5,
+                          padding: '2px 8px', borderRadius: 20,
+                          background: QUESTION_TYPE_COLORS[msg.question_type]?.bg || 'rgba(26,26,26,0.06)',
+                          color: QUESTION_TYPE_COLORS[msg.question_type]?.color || '#1A1A1A',
+                          textTransform: 'uppercase',
+                        }}>
+                          {msg.question_type.replace('_', ' ')}
+                        </span>
+                      </div>
+                    )}
                     <div style={{
-                      display: 'inline-block',
-                      maxWidth: '85%',
+                      display: 'inline-block', maxWidth: '85%',
                       padding: '8px 12px',
                       borderRadius: msg.role === 'user' ? '12px 12px 2px 12px' : '12px 12px 12px 2px',
                       background: msg.role === 'user' ? '#CC785C' : '#F5F1EB',
                       color: msg.role === 'user' ? '#FFFFFF' : '#1A1A1A',
-                      fontSize: 12,
-                      lineHeight: 1.6,
+                      fontSize: 12, lineHeight: 1.6,
                       fontWeight: msg.role === 'user' ? 600 : 400,
                     }}>
                       {msg.role === 'assistant' ? (
                         <span dangerouslySetInnerHTML={{ __html: highlightHesitation(msg.content, CONFIG.language) }} />
                       ) : msg.content}
                     </div>
+                    {/* Coaching note in transcript */}
+                    {msg.role === 'assistant' && msg.coaching_note && (
+                      <div style={{
+                        marginTop: 4,
+                        padding: '6px 10px',
+                        background: 'rgba(204,120,92,0.06)',
+                        border: '0.5px solid rgba(204,120,92,0.25)',
+                        borderRadius: 8,
+                        fontSize: 11, color: '#CC785C', lineHeight: 1.5
+                      }}>
+                        <span style={{ fontWeight: 700 }}>{t.recruiterNote}: </span>
+                        {msg.coaching_note}
+                      </div>
+                    )}
                   </div>
                 ))}
               <div ref={transcriptEndRef} />
@@ -783,22 +830,12 @@ export default function InterviewPage() {
 
       {/* Input Area */}
       {!isEnded ? (
-        <div style={{
-          padding: '12px 16px',
-          borderTop: '0.5px solid #E5DDD0',
-          background: '#F5F1EB'
-        }}>
+        <div style={{ padding: '12px 16px', borderTop: '0.5px solid #E5DDD0', background: '#F5F1EB' }}>
           {micError && (
             <div style={{
-              fontSize: 11,
-              color: '#DC2626',
-              marginBottom: 8,
-              textAlign: 'center',
-              padding: '6px 10px',
-              background: 'rgba(220,38,38,0.06)',
-              border: '0.5px solid rgba(220,38,38,0.2)',
-              borderRadius: 8,
-              fontWeight: 600
+              fontSize: 11, color: '#DC2626', marginBottom: 8, textAlign: 'center',
+              padding: '6px 10px', background: 'rgba(220,38,38,0.06)',
+              border: '0.5px solid rgba(220,38,38,0.2)', borderRadius: 8, fontWeight: 600
             }}>
               ⚠ {micError}
             </div>
@@ -821,17 +858,12 @@ export default function InterviewPage() {
               onTouchEnd={(e) => { e.preventDefault(); stopRecording() }}
               disabled={isLoading || isTranscribing || isEnded}
               style={{
-                width: 52,
-                height: 52,
-                borderRadius: 12,
-                border: 'none',
+                width: 52, height: 52, borderRadius: 12, border: 'none',
                 cursor: isLoading || isTranscribing ? 'not-allowed' : 'pointer',
-                flexShrink: 0,
-                fontSize: 22,
+                flexShrink: 0, fontSize: 22,
                 background: isRecording ? '#DC2626' : '#1A1A1A',
                 boxShadow: isRecording ? '0 0 20px rgba(220,38,38,0.5)' : 'none',
-                transition: 'all 0.15s',
-                userSelect: 'none' as any
+                transition: 'all 0.15s', userSelect: 'none' as any
               }}>
               {isTranscribing ? '⏳' : isRecording ? '⏹' : '🎤'}
             </button>
@@ -845,44 +877,28 @@ export default function InterviewPage() {
               rows={1}
               dir={isRTL ? 'rtl' : 'ltr'}
               style={{
-                flex: 1,
-                background: '#FFFFFF',
-                border: '0.5px solid #E5DDD0',
-                color: '#1A1A1A',
-                fontFamily: 'inherit',
-                fontSize: 13,
-                padding: '9px 12px',
-                borderRadius: 8,
-                outline: 'none',
-                resize: 'none'
+                flex: 1, background: '#FFFFFF', border: '0.5px solid #E5DDD0',
+                color: '#1A1A1A', fontFamily: 'inherit', fontSize: 13,
+                padding: '9px 12px', borderRadius: 8, outline: 'none', resize: 'none'
               }}
             />
             <button
               onClick={sendMessage}
               disabled={isLoading || !input.trim() || isRecording || isTranscribing}
               style={{
-                width: 52,
-                height: 52,
+                width: 52, height: 52,
                 background: (isLoading || !input.trim()) ? '#E5DDD0' : '#CC785C',
-                border: 'none',
-                borderRadius: 12,
+                border: 'none', borderRadius: 12,
                 cursor: (isLoading || !input.trim()) ? 'not-allowed' : 'pointer',
                 color: (isLoading || !input.trim()) ? 'rgba(26,26,26,0.3)' : '#fff',
-                fontSize: 20,
-                flexShrink: 0,
-                transition: 'background 0.15s'
+                fontSize: 20, flexShrink: 0, transition: 'background 0.15s'
               }}>
               {isRTL ? '←' : '→'}
             </button>
           </div>
         </div>
       ) : (
-        <div style={{
-          padding: 20,
-          textAlign: 'center',
-          borderTop: '0.5px solid #E5DDD0',
-          background: '#F5F1EB'
-        }}>
+        <div style={{ padding: 20, textAlign: 'center', borderTop: '0.5px solid #E5DDD0', background: '#F5F1EB' }}>
           <div style={{ fontSize: 14, color: '#CC785C', marginBottom: 8, fontWeight: 700 }}>
             {t.sessionEnded} · {t.score}: {overallScore ?? '—'}/100
           </div>
@@ -890,17 +906,11 @@ export default function InterviewPage() {
             {t.redirecting}
           </div>
           <button
-            onClick={() => router.push('/report')}
+            onClick={() => router.push('/session-end')}
             style={{
-              background: '#CC785C',
-              color: '#fff',
-              border: 'none',
-              borderRadius: 8,
-              padding: '10px 24px',
-              fontSize: 14,
-              fontWeight: 700,
-              cursor: 'pointer',
-              fontFamily: 'inherit'
+              background: '#CC785C', color: '#fff', border: 'none',
+              borderRadius: 8, padding: '10px 24px', fontSize: 14,
+              fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit'
             }}>
             {t.viewReport}
           </button>
@@ -909,22 +919,15 @@ export default function InterviewPage() {
 
       {/* Bottom Bar */}
       <div style={{
-        background: '#EDE6D8',
-        borderTop: '0.5px solid #E5DDD0',
-        padding: '8px 16px',
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center'
+        background: '#EDE6D8', borderTop: '0.5px solid #E5DDD0',
+        padding: '8px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center'
       }}>
         <div style={{ fontSize: 10, color: 'rgba(26,26,26,0.45)', fontWeight: 600 }}>
           {t.question}{questionCount} · {getPlanLabel(CONFIG.plan)}
         </div>
         <div style={{
-          background: 'rgba(204,120,92,0.1)',
-          border: '0.5px solid rgba(204,120,92,0.25)',
-          borderRadius: 6,
-          padding: '4px 12px',
-          textAlign: 'center'
+          background: 'rgba(204,120,92,0.1)', border: '0.5px solid rgba(204,120,92,0.25)',
+          borderRadius: 6, padding: '4px 12px', textAlign: 'center'
         }}>
           <div style={{ fontSize: 8, color: 'rgba(26,26,26,0.4)', textTransform: 'uppercase', fontWeight: 700 }}>
             {t.performance}
@@ -936,27 +939,16 @@ export default function InterviewPage() {
         <button
           onClick={() => { if (confirm(t.endConfirm)) endSession(messagesRef.current, overallScoreRef.current) }}
           style={{
-            background: 'rgba(220,38,38,0.08)',
-            border: '0.5px solid rgba(220,38,38,0.25)',
-            color: '#DC2626',
-            borderRadius: 8,
-            padding: '8px 18px',
-            fontSize: 13,
-            fontWeight: 700,
-            cursor: 'pointer',
-            fontFamily: 'inherit'
+            background: 'rgba(220,38,38,0.08)', border: '0.5px solid rgba(220,38,38,0.25)',
+            color: '#DC2626', borderRadius: 8, padding: '8px 18px',
+            fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit'
           }}>
           {t.end}
         </button>
       </div>
 
       {/* Footer */}
-      <footer style={{
-        background: '#EDE6D8',
-        borderTop: '0.5px solid #E5DDD0',
-        padding: '8px 16px',
-        textAlign: 'center'
-      }}>
+      <footer style={{ background: '#EDE6D8', borderTop: '0.5px solid #E5DDD0', padding: '8px 16px', textAlign: 'center' }}>
         <div style={{ fontSize: 10, color: 'rgba(26,26,26,0.3)' }}>{t.poweredBy}</div>
       </footer>
 

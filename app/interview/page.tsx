@@ -61,7 +61,7 @@ const translations = {
     yourTurn: 'Your turn',
     listeningToInterviewer: 'Listening to Interviewer...',
     tapToRecord: '🎤 Tap mic to start recording',
-    tapToStop: '🔴 Tap again to stop & send',
+    tapToStop: '🔴 Tap again to stop & send your answer',
     recording: '● Recording...',
     typeHere: 'Or type your answer here...',
     micDenied: 'Microphone access denied — please allow mic permission',
@@ -90,8 +90,8 @@ const translations = {
     candidate: 'مرشح',
     yourTurn: 'دورك',
     listeningToInterviewer: 'يستمع للمحاور...',
-    tapToRecord: '🎤 اضغط للتسجيل',
-    tapToStop: '🔴 اضغط مجدداً للإرسال',
+    tapToRecord: '🎤 اضغط على المايك للبدء',
+    tapToStop: '🔴 اضغط مجدداً لإيقاف التسجيل وإرسال إجابتك',
     recording: '● جاري التسجيل...',
     typeHere: 'أو اكتب إجابتك هنا...',
     micDenied: 'تم رفض الوصول للميكروفون — يرجى السماح بالإذن',
@@ -214,7 +214,6 @@ export default function InterviewPage() {
     }
   }, [audioReady, pendingAudio])
 
-  // Recording timer counter
   useEffect(() => {
     if (isRecording) {
       setRecordingSeconds(0)
@@ -294,18 +293,15 @@ export default function InterviewPage() {
     }, 30000)
   }, [])
 
-  // ── TOGGLE MIC — ضغطة تبدأ، ضغطة ثانية توقف وترسل ──────────────────────
   const toggleRecording = async () => {
     if (isLoading || isTranscribing || isEnded) return
 
     if (isRecordingRef.current) {
-      // ── ضغطة ثانية: أوقف وأرسل ──
       if (mediaRecorderRef.current) {
         mediaRecorderRef.current.stop()
         setIsRecording(false)
       }
     } else {
-      // ── ضغطة أولى: ابدأ التسجيل ──
       try {
         handleFirstInteraction()
         setMicError(null)
@@ -315,22 +311,18 @@ export default function InterviewPage() {
           audioRef.current = null
           setInterviewerSpeaking(false)
         }
-
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
         const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' })
         mediaRecorderRef.current = mediaRecorder
         audioChunksRef.current = []
-
         mediaRecorder.ondataavailable = e => {
           if (e.data.size > 0) audioChunksRef.current.push(e.data)
         }
-
         mediaRecorder.onstop = async () => {
           stream.getTracks().forEach(track => track.stop())
           const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
           await transcribeAudio(audioBlob)
         }
-
         mediaRecorder.start()
         setIsRecording(true)
       } catch (err: any) {
@@ -512,7 +504,6 @@ export default function InterviewPage() {
       dir={isRTL ? 'rtl' : 'ltr'}
       style={{ fontFamily: 'system-ui, sans-serif', background: '#F5F1EB', color: '#1A1A1A', minHeight: '100vh', display: 'flex', flexDirection: 'column' }}
     >
-      {/* Nav */}
       <nav style={{ background: '#F5F1EB', borderBottom: '0.5px solid #E5DDD0', padding: '12px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <Barbaros size={20} />
         <div style={{ textAlign: 'center' }}>
@@ -532,7 +523,6 @@ export default function InterviewPage() {
         </div>
       </nav>
 
-      {/* Main Room */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '24px 16px', gap: 16 }}>
 
         {/* Interviewer Card */}
@@ -641,7 +631,6 @@ export default function InterviewPage() {
             )}
           </div>
 
-          {/* Recording timer */}
           {isRecording && (
             <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
               <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#DC2626', animation: 'pulse 1s infinite' }} />
@@ -718,14 +707,18 @@ export default function InterviewPage() {
             </div>
           )}
 
-          {/* Hint text */}
+          {/* Hint — toggle based on state */}
           <div style={{ fontSize: 11, textAlign: 'center', marginBottom: 8, fontWeight: 600, color: isRecording ? '#DC2626' : 'rgba(26,26,26,0.4)' }}>
-            {isRecording ? t.tapToStop : isTranscribing ? t.processing : !isLoading ? t.tapToRecord : ''}
+            {isRecording
+              ? t.tapToStop
+              : isTranscribing
+              ? t.processing
+              : !isLoading
+              ? t.tapToRecord
+              : ''}
           </div>
 
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-
-            {/* Toggle Mic Button */}
             <button
               onClick={toggleRecording}
               disabled={isLoading || isTranscribing || isEnded}

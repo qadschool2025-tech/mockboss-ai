@@ -44,6 +44,39 @@ const STEPS = [
   { id: 4, label: 'Ready', icon: '🚀' },
 ]
 
+// ─── Job Title Validator ──────────────────────────────────────────────────────
+function isValidJobTitle(title: string): { valid: boolean; reason?: string } {
+  const t = title.trim()
+
+  if (t.length < 3) return { valid: false, reason: 'Job title is too short' }
+  if (t.length > 100) return { valid: false, reason: 'Job title is too long' }
+
+  // Only numbers or symbols
+  if (/^[^a-zA-Z\u0600-\u06FF]+$/.test(t))
+    return { valid: false, reason: 'Job title must contain real words' }
+
+  // Repeated single characters: "aaaa", "xxxx"
+  if (/^(.)\1{3,}$/.test(t))
+    return { valid: false, reason: 'Please enter a real job title' }
+
+  // Random keyboard mashing: consonant clusters > 4 with no vowels
+  const noVowels = t.replace(/[aeiouAEIOU\s\u0600-\u06FF]/g, '')
+  if (noVowels.length > 6 && noVowels.length / t.replace(/\s/g, '').length > 0.85)
+    return { valid: false, reason: 'This doesn\'t look like a valid job title' }
+
+  // Too many numbers
+  const digitRatio = (t.match(/\d/g) || []).length / t.length
+  if (digitRatio > 0.5)
+    return { valid: false, reason: 'Job title should not contain mostly numbers' }
+
+  // Common gibberish patterns
+  const gibberish = /^(asdf|qwer|zxcv|test|abc|xyz|aaa|bbb|sss|ddd|fff|gggg|hhhh|jjjj)/i
+  if (gibberish.test(t))
+    return { valid: false, reason: 'Please enter a real job title' }
+
+  return { valid: true }
+}
+
 const Barbaros = () => (
   <span style={{ fontWeight: 900 }}>
     <span style={{ color: '#1A1A1A' }}>Barbar</span>
@@ -84,9 +117,15 @@ export default function OnboardingPage() {
     const e: typeof errors = {}
     if (step === 1) {
       if (!data.candidateName.trim()) e.candidateName = 'Name is required'
+      else if (data.candidateName.trim().length < 2) e.candidateName = 'Please enter your full name'
     }
     if (step === 2) {
-      if (!data.jobTitle.trim()) e.jobTitle = 'Job title is required'
+      if (!data.jobTitle.trim()) {
+        e.jobTitle = 'Job title is required'
+      } else {
+        const check = isValidJobTitle(data.jobTitle)
+        if (!check.valid) e.jobTitle = check.reason
+      }
       if (!data.institution.trim()) e.institution = 'Institution is required'
       if (!data.country) e.country = 'Please select a country'
       if (!data.sector) e.sector = 'Please select a sector'
@@ -141,7 +180,7 @@ export default function OnboardingPage() {
   }
 
   const skipCV = () => {
-    set('cvText', '[NO_CV] Candidate has no CV. Conduct a general interview based on job title, sector, and experience level only. Do not ask CV-specific questions.')
+    set('cvText', '[NO_CV]')
     setCvSkipped(true)
     setCvReady(true)
   }
@@ -230,13 +269,7 @@ export default function OnboardingPage() {
       </div>
 
       <main style={{ flex: 1, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '32px 16px 60px' }}>
-        <div style={{
-          width: '100%', maxWidth: 560,
-          background: '#FFFFFF',
-          border: '0.5px solid #E5DDD0',
-          borderRadius: 16,
-          padding: '32px 28px'
-        }}>
+        <div style={{ width: '100%', maxWidth: 560, background: '#FFFFFF', border: '0.5px solid #E5DDD0', borderRadius: 16, padding: '32px 28px' }}>
 
           {/* Step 1 */}
           {step === 1 && (
@@ -293,10 +326,21 @@ export default function OnboardingPage() {
                   type="text"
                   value={data.jobTitle}
                   onChange={e => set('jobTitle', e.target.value)}
+                  onBlur={() => {
+                    if (data.jobTitle.trim()) {
+                      const check = isValidJobTitle(data.jobTitle)
+                      if (!check.valid) setErrors(prev => ({ ...prev, jobTitle: check.reason }))
+                    }
+                  }}
                   placeholder="e.g. Senior Data Analyst"
                   style={inputStyle(!!errors.jobTitle)}
                 />
-                {errors.jobTitle && <p style={{ fontSize: 11, color: '#DC2626', marginTop: 6, fontWeight: 600 }}>⚠ {errors.jobTitle}</p>}
+                {errors.jobTitle && (
+                  <p style={{ fontSize: 11, color: '#DC2626', marginTop: 6, fontWeight: 600 }}>⚠ {errors.jobTitle}</p>
+                )}
+                {!errors.jobTitle && data.jobTitle.trim().length >= 3 && isValidJobTitle(data.jobTitle).valid && (
+                  <p style={{ fontSize: 11, color: '#22C55E', marginTop: 6, fontWeight: 600 }}>✓ Valid job title</p>
+                )}
               </div>
 
               <div style={{ marginBottom: 20 }}>
@@ -378,11 +422,7 @@ export default function OnboardingPage() {
                 Your <strong style={{ color: '#1A1A1A', fontWeight: 800 }}><Barbaros /> Interviewer</strong> reads your CV before the interview begins — and will question every detail.
               </p>
 
-              <div style={{
-                fontSize: 12, color: '#CC785C', marginBottom: 24, fontWeight: 700,
-                background: 'rgba(204,120,92,0.08)', border: '0.5px solid rgba(204,120,92,0.25)',
-                padding: '10px 14px', borderRadius: 10
-              }}>
+              <div style={{ fontSize: 12, color: '#CC785C', marginBottom: 24, fontWeight: 700, background: 'rgba(204,120,92,0.08)', border: '0.5px solid rgba(204,120,92,0.25)', padding: '10px 14px', borderRadius: 10 }}>
                 ⚡ A CV-backed interview is 3x more targeted and realistic.
               </div>
 
@@ -472,15 +512,9 @@ export default function OnboardingPage() {
               )}
 
               {cvSkipped && (
-                <div style={{
-                  textAlign: 'center', padding: '28px 22px',
-                  background: 'linear-gradient(135deg, rgba(204,120,92,0.08), rgba(204,120,92,0.03))',
-                  border: '0.5px solid rgba(204,120,92,0.3)', borderRadius: 14
-                }}>
+                <div style={{ textAlign: 'center', padding: '28px 22px', background: 'linear-gradient(135deg, rgba(204,120,92,0.08), rgba(204,120,92,0.03))', border: '0.5px solid rgba(204,120,92,0.3)', borderRadius: 14 }}>
                   <div style={{ fontSize: 28, marginBottom: 12 }}>🚀</div>
-                  <div style={{ fontSize: 15, color: '#1A1A1A', fontWeight: 800, marginBottom: 8, letterSpacing: -0.3 }}>
-                    You're ready to start.
-                  </div>
+                  <div style={{ fontSize: 15, color: '#1A1A1A', fontWeight: 800, marginBottom: 8, letterSpacing: -0.3 }}>You're ready to start.</div>
                   <div style={{ fontSize: 13, color: 'rgba(26,26,26,0.65)', lineHeight: 1.7, marginBottom: 16 }}>
                     Add your CV later to <span style={{ color: '#CC785C', fontWeight: 700 }}>unlock deeper, personalized questions.</span>
                     <br />
@@ -507,10 +541,7 @@ export default function OnboardingPage() {
                 Your <strong style={{ color: '#1A1A1A', fontWeight: 800 }}><Barbaros /> Interviewer</strong> has reviewed your profile. Hold the mic button while answering and speak clearly.
               </p>
 
-              <div style={{
-                background: '#F5F1EB', border: '0.5px solid #E5DDD0',
-                borderRadius: 12, padding: '18px 20px', textAlign: 'left', marginBottom: 28
-              }}>
+              <div style={{ background: '#F5F1EB', border: '0.5px solid #E5DDD0', borderRadius: 12, padding: '18px 20px', textAlign: 'left', marginBottom: 28 }}>
                 {([
                   ['Name', data.candidateName],
                   ['Role', data.jobTitle],
@@ -521,12 +552,7 @@ export default function OnboardingPage() {
                   ['Language', { en: 'English', ar: 'Arabic', mixed: 'Mixed' }[data.language]],
                   ['CV', cvSkipped ? '⚠️ Not provided' : data.cvText ? '✅ Provided & reviewed' : '⚠️ Not provided'],
                 ] as [string, string][]).map(([k, v], i, arr) => (
-                  <div key={k} style={{
-                    display: 'flex', justifyContent: 'space-between',
-                    padding: '7px 0',
-                    borderBottom: i < arr.length - 1 ? '0.5px solid #E5DDD0' : 'none',
-                    fontSize: 13
-                  }}>
+                  <div key={k} style={{ display: 'flex', justifyContent: 'space-between', padding: '7px 0', borderBottom: i < arr.length - 1 ? '0.5px solid #E5DDD0' : 'none', fontSize: 13 }}>
                     <span style={{ color: 'rgba(26,26,26,0.55)', fontWeight: 600 }}>{k}</span>
                     <span style={{ fontWeight: 700, color: '#1A1A1A' }}>{v}</span>
                   </div>
@@ -535,12 +561,7 @@ export default function OnboardingPage() {
 
               <button
                 onClick={startInterview}
-                style={{
-                  width: '100%', padding: '15px',
-                  background: '#CC785C', border: 'none', borderRadius: 10,
-                  color: '#FFFFFF', fontWeight: 800, fontSize: 15,
-                  cursor: 'pointer', fontFamily: 'inherit', letterSpacing: -0.3,
-                }}>
+                style={{ width: '100%', padding: '15px', background: '#CC785C', border: 'none', borderRadius: 10, color: '#FFFFFF', fontWeight: 800, fontSize: 15, cursor: 'pointer', fontFamily: 'inherit', letterSpacing: -0.3 }}>
                 Enter Interview Room →
               </button>
               <p style={{ fontSize: 11, color: 'rgba(26,26,26,0.45)', marginTop: 14, fontWeight: 600 }}>
@@ -554,12 +575,7 @@ export default function OnboardingPage() {
               {step > 1 && (
                 <button
                   onClick={back}
-                  style={{
-                    padding: '13px 20px', background: 'transparent',
-                    border: '0.5px solid #E5DDD0', borderRadius: 10,
-                    color: '#1A1A1A', fontWeight: 600, fontSize: 14,
-                    cursor: 'pointer', fontFamily: 'inherit',
-                  }}>
+                  style={{ padding: '13px 20px', background: 'transparent', border: '0.5px solid #E5DDD0', borderRadius: 10, color: '#1A1A1A', fontWeight: 600, fontSize: 14, cursor: 'pointer', fontFamily: 'inherit' }}>
                   Back
                 </button>
               )}
@@ -583,11 +599,7 @@ export default function OnboardingPage() {
         </div>
       </main>
 
-      <footer style={{
-        background: '#EDE6D8', borderTop: '0.5px solid #E5DDD0',
-        padding: '16px 24px', display: 'flex',
-        justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8
-      }}>
+      <footer style={{ background: '#EDE6D8', borderTop: '0.5px solid #E5DDD0', padding: '16px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
         <div style={{ fontSize: 14 }}><Barbaros /></div>
         <div style={{ fontSize: 11, color: 'rgba(26,26,26,0.4)' }}>© 2026 Barbaros. All rights reserved.</div>
         <div style={{ fontSize: 11, color: 'rgba(26,26,26,0.4)' }}>Powered by AI</div>

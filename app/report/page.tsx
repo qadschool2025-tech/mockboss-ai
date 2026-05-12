@@ -43,6 +43,8 @@ interface ReportData {
   config: BarbarosConfig;
   messages: Message[];
   overallScore: number;
+  scoredCount: number;
+  isIncomplete: boolean;
   criteria: {
     clarity: number;
     confidence: number;
@@ -64,7 +66,6 @@ interface ReportData {
   readiness: number;
 }
 
-// ── Arabic translations ───────────────────────────────────────────────────────
 const AR = {
   reportTitle: "تقرير المقابلة",
   print: "طباعة",
@@ -92,10 +93,12 @@ const AR = {
   practiceHint: "كل جلسة تقربك من العرض.",
   noData: "لا توجد بيانات مقابلة.",
   startInterview: "ابدأ مقابلة",
-  generating_report: "جاري إنشاء تقريرك...",
-  readinessLabels: ["غير جاهز بعد", "يحتاج تحضيراً", "توظيف مشروط", "مرشح قوي", "جاهز للتوظيف"],
-  scoreLabels: ["حرج", "يحتاج عمل", "في طور التطور", "قوي", "استثنائي"],
   interviewIntelligence: "ذكاء المقابلات",
+  incompleteTitle: "المقابلة لم تكتمل",
+  incompleteMsg: (name: string, count: number) =>
+    `${name}، أجبت على ${count} سؤال فقط. التقرير الكامل يتطلب إكمال المقابلة كاملاً للحصول على تقييم دقيق.`,
+  incompleteAction: "أكمل المقابلة الآن",
+  incompletePartial: "عرض التقرير الجزئي",
   criteria: {
     clarity: "الوضوح",
     confidence: "الثقة",
@@ -106,6 +109,14 @@ const AR = {
     problem_solving: "حل المشكلات",
     leadership: "القيادة",
   }
+}
+
+const EN_INCOMPLETE = {
+  incompleteTitle: "Interview Incomplete",
+  incompleteMsg: (name: string, count: number) =>
+    `${name}, you answered only ${count} question${count === 1 ? '' : 's'}. A full report requires completing the interview — results may not reflect your true performance.`,
+  incompleteAction: "Complete the Interview",
+  incompletePartial: "View Partial Report",
 }
 
 const CRITERIA_ICONS: Record<string, string> = {
@@ -175,6 +186,11 @@ function buildReport(): ReportData | null {
 
     if (!scoredAssistant.length) return null;
 
+    // ── Incomplete detection ─────────────────────────────────────────────────
+    const scoredCount = scoredAssistant.length;
+    const avgScore = avg(scoredAssistant.map((m) => (m.score as MessageScore).score));
+    const isIncomplete = scoredCount < 3 || avgScore < 20;
+
     const criteriaKeys = [
       "clarity", "confidence", "relevance", "technical_depth",
       "structure", "communication", "problem_solving", "leadership",
@@ -228,15 +244,15 @@ function buildReport(): ReportData | null {
       .slice(0, 5)
       .map(([label]) => label.charAt(0).toUpperCase() + label.slice(1));
 
+    const isAr = config.language === 'ar';
     const hiringRisks: string[] = [];
-    if ((criteria.confidence ?? 0) < 55) hiringRisks.push(config.language === 'ar' ? "ثقة منخفضة تحت الضغط" : "Low confidence under pressure");
-    if ((criteria.technical_depth ?? 0) < 50) hiringRisks.push(config.language === 'ar' ? "عمق تقني غير كافٍ" : "Insufficient technical depth");
-    if ((criteria.structure ?? 0) < 55) hiringRisks.push(config.language === 'ar' ? "إجابات غير منظمة" : "Unstructured responses");
-    if (fillerWords > 60) hiringRisks.push(config.language === 'ar' ? "كلمات حشو مفرطة" : "Excessive filler words");
-    if ((criteria.relevance ?? 0) < 55) hiringRisks.push(config.language === 'ar' ? "الإجابات تفتقر للتركيز" : "Answers lack focus and relevance");
-    if (!hiringRisks.length) hiringRisks.push(config.language === 'ar' ? "لا توجد مخاطر جوهرية" : "No critical risks identified");
+    if ((criteria.confidence ?? 0) < 55) hiringRisks.push(isAr ? "ثقة منخفضة تحت الضغط" : "Low confidence under pressure");
+    if ((criteria.technical_depth ?? 0) < 50) hiringRisks.push(isAr ? "عمق تقني غير كافٍ" : "Insufficient technical depth");
+    if ((criteria.structure ?? 0) < 55) hiringRisks.push(isAr ? "إجابات غير منظمة" : "Unstructured responses");
+    if (fillerWords > 60) hiringRisks.push(isAr ? "كلمات حشو مفرطة" : "Excessive filler words");
+    if ((criteria.relevance ?? 0) < 55) hiringRisks.push(isAr ? "الإجابات تفتقر للتركيز" : "Answers lack focus and relevance");
+    if (!hiringRisks.length) hiringRisks.push(isAr ? "لا توجد مخاطر جوهرية" : "No critical risks identified");
 
-    // fallback improvement plan — will be replaced by AI
     const improvementPlan: string[] = [];
 
     const userAnswers = messages.filter((m) => m.role === "user" && !m.content.startsWith("["));
@@ -253,7 +269,6 @@ function buildReport(): ReportData | null {
       });
 
     const s = overallScore;
-    const isAr = config.language === 'ar';
     let recruiterEvaluation = "";
     if (s >= 80)
       recruiterEvaluation = isAr
@@ -278,7 +293,7 @@ function buildReport(): ReportData | null {
     ));
 
     return {
-      config, messages, overallScore,
+      config, messages, overallScore, scoredCount, isIncomplete,
       criteria: criteria as ReportData["criteria"],
       strongestAnswer, weakestAnswer,
       repeatedMistakes, fillerWords,
@@ -374,13 +389,14 @@ export default function ReportPage() {
   const [evalLoading, setEvalLoading] = useState(true);
   const [improvementPlan, setImprovementPlan] = useState<string[]>([]);
   const [planLoading, setPlanLoading] = useState(true);
+  const [showPartial, setShowPartial] = useState(false);
 
   useEffect(() => {
     const data = buildReport();
     setReport(data);
     setLoading(false);
 
-    if (data) {
+    if (data && (!data.isIncomplete || showPartial)) {
       fetch('/api/recruiter-eval', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -415,7 +431,7 @@ export default function ReportPage() {
           setPlanLoading(false);
         });
     }
-  }, []);
+  }, [showPartial]);
 
   if (loading) {
     return (
@@ -442,7 +458,6 @@ export default function ReportPage() {
 
   const { config, overallScore, criteria, readiness } = report;
   const isArabic = config.language === "ar";
-  const t = isArabic ? AR : null;
 
   const criteriaLabels: Record<string, string> = isArabic
     ? AR.criteria
@@ -451,6 +466,42 @@ export default function ReportPage() {
         technical_depth: "Technical Depth", structure: "Structure",
         communication: "Communication", problem_solving: "Problem Solving", leadership: "Leadership",
       };
+
+  // ── Incomplete Warning Screen ─────────────────────────────────────────────
+  if (report.isIncomplete && !showPartial) {
+    const inc = isArabic ? AR : EN_INCOMPLETE;
+    return (
+      <div
+        dir={isArabic ? "rtl" : "ltr"}
+        style={{ minHeight: "100vh", background: "#F5F1EB", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "2rem", fontFamily: '"DM Sans", ui-sans-serif, system-ui, sans-serif' }}
+      >
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+        <div style={{ maxWidth: 480, width: "100%", textAlign: "center" }}>
+          <div style={{ fontSize: "3.5rem", marginBottom: "1rem" }}>⚠️</div>
+          <h1 style={{ fontSize: "1.4rem", fontWeight: 800, color: "#1A1A1A", marginBottom: "0.75rem" }}>
+            {inc.incompleteTitle}
+          </h1>
+          <p style={{ fontSize: "0.95rem", color: "#555", lineHeight: 1.7, marginBottom: "2rem", background: "#fff", border: "1px solid #E5DDD0", borderRadius: 12, padding: "1.2rem 1.5rem" }}>
+            {inc.incompleteMsg(config.candidateName, report.scoredCount)}
+          </p>
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+            <button
+              onClick={() => router.push("/interview")}
+              style={{ background: "#CC785C", color: "#fff", border: "none", borderRadius: 10, padding: "0.9rem 2rem", fontSize: "0.95rem", fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}
+            >
+              {inc.incompleteAction}
+            </button>
+            <button
+              onClick={() => setShowPartial(true)}
+              style={{ background: "transparent", color: "rgba(26,26,26,0.5)", border: "1px solid #E5DDD0", borderRadius: 10, padding: "0.75rem 2rem", fontSize: "0.85rem", fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}
+            >
+              {inc.incompletePartial}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -466,7 +517,6 @@ export default function ReportPage() {
         .fade-up { animation: fadeUp 0.5s ease both; }
       `}</style>
 
-      {/* Header */}
       <header style={{ background: "#1A1A1A", padding: "1rem 2rem", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <BrandLogo />
         <span style={{ fontSize: "0.75rem", color: "#888", letterSpacing: "0.08em", textTransform: "uppercase" }}>
@@ -483,6 +533,18 @@ export default function ReportPage() {
       </header>
 
       <main style={{ maxWidth: 860, margin: "0 auto", padding: "2rem 1.25rem 4rem" }}>
+
+        {/* Incomplete banner */}
+        {report.isIncomplete && (
+          <div style={{ background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.35)", borderRadius: 10, padding: "0.85rem 1.2rem", marginBottom: "1.2rem", display: "flex", alignItems: "center", gap: "0.75rem" }}>
+            <span style={{ fontSize: "1.1rem" }}>⚠️</span>
+            <p style={{ fontSize: "0.84rem", color: "#92400e", margin: 0, lineHeight: 1.5 }}>
+              {isArabic
+                ? `هذا تقرير جزئي — أجبت على ${report.scoredCount} سؤال فقط. أكمل المقابلة للحصول على تقييم دقيق.`
+                : `Partial report — only ${report.scoredCount} answer${report.scoredCount === 1 ? '' : 's'} recorded. Complete the interview for accurate results.`}
+            </p>
+          </div>
+        )}
 
         {/* Hero */}
         <div className="fade-up" style={{ background: "#FDFAF6", border: "1px solid #E5DDD0", borderRadius: 16, padding: "2rem", marginBottom: "1.5rem", display: "flex", flexWrap: "wrap", gap: "2rem", alignItems: "center" }}>
@@ -608,7 +670,7 @@ export default function ReportPage() {
           </div>
         </SectionCard>
 
-        {/* Improvement Plan — Dynamic */}
+        {/* Improvement Plan */}
         <SectionCard title={isArabic ? AR.improvementPlan : "Suggested Improvement Plan"} icon="◎">
           {planLoading ? (
             <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", padding: "0.5rem 0" }}>
@@ -658,7 +720,7 @@ export default function ReportPage() {
           </SectionCard>
         )}
 
-        {/* Recruiter Evaluation — Dynamic */}
+        {/* Recruiter Evaluation */}
         <div style={{ background: "#1A1A1A", borderRadius: 12, padding: "1.5rem 1.8rem", marginBottom: "1.2rem" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.85rem" }}>
             <span>👔</span>

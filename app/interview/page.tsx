@@ -375,7 +375,7 @@ export default function InterviewPage() {
     sessionStorage.setItem('barbaros_messages', JSON.stringify(msgs))
     sessionStorage.setItem('barbaros_score', String(finalScore ?? 0))
     setIsEnded(true)
-    setTimeout(() => router.push('/session-end'), 2000)
+    setTimeout(() => router.push('/report'), 2000)
   }
 
   const callAdam = async (msgs: Message[]) => {
@@ -778,7 +778,6 @@ export default function InterviewPage() {
                 .filter(m => !m.content.startsWith('['))
                 .map((msg, i) => (
                   <div key={i} style={{ marginBottom: 12, textAlign: msg.role === 'user' ? (isRTL ? 'left' : 'right') : (isRTL ? 'right' : 'left') }}>
-                    {/* Question Type badge in transcript */}
                     {msg.role === 'assistant' && msg.question_type && (
                       <div style={{ marginBottom: 4 }}>
                         <span style={{
@@ -805,7 +804,6 @@ export default function InterviewPage() {
                         <span dangerouslySetInnerHTML={{ __html: highlightHesitation(msg.content, CONFIG.language) }} />
                       ) : msg.content}
                     </div>
-                    {/* Coaching note in transcript */}
                     {msg.role === 'assistant' && msg.coaching_note && (
                       <div style={{
                         marginTop: 4,
@@ -906,7 +904,7 @@ export default function InterviewPage() {
             {t.redirecting}
           </div>
           <button
-            onClick={() => router.push('/session-end')}
+            onClick={() => router.push('/report')}
             style={{
               background: '#CC785C', color: '#fff', border: 'none',
               borderRadius: 8, padding: '10px 24px', fontSize: 14,

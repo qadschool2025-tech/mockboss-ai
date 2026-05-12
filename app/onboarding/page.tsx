@@ -7,6 +7,7 @@ interface OnboardingData {
   candidateName: string
   jobTitle: string
   institution: string
+  country: string
   sector: string
   yearsExperience: string
   language: 'en' | 'ar' | 'mixed'
@@ -29,6 +30,13 @@ const EXPERIENCE_LEVELS = [
   '10+ years'
 ]
 
+const COUNTRIES = [
+  'United Arab Emirates', 'Saudi Arabia', 'Qatar', 'Kuwait', 'Bahrain', 'Oman',
+  'United States', 'United Kingdom', 'Canada', 'Australia', 'Germany', 'France',
+  'Egypt', 'Jordan', 'Lebanon', 'Morocco', 'Tunisia', 'South Africa',
+  'India', 'Pakistan', 'Philippines', 'Other'
+]
+
 const STEPS = [
   { id: 1, label: 'Personal Info', icon: '👤' },
   { id: 2, label: 'Job Details', icon: '💼' },
@@ -36,7 +44,6 @@ const STEPS = [
   { id: 4, label: 'Ready', icon: '🚀' },
 ]
 
-// Brand Component — used everywhere "Barbaros" appears
 const Barbaros = () => (
   <span style={{ fontWeight: 900 }}>
     <span style={{ color: '#1A1A1A' }}>Barbar</span>
@@ -59,6 +66,7 @@ export default function OnboardingPage() {
     candidateName: '',
     jobTitle: '',
     institution: '',
+    country: '',
     sector: '',
     yearsExperience: '',
     language: 'en',
@@ -80,6 +88,7 @@ export default function OnboardingPage() {
     if (step === 2) {
       if (!data.jobTitle.trim()) e.jobTitle = 'Job title is required'
       if (!data.institution.trim()) e.institution = 'Institution is required'
+      if (!data.country) e.country = 'Please select a country'
       if (!data.sector) e.sector = 'Please select a sector'
       if (!data.yearsExperience) e.yearsExperience = 'Please select experience level'
     }
@@ -188,7 +197,6 @@ export default function OnboardingPage() {
   return (
     <div style={{ fontFamily: 'system-ui, sans-serif', background: '#F5F1EB', color: '#1A1A1A', minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
 
-      {/* Nav — matches Landing */}
       <nav style={{ background: '#F5F1EB', borderBottom: '0.5px solid #E5DDD0', padding: '14px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div onClick={() => router.push('/')} style={{ fontSize: 22, letterSpacing: -0.5, cursor: 'pointer' }}>
           <Barbaros />
@@ -198,12 +206,10 @@ export default function OnboardingPage() {
         </div>
       </nav>
 
-      {/* Progress Bar */}
       <div style={{ height: 3, background: '#E5DDD0' }}>
         <div style={{ height: '100%', background: '#CC785C', width: `${(step / 4) * 100}%`, transition: 'width 0.4s ease' }} />
       </div>
 
-      {/* Steps Indicator */}
       <div style={{ display: 'flex', justifyContent: 'center', gap: 8, padding: '24px 16px 0', flexWrap: 'wrap' }}>
         {STEPS.map(s => (
           <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 6, opacity: s.id <= step ? 1 : 0.35 }}>
@@ -232,7 +238,7 @@ export default function OnboardingPage() {
           padding: '32px 28px'
         }}>
 
-          {/* Step 1 — Personal Info */}
+          {/* Step 1 */}
           {step === 1 && (
             <div>
               <h2 style={{ fontSize: 22, fontWeight: 900, marginBottom: 6, color: '#1A1A1A', letterSpacing: -0.5 }}>
@@ -271,7 +277,7 @@ export default function OnboardingPage() {
             </div>
           )}
 
-          {/* Step 2 — Job Details */}
+          {/* Step 2 */}
           {step === 2 && (
             <div>
               <h2 style={{ fontSize: 22, fontWeight: 900, marginBottom: 6, color: '#1A1A1A', letterSpacing: -0.5 }}>
@@ -303,6 +309,29 @@ export default function OnboardingPage() {
                   style={inputStyle(!!errors.institution)}
                 />
                 {errors.institution && <p style={{ fontSize: 11, color: '#DC2626', marginTop: 6, fontWeight: 600 }}>⚠ {errors.institution}</p>}
+              </div>
+
+              <div style={{ marginBottom: 20 }}>
+                <label style={labelStyle}>Country *</label>
+                <select
+                  value={data.country}
+                  onChange={e => set('country', e.target.value)}
+                  style={{
+                    ...inputStyle(!!errors.country),
+                    appearance: 'none',
+                    backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%231A1A1A' d='M6 8L1 3h10z'/%3E%3C/svg%3E")`,
+                    backgroundRepeat: 'no-repeat',
+                    backgroundPosition: 'right 12px center',
+                    paddingRight: 36,
+                    cursor: 'pointer',
+                  }}
+                >
+                  <option value="">Select country...</option>
+                  {COUNTRIES.map(c => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+                {errors.country && <p style={{ fontSize: 11, color: '#DC2626', marginTop: 6, fontWeight: 600 }}>⚠ {errors.country}</p>}
               </div>
 
               <div style={{ marginBottom: 20 }}>
@@ -339,7 +368,7 @@ export default function OnboardingPage() {
             </div>
           )}
 
-          {/* Step 3 — CV */}
+          {/* Step 3 */}
           {step === 3 && (
             <div>
               <h2 style={{ fontSize: 22, fontWeight: 900, marginBottom: 6, color: '#1A1A1A', letterSpacing: -0.5 }}>
@@ -350,29 +379,22 @@ export default function OnboardingPage() {
               </p>
 
               <div style={{
-                fontSize: 12,
-                color: '#CC785C',
-                marginBottom: 24,
-                fontWeight: 700,
-                background: 'rgba(204,120,92,0.08)',
-                border: '0.5px solid rgba(204,120,92,0.25)',
-                padding: '10px 14px',
-                borderRadius: 10
+                fontSize: 12, color: '#CC785C', marginBottom: 24, fontWeight: 700,
+                background: 'rgba(204,120,92,0.08)', border: '0.5px solid rgba(204,120,92,0.25)',
+                padding: '10px 14px', borderRadius: 10
               }}>
                 ⚡ A CV-backed interview is 3x more targeted and realistic.
               </div>
 
               {!cvSkipped && (
                 <>
-                  {/* Upload Area */}
                   <div style={{ marginBottom: 16 }}>
                     <label style={labelStyle}>Upload CV — PDF, DOCX, or TXT</label>
                     <div
                       onClick={() => !isParsingCV && fileRef.current?.click()}
                       style={{
                         border: `1.5px dashed ${cvReady && cvFileName ? '#22C55E' : '#CC785C'}`,
-                        borderRadius: 12,
-                        padding: '24px 14px',
+                        borderRadius: 12, padding: '24px 14px',
                         cursor: isParsingCV ? 'wait' : 'pointer',
                         textAlign: 'center',
                         background: cvReady && cvFileName ? 'rgba(34,197,94,0.06)' : 'rgba(204,120,92,0.05)',
@@ -403,15 +425,12 @@ export default function OnboardingPage() {
                       )}
                     </div>
                     <input
-                      ref={fileRef}
-                      type="file"
-                      accept=".pdf,.docx,.txt"
+                      ref={fileRef} type="file" accept=".pdf,.docx,.txt"
                       style={{ display: 'none' }}
                       onChange={e => { if (e.target.files?.[0]) handleCV(e.target.files[0]) }}
                     />
                   </div>
 
-                  {/* Paste CV Text */}
                   <div style={{ marginBottom: 16 }}>
                     <label style={labelStyle}>Or paste CV text</label>
                     <textarea
@@ -426,7 +445,6 @@ export default function OnboardingPage() {
                     )}
                   </div>
 
-                  {/* Job Requirements */}
                   <div style={{ marginBottom: 20 }}>
                     <label style={labelStyle}>Job Requirements (optional)</label>
                     <textarea
@@ -438,21 +456,14 @@ export default function OnboardingPage() {
                     />
                   </div>
 
-                  {/* Skip CV */}
                   {!cvReady && (
                     <button
                       onClick={skipCV}
                       style={{
-                        width: '100%',
-                        padding: '12px',
-                        background: 'transparent',
-                        border: '0.5px solid #E5DDD0',
-                        borderRadius: 9,
-                        color: 'rgba(26,26,26,0.5)',
-                        fontSize: 12,
-                        cursor: 'pointer',
-                        fontFamily: 'inherit',
-                        fontWeight: 600,
+                        width: '100%', padding: '12px',
+                        background: 'transparent', border: '0.5px solid #E5DDD0',
+                        borderRadius: 9, color: 'rgba(26,26,26,0.5)',
+                        fontSize: 12, cursor: 'pointer', fontFamily: 'inherit', fontWeight: 600,
                       }}>
                       I don't have a CV — proceed without it
                     </button>
@@ -460,47 +471,24 @@ export default function OnboardingPage() {
                 </>
               )}
 
-              {/* Skipped CV State — Option C */}
               {cvSkipped && (
                 <div style={{
-                  textAlign: 'center',
-                  padding: '28px 22px',
+                  textAlign: 'center', padding: '28px 22px',
                   background: 'linear-gradient(135deg, rgba(204,120,92,0.08), rgba(204,120,92,0.03))',
-                  border: '0.5px solid rgba(204,120,92,0.3)',
-                  borderRadius: 14
+                  border: '0.5px solid rgba(204,120,92,0.3)', borderRadius: 14
                 }}>
                   <div style={{ fontSize: 28, marginBottom: 12 }}>🚀</div>
-                  <div style={{
-                    fontSize: 15,
-                    color: '#1A1A1A',
-                    fontWeight: 800,
-                    marginBottom: 8,
-                    letterSpacing: -0.3,
-                  }}>
+                  <div style={{ fontSize: 15, color: '#1A1A1A', fontWeight: 800, marginBottom: 8, letterSpacing: -0.3 }}>
                     You're ready to start.
                   </div>
-                  <div style={{
-                    fontSize: 13,
-                    color: 'rgba(26,26,26,0.65)',
-                    lineHeight: 1.7,
-                    marginBottom: 16,
-                  }}>
+                  <div style={{ fontSize: 13, color: 'rgba(26,26,26,0.65)', lineHeight: 1.7, marginBottom: 16 }}>
                     Add your CV later to <span style={{ color: '#CC785C', fontWeight: 700 }}>unlock deeper, personalized questions.</span>
                     <br />
                     Your <Barbaros /> Interviewer will conduct the interview based on your role and experience.
                   </div>
                   <button
                     onClick={() => { setCvSkipped(false); setCvReady(false); set('cvText', '') }}
-                    style={{
-                      fontSize: 13,
-                      color: '#CC785C',
-                      background: 'none',
-                      border: 'none',
-                      cursor: 'pointer',
-                      textDecoration: 'underline',
-                      fontFamily: 'inherit',
-                      fontWeight: 700,
-                    }}>
+                    style={{ fontSize: 13, color: '#CC785C', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline', fontFamily: 'inherit', fontWeight: 700 }}>
                     Add CV now instead
                   </button>
                 </div>
@@ -508,7 +496,7 @@ export default function OnboardingPage() {
             </div>
           )}
 
-          {/* Step 4 — Ready */}
+          {/* Step 4 */}
           {step === 4 && (
             <div style={{ textAlign: 'center' }}>
               <div style={{ fontSize: 56, marginBottom: 14 }}>🎯</div>
@@ -520,25 +508,21 @@ export default function OnboardingPage() {
               </p>
 
               <div style={{
-                background: '#F5F1EB',
-                border: '0.5px solid #E5DDD0',
-                borderRadius: 12,
-                padding: '18px 20px',
-                textAlign: 'left',
-                marginBottom: 28
+                background: '#F5F1EB', border: '0.5px solid #E5DDD0',
+                borderRadius: 12, padding: '18px 20px', textAlign: 'left', marginBottom: 28
               }}>
                 {([
                   ['Name', data.candidateName],
                   ['Role', data.jobTitle],
                   ['Institution', data.institution],
+                  ['Country', data.country],
                   ['Sector', data.sector],
                   ['Experience', data.yearsExperience],
                   ['Language', { en: 'English', ar: 'Arabic', mixed: 'Mixed' }[data.language]],
                   ['CV', cvSkipped ? '⚠️ Not provided' : data.cvText ? '✅ Provided & reviewed' : '⚠️ Not provided'],
                 ] as [string, string][]).map(([k, v], i, arr) => (
                   <div key={k} style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
+                    display: 'flex', justifyContent: 'space-between',
                     padding: '7px 0',
                     borderBottom: i < arr.length - 1 ? '0.5px solid #E5DDD0' : 'none',
                     fontSize: 13
@@ -552,17 +536,10 @@ export default function OnboardingPage() {
               <button
                 onClick={startInterview}
                 style={{
-                  width: '100%',
-                  padding: '15px',
-                  background: '#CC785C',
-                  border: 'none',
-                  borderRadius: 10,
-                  color: '#FFFFFF',
-                  fontWeight: 800,
-                  fontSize: 15,
-                  cursor: 'pointer',
-                  fontFamily: 'inherit',
-                  letterSpacing: -0.3,
+                  width: '100%', padding: '15px',
+                  background: '#CC785C', border: 'none', borderRadius: 10,
+                  color: '#FFFFFF', fontWeight: 800, fontSize: 15,
+                  cursor: 'pointer', fontFamily: 'inherit', letterSpacing: -0.3,
                 }}>
                 Enter Interview Room →
               </button>
@@ -572,22 +549,16 @@ export default function OnboardingPage() {
             </div>
           )}
 
-          {/* Navigation Buttons */}
           {step < 4 && (
             <div style={{ display: 'flex', gap: 10, marginTop: 28 }}>
               {step > 1 && (
                 <button
                   onClick={back}
                   style={{
-                    padding: '13px 20px',
-                    background: 'transparent',
-                    border: '0.5px solid #E5DDD0',
-                    borderRadius: 10,
-                    color: '#1A1A1A',
-                    fontWeight: 600,
-                    fontSize: 14,
-                    cursor: 'pointer',
-                    fontFamily: 'inherit',
+                    padding: '13px 20px', background: 'transparent',
+                    border: '0.5px solid #E5DDD0', borderRadius: 10,
+                    color: '#1A1A1A', fontWeight: 600, fontSize: 14,
+                    cursor: 'pointer', fontFamily: 'inherit',
                   }}>
                   Back
                 </button>
@@ -596,17 +567,13 @@ export default function OnboardingPage() {
                 onClick={next}
                 disabled={step === 3 && isParsingCV}
                 style={{
-                  flex: 1,
-                  padding: '13px 20px',
+                  flex: 1, padding: '13px 20px',
                   background: step === 3 && isParsingCV ? '#E5DDD0' : '#CC785C',
-                  border: 'none',
-                  borderRadius: 10,
+                  border: 'none', borderRadius: 10,
                   color: step === 3 && isParsingCV ? 'rgba(26,26,26,0.4)' : '#FFFFFF',
-                  fontWeight: 800,
-                  fontSize: 14,
+                  fontWeight: 800, fontSize: 14,
                   cursor: step === 3 && isParsingCV ? 'not-allowed' : 'pointer',
-                  fontFamily: 'inherit',
-                  letterSpacing: -0.3,
+                  fontFamily: 'inherit', letterSpacing: -0.3,
                 }}>
                 {step === 3 && isParsingCV ? 'Reading CV...' : step === 3 ? 'Review and Start' : 'Continue →'}
               </button>
@@ -616,20 +583,12 @@ export default function OnboardingPage() {
         </div>
       </main>
 
-      {/* Footer — matches Landing */}
       <footer style={{
-        background: '#EDE6D8',
-        borderTop: '0.5px solid #E5DDD0',
-        padding: '16px 24px',
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        flexWrap: 'wrap',
-        gap: 8
+        background: '#EDE6D8', borderTop: '0.5px solid #E5DDD0',
+        padding: '16px 24px', display: 'flex',
+        justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8
       }}>
-        <div style={{ fontSize: 14 }}>
-          <Barbaros />
-        </div>
+        <div style={{ fontSize: 14 }}><Barbaros /></div>
         <div style={{ fontSize: 11, color: 'rgba(26,26,26,0.4)' }}>© 2026 Barbaros. All rights reserved.</div>
         <div style={{ fontSize: 11, color: 'rgba(26,26,26,0.4)' }}>Powered by AI</div>
       </footer>

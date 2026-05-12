@@ -260,4 +260,368 @@ function buildReport(): ReportData | null {
 
 function BrandLogo() {
   return (
-    <span
+    <span style={{ fontWeight: 900, fontSize: "1.25rem", letterSpacing: "-0.02em" }}>
+      <span style={{ color: "#1A1A1A" }}>Barbar</span>
+      <span style={{ color: "#CC785C" }}>os</span>
+    </span>
+  );
+}
+
+function ScoreCircle({ score, size = 140 }: { score: number; size?: number }) {
+  const radius = (size - 16) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const dashOffset = circumference - (score / 100) * circumference;
+  const color = scoreColor(score);
+  return (
+    <div style={{ position: "relative", width: size, height: size, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <svg width={size} height={size} style={{ position: "absolute", transform: "rotate(-90deg)" }}>
+        <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke="#E5DDD0" strokeWidth={8} />
+        <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke={color} strokeWidth={8}
+          strokeDasharray={circumference} strokeDashoffset={dashOffset} strokeLinecap="round"
+          style={{ transition: "stroke-dashoffset 1.2s ease" }} />
+      </svg>
+      <div style={{ textAlign: "center", zIndex: 1 }}>
+        <div style={{ fontSize: size > 100 ? "2rem" : "1.4rem", fontWeight: 800, color: "#1A1A1A", lineHeight: 1 }}>{score}</div>
+        <div style={{ fontSize: "0.65rem", color: "#666", fontWeight: 500, marginTop: 2 }}>/ 100</div>
+      </div>
+    </div>
+  );
+}
+
+function CriteriaBar({ label, icon, value, delay = 0 }: { label: string; icon: string; value: number; delay?: number }) {
+  const [width, setWidth] = useState(0);
+  const color = scoreColor(value);
+  useEffect(() => {
+    const t = setTimeout(() => setWidth(value), 200 + delay);
+    return () => clearTimeout(t);
+  }, [value, delay]);
+  return (
+    <div style={{ marginBottom: "0.85rem" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.3rem" }}>
+        <span style={{ fontSize: "0.82rem", color: "#1A1A1A", fontWeight: 500, display: "flex", alignItems: "center", gap: "0.35rem" }}>
+          <span style={{ color: "#CC785C", fontSize: "0.9rem" }}>{icon}</span>{label}
+        </span>
+        <span style={{ fontSize: "0.82rem", fontWeight: 700, color }}>
+          {value}<span style={{ fontWeight: 400, color: "#999", fontSize: "0.72rem" }}>/100</span>
+        </span>
+      </div>
+      <div style={{ height: 7, background: "#E5DDD0", borderRadius: 999, overflow: "hidden" }}>
+        <div style={{
+          height: "100%", width: `${width}%`,
+          background: `linear-gradient(90deg, ${color}88, ${color})`,
+          borderRadius: 999, transition: "width 0.9s cubic-bezier(0.4, 0, 0.2, 1)",
+        }} />
+      </div>
+    </div>
+  );
+}
+
+function SectionCard({ title, icon, children, accent = false }: { title: string; icon: string; children: React.ReactNode; accent?: boolean }) {
+  return (
+    <div style={{
+      background: accent ? "rgba(204, 120, 92, 0.04)" : "#FDFAF6",
+      border: `1px solid ${accent ? "rgba(204, 120, 92, 0.25)" : "#E5DDD0"}`,
+      borderRadius: 12, padding: "1.4rem 1.6rem", marginBottom: "1.2rem",
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "1rem", paddingBottom: "0.75rem", borderBottom: "1px solid #E5DDD0" }}>
+        <span style={{ fontSize: "1.1rem" }}>{icon}</span>
+        <h2 style={{ fontSize: "0.95rem", fontWeight: 700, color: "#1A1A1A", letterSpacing: "0.04em", textTransform: "uppercase", margin: 0 }}>{title}</h2>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+export default function ReportPage() {
+  const router = useRouter();
+  const [report, setReport] = useState<ReportData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [expandedRebuilt, setExpandedRebuilt] = useState<number | null>(null);
+  const [recruiterEval, setRecruiterEval] = useState<string>('');
+  const [evalLoading, setEvalLoading] = useState(true);
+
+  useEffect(() => {
+    const data = buildReport();
+    setReport(data);
+    setLoading(false);
+
+    if (data) {
+      setEvalLoading(true);
+      fetch('/api/recruiter-eval', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          config: data.config,
+          overallScore: data.overallScore,
+          criteria: data.criteria,
+          strongestAnswer: data.strongestAnswer,
+          weakestAnswer: data.weakestAnswer,
+          hiringRisks: data.hiringRisks,
+          repeatedMistakes: data.repeatedMistakes,
+        }),
+      })
+        .then((r) => r.json())
+        .then((res) => {
+          if (res.success && res.evaluation) setRecruiterEval(res.evaluation);
+          else setRecruiterEval(data.recruiterEvaluation);
+        })
+        .catch(() => setRecruiterEval(data.recruiterEvaluation))
+        .finally(() => setEvalLoading(false));
+    }
+  }, []);
+
+  if (loading) {
+    return (
+      <div style={{ minHeight: "100vh", background: "#F5F1EB", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div style={{ textAlign: "center" }}>
+          <div style={{ width: 40, height: 40, border: "3px solid #E5DDD0", borderTopColor: "#CC785C", borderRadius: "50%", animation: "spin 0.8s linear infinite", margin: "0 auto 1rem" }} />
+          <p style={{ color: "#666", fontSize: "0.9rem" }}>Generating your report…</p>
+          <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+        </div>
+      </div>
+    );
+  }
+
+  if (!report) {
+    return (
+      <div style={{ minHeight: "100vh", background: "#F5F1EB", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: "1rem" }}>
+        <p style={{ color: "#666" }}>No interview data found.</p>
+        <button onClick={() => router.push("/onboarding")} style={{ background: "#CC785C", color: "#fff", border: "none", borderRadius: 8, padding: "0.6rem 1.4rem", cursor: "pointer", fontWeight: 600 }}>
+          Start an Interview
+        </button>
+      </div>
+    );
+  }
+
+  const { config, overallScore, criteria, readiness } = report;
+  const isArabic = config.language === "ar";
+
+  return (
+    <div
+      dir={isArabic ? "rtl" : "ltr"}
+      style={{ minHeight: "100vh", background: "#F5F1EB", fontFamily: '"DM Sans", ui-sans-serif, system-ui, sans-serif', color: "#1A1A1A" }}
+    >
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700;800;900&display=swap');
+        * { box-sizing: border-box; }
+        @media print { .no-print { display: none !important; } }
+        @keyframes fadeUp { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .fade-up { animation: fadeUp 0.5s ease both; }
+      `}</style>
+
+      <header style={{ background: "#1A1A1A", padding: "1rem 2rem", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <BrandLogo />
+        <span style={{ fontSize: "0.75rem", color: "#888", letterSpacing: "0.08em", textTransform: "uppercase" }}>Interview Report</span>
+        <div className="no-print" style={{ display: "flex", gap: "0.5rem" }}>
+          <button onClick={() => window.print()} style={{ background: "transparent", border: "1px solid #444", color: "#aaa", borderRadius: 6, padding: "0.35rem 0.9rem", fontSize: "0.78rem", cursor: "pointer" }}>Print</button>
+          <button onClick={() => router.push("/onboarding")} style={{ background: "#CC785C", border: "none", color: "#fff", borderRadius: 6, padding: "0.35rem 0.9rem", fontSize: "0.78rem", cursor: "pointer", fontWeight: 600 }}>New Interview</button>
+        </div>
+      </header>
+
+      <main style={{ maxWidth: 860, margin: "0 auto", padding: "2rem 1.25rem 4rem" }}>
+
+        <div className="fade-up" style={{ background: "#FDFAF6", border: "1px solid #E5DDD0", borderRadius: 16, padding: "2rem", marginBottom: "1.5rem", display: "flex", flexWrap: "wrap", gap: "2rem", alignItems: "center" }}>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "0.5rem" }}>
+            <ScoreCircle score={overallScore} size={140} />
+            <span style={{ fontSize: "0.78rem", fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: scoreColor(overallScore) }}>
+              {scoreLabel(overallScore)}
+            </span>
+          </div>
+          <div style={{ flex: 1, minWidth: 200 }}>
+            <h1 style={{ fontSize: "1.5rem", fontWeight: 800, margin: "0 0 0.25rem", color: "#1A1A1A" }}>{config.candidateName}</h1>
+            <p style={{ margin: "0 0 1rem", color: "#555", fontSize: "0.9rem" }}>
+              {config.jobTitle}{config.institution ? ` · ${config.institution}` : ""}{config.country ? ` · ${config.country}` : ""}
+            </p>
+            <div>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.4rem" }}>
+                <span style={{ fontSize: "0.8rem", color: "#555", fontWeight: 500 }}>Job Readiness</span>
+                <span style={{ fontSize: "0.8rem", fontWeight: 700, color: scoreColor(readiness) }}>{readiness}% — {readinessLabel(readiness)}</span>
+              </div>
+              <div style={{ height: 10, background: "#E5DDD0", borderRadius: 999, overflow: "hidden" }}>
+                <div style={{ height: "100%", width: `${readiness}%`, background: "linear-gradient(90deg, #CC785C88, #CC785C)", borderRadius: 999, transition: "width 1.4s cubic-bezier(0.4, 0, 0.2, 1)" }} />
+              </div>
+            </div>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.6rem", minWidth: 130 }}>
+            {[
+              { label: "Questions", value: report.messages.filter((m) => m.role === "assistant" && m.score).length },
+              { label: "Plan", value: config.plan.charAt(0).toUpperCase() + config.plan.slice(1) },
+              { label: "Experience", value: (config as any).yearsExperience || config.experienceLevel || "—" },
+            ].map(({ label, value }) => (
+              <div key={label} style={{ background: "#F0EBE3", borderRadius: 8, padding: "0.45rem 0.8rem", fontSize: "0.78rem" }}>
+                <span style={{ color: "#888" }}>{label}: </span>
+                <span style={{ fontWeight: 700 }}>{value}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <SectionCard title="Performance Criteria" icon="◈">
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: "0 2.5rem" }}>
+            {Object.entries(criteria).map(([key, val], i) => (
+              <CriteriaBar key={key} label={CRITERIA_LABELS[key] || key} icon={CRITERIA_ICONS[key] || "●"} value={val as number} delay={i * 80} />
+            ))}
+          </div>
+        </SectionCard>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(360px, 1fr))", gap: "1.2rem", marginBottom: "1.2rem" }}>
+          <div style={{ background: "rgba(76, 175, 122, 0.05)", border: "1px solid rgba(76, 175, 122, 0.3)", borderRadius: 12, padding: "1.3rem 1.5rem" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.75rem" }}>
+              <span>✦</span>
+              <span style={{ fontSize: "0.8rem", fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", color: "#4CAF7A" }}>Strongest Answer</span>
+              <span style={{ marginLeft: "auto", fontWeight: 800, color: "#4CAF7A", fontSize: "0.9rem" }}>{report.strongestAnswer.score}/100</span>
+            </div>
+            {report.strongestAnswer.question && (
+              <p style={{ fontSize: "0.78rem", color: "#888", marginBottom: "0.5rem", fontStyle: "italic" }}>
+                "{report.strongestAnswer.question.slice(0, 100)}{report.strongestAnswer.question.length > 100 ? "…" : ""}"
+              </p>
+            )}
+            <p style={{ fontSize: "0.84rem", color: "#1A1A1A", lineHeight: 1.55 }}>
+              {report.strongestAnswer.answer.slice(0, 220)}{report.strongestAnswer.answer.length > 220 ? "…" : ""}
+            </p>
+          </div>
+          <div style={{ background: "rgba(200, 75, 75, 0.04)", border: "1px solid rgba(200, 75, 75, 0.25)", borderRadius: 12, padding: "1.3rem 1.5rem" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.75rem" }}>
+              <span>⚠</span>
+              <span style={{ fontSize: "0.8rem", fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", color: "#C84B4B" }}>Weakest Answer</span>
+              <span style={{ marginLeft: "auto", fontWeight: 800, color: "#C84B4B", fontSize: "0.9rem" }}>{report.weakestAnswer.score}/100</span>
+            </div>
+            {report.weakestAnswer.question && (
+              <p style={{ fontSize: "0.78rem", color: "#888", marginBottom: "0.5rem", fontStyle: "italic" }}>
+                "{report.weakestAnswer.question.slice(0, 100)}{report.weakestAnswer.question.length > 100 ? "…" : ""}"
+              </p>
+            )}
+            <p style={{ fontSize: "0.84rem", color: "#1A1A1A", lineHeight: 1.55 }}>
+              {report.weakestAnswer.answer.slice(0, 220)}{report.weakestAnswer.answer.length > 220 ? "…" : ""}
+            </p>
+          </div>
+        </div>
+
+        <SectionCard title="Patterns & Filler Words" icon="⟲">
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "1.5rem" }}>
+            <div style={{ flex: 1, minWidth: 200 }}>
+              <p style={{ fontSize: "0.8rem", color: "#888", marginBottom: "0.6rem", fontWeight: 500 }}>Repeated Patterns</p>
+              {report.repeatedMistakes.length ? (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem" }}>
+                  {report.repeatedMistakes.map((m) => (
+                    <span key={m} style={{ background: "rgba(200,75,75,0.08)", color: "#C84B4B", border: "1px solid rgba(200,75,75,0.2)", borderRadius: 6, padding: "0.25rem 0.6rem", fontSize: "0.78rem", fontWeight: 600 }}>{m}</span>
+                  ))}
+                </div>
+              ) : (
+                <span style={{ fontSize: "0.82rem", color: "#666" }}>No consistent issues detected ✓</span>
+              )}
+            </div>
+            <div style={{ minWidth: 160, textAlign: "center" }}>
+              <p style={{ fontSize: "0.8rem", color: "#888", marginBottom: "0.5rem", fontWeight: 500 }}>Hesitation Index</p>
+              <div style={{ width: 72, height: 72, borderRadius: "50%", background: report.fillerWords > 60 ? "rgba(200,75,75,0.1)" : "rgba(76,175,122,0.1)", border: `2px solid ${report.fillerWords > 60 ? "#C84B4B" : "#4CAF7A"}`, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto", flexDirection: "column" }}>
+                <span style={{ fontSize: "1.4rem", fontWeight: 800, color: report.fillerWords > 60 ? "#C84B4B" : "#4CAF7A", lineHeight: 1 }}>{report.fillerWords}</span>
+                <span style={{ fontSize: "0.6rem", color: "#888" }}>avg/answer</span>
+              </div>
+            </div>
+          </div>
+        </SectionCard>
+
+        <SectionCard title="Hiring Risk Factors" icon="⚑" accent>
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+            {report.hiringRisks.map((risk, i) => (
+              <div key={i} style={{ display: "flex", alignItems: "center", gap: "0.6rem", fontSize: "0.86rem", color: risk.startsWith("No critical") ? "#4CAF7A" : "#1A1A1A" }}>
+                <span style={{ width: 6, height: 6, borderRadius: "50%", background: risk.startsWith("No critical") ? "#4CAF7A" : "#C84B4B", flexShrink: 0 }} />
+                {risk}
+              </div>
+            ))}
+          </div>
+        </SectionCard>
+
+        <SectionCard title="Suggested Improvement Plan" icon="◎">
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.6rem" }}>
+            {report.improvementPlan.map((item, i) => (
+              <div key={i} style={{ display: "flex", gap: "0.75rem", alignItems: "flex-start", fontSize: "0.86rem", lineHeight: 1.5 }}>
+                <span style={{ background: "#CC785C", color: "#fff", borderRadius: "50%", width: 20, height: 20, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.65rem", fontWeight: 800, flexShrink: 0, marginTop: 1 }}>{i + 1}</span>
+                <span>{item}</span>
+              </div>
+            ))}
+          </div>
+        </SectionCard>
+
+        {report.rebuiltExamples.length > 0 && (
+          <SectionCard title="Example Improved Answers" icon="✦">
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.8rem" }}>
+              {report.rebuiltExamples.map((ex, i) => (
+                <div key={i} style={{ border: "1px solid #E5DDD0", borderRadius: 10, overflow: "hidden" }}>
+                  <button onClick={() => setExpandedRebuilt(expandedRebuilt === i ? null : i)}
+                    style={{ width: "100%", background: "#F5F1EB", border: "none", padding: "0.75rem 1rem", textAlign: "left", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "0.82rem", color: "#1A1A1A", fontWeight: 600 }}>
+                    <span>Q{i + 1}: {ex.question.slice(0, 80)}…</span>
+                    <span style={{ color: "#CC785C", fontSize: "1rem" }}>{expandedRebuilt === i ? "−" : "+"}</span>
+                  </button>
+                  {expandedRebuilt === i && (
+                    <div style={{ padding: "1rem" }}>
+                      <div style={{ marginBottom: "0.75rem" }}>
+                        <p style={{ fontSize: "0.72rem", color: "#999", marginBottom: "0.35rem", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>Your Answer</p>
+                        <p style={{ fontSize: "0.84rem", color: "#555", lineHeight: 1.55, background: "#F5F1EB", padding: "0.6rem 0.8rem", borderRadius: 6 }}>{ex.original}</p>
+                      </div>
+                      <div>
+                        <p style={{ fontSize: "0.72rem", color: "#CC785C", marginBottom: "0.35rem", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>Improved Version</p>
+                        <p style={{ fontSize: "0.84rem", color: "#1A1A1A", lineHeight: 1.6, background: "rgba(204,120,92,0.06)", padding: "0.6rem 0.8rem", borderRadius: 6, borderLeft: "3px solid #CC785C" }}>{ex.improved}</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </SectionCard>
+        )}
+
+        {/* Recruiter Evaluation — Dynamic */}
+        <div style={{ background: "#1A1A1A", borderRadius: 12, padding: "1.5rem 1.8rem", marginBottom: "1.2rem" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.85rem" }}>
+            <span>👔</span>
+            <span style={{ fontSize: "0.8rem", fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "#CC785C" }}>
+              Recruiter Evaluation
+            </span>
+          </div>
+
+          {evalLoading ? (
+            <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", padding: "0.25rem 0" }}>
+              <div style={{ width: 16, height: 16, border: "2px solid #444", borderTopColor: "#CC785C", borderRadius: "50%", animation: "spin 0.8s linear infinite", flexShrink: 0 }} />
+              <span style={{ fontSize: "0.85rem", color: "#666", fontStyle: "italic" }}>
+                Generating personalized evaluation...
+              </span>
+            </div>
+          ) : (
+            <p
+              dir="ltr"
+              style={{ fontSize: "0.92rem", color: "#E5DDD0", lineHeight: 1.7, margin: 0, fontStyle: "italic", textAlign: isArabic ? "right" : "left" }}
+            >
+              "{recruiterEval}"
+            </p>
+          )}
+
+          <div style={{ marginTop: "1rem", paddingTop: "0.75rem", borderTop: "1px solid #333", display: "flex", alignItems: "center", gap: "0.4rem" }}>
+            <span style={{ fontWeight: 900, fontSize: "0.85rem" }}>
+              <span style={{ color: "#fff" }}>Barbar</span>
+              <span style={{ color: "#CC785C" }}>os</span>
+            </span>
+            <span style={{ fontSize: "0.75rem", color: "#666" }}>Interview Intelligence</span>
+          </div>
+        </div>
+
+        <div className="no-print" style={{ textAlign: "center", paddingTop: "1rem" }}>
+          <button
+            onClick={() => router.push("/onboarding")}
+            style={{ background: "#CC785C", color: "#fff", border: "none", borderRadius: 10, padding: "0.85rem 2.4rem", fontSize: "0.95rem", fontWeight: 700, cursor: "pointer", letterSpacing: "0.02em", boxShadow: "0 4px 20px rgba(204,120,92,0.35)" }}
+          >
+            Practice Again →
+          </button>
+          <p style={{ fontSize: "0.78rem", color: "#aaa", marginTop: "0.6rem" }}>Each session brings you closer to the offer.</p>
+        </div>
+      </main>
+
+      <footer style={{ background: "#EDE6D8", borderTop: "1px solid #E5DDD0", padding: "1.2rem 2rem", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "0.5rem" }}>
+        <BrandLogo />
+        <span style={{ fontSize: "0.75rem", color: "#999" }}>AI-powered interview intelligence · mockboss-ai.vercel.app</span>
+        <span style={{ fontSize: "0.75rem", color: "#bbb" }}>© {new Date().getFullYear()} Barbaros</span>
+      </footer>
+    </div>
+  );
+}

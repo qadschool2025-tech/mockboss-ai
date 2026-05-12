@@ -44,35 +44,139 @@ const STEPS = [
   { id: 4, label: 'Ready', icon: '🚀' },
 ]
 
-// ─── Job Title Validator ──────────────────────────────────────────────────────
+// ─── Job Title Semantic Validator ────────────────────────────────────────────
+// Validates based on professional role semantics, not length or spelling
+
+// Known first names (common — not exhaustive, covers majority)
+const COMMON_NAMES = new Set([
+  'ahmed','ahmed','ali','omar','sara','sarah','mona','lina','reem','nour','hana','hana',
+  'dana','dina','rana','rania','layla','leila','farid','tariq','khalid','khaled','walid',
+  'mahmoud','mohamed','muhammad','ahmad','hassan','hussain','ibrahim','ismail','yousef',
+  'youssef','nadia','noor','sana','iman','amal','amira','fatima','mariam','maryam',
+  'john','james','michael','david','chris','daniel','paul','mark','luke','peter','robert',
+  'william','richard','thomas','charles','steven','kevin','brian','jason','andrew','ryan',
+  'jennifer','jessica','ashley','amanda','melissa','sarah','stephanie','elizabeth','lisa',
+  'mary','patricia','linda','barbara','susan','karen','nancy','betty','helen','dorothy',
+  'pizza','hello','bye','yes','no','ok','okay','test','testing','sample','demo','dummy',
+  'random','stuff','thing','blah','foo','bar','baz','qux','lorem','ipsum',
+  'محمد','احمد','علي','عمر','سارة','مريم','فاطمة','خالد','وليد','ابراهيم','يوسف',
+  'نور','ليلى','رنا','دينا','هناء','امال','امين','سالم','ناصر','راشد','منى',
+])
+
+// Occupational role words — titles almost always contain one of these
+const ROLE_INDICATORS = [
+  // English role words
+  'engineer','manager','analyst','developer','designer','director','coordinator',
+  'specialist','consultant','advisor','officer','executive','administrator',
+  'supervisor','lead','head','chief','senior','junior','associate','assistant',
+  'intern','technician','operator','inspector','auditor','architect','scientist',
+  'researcher','professor','teacher','instructor','trainer','coach','therapist',
+  'nurse','doctor','physician','surgeon','pharmacist','accountant','lawyer',
+  'attorney','paralegal','journalist','editor','writer','producer','planner',
+  'strategist','recruiter','representative','agent','broker','estimator',
+  'controller','secretary','receptionist','clerk','driver','mechanic','electrician',
+  'plumber','carpenter','welder','painter','security','guard','cleaner','worker',
+  'laborer','helper','staff','personnel','professional','expert','principal',
+  // Arabic role words
+  'مهندس','مدير','محلل','مطور','مصمم','منسق','مستشار','مشرف','رئيس','كبير',
+  'أخصائي','اخصائي','فني','مراجع','مدقق','باحث','أستاذ','معلم','مدرب','ممرض',
+  'طبيب','محاسب','محامي','مسوق','مبرمج','موظف','عامل','سائق','حارس','مساعد',
+  'نائب','مسؤول','خبير','متخصص','قائد','مشغل','مفتش','مخطط','مستشار',
+]
+
+// Structural patterns that strongly suggest a job title
+const JOB_TITLE_PATTERNS = [
+  /\b(senior|junior|lead|head|chief|associate|assistant|deputy|acting|interim)\b/i,
+  /\b(manager|director|officer|executive|coordinator|specialist|analyst|engineer)\b/i,
+  /\b(supervisor|administrator|consultant|advisor|representative|technician)\b/i,
+  /\b(developer|designer|architect|scientist|researcher|professor|instructor)\b/i,
+  /\b(مدير|مهندس|أخصائي|اخصائي|مستشار|محلل|مشرف|منسق|فني|مسؤول)\b/i,
+  // "X of Y" structure: Head of Operations, Director of Finance
+  /\b(head|director|chief|manager|officer|vp|vice\s*president)\s+of\b/i,
+  // "X and Y" job combos: Sales and Marketing Manager
+  /\b\w+\s+and\s+\w+\s+(manager|officer|director|specialist)\b/i,
+]
+
+// Non-professional words that should never appear as standalone job titles
+const CLEARLY_NOT_JOBS = new Set([
+  'pizza','burger','coffee','food','water','car','house','phone','laptop',
+  'hello','hi','bye','yes','no','ok','okay','sure','maybe','please','thank',
+  'good','bad','nice','cool','wow','lol','haha','omg','wtf',
+  'red','blue','green','yellow','white','black','orange','purple',
+  'one','two','three','four','five','six','seven','eight','nine','ten',
+  'مرحبا','اهلا','وداعا','نعم','لا','تمام','حسنا','شكرا','من فضلك',
+])
+
 function isValidJobTitle(title: string): { valid: boolean; reason?: string } {
   const t = title.trim()
+  const lower = t.toLowerCase()
+  const words = lower.split(/\s+/).filter(Boolean)
 
-  if (t.length < 3) return { valid: false, reason: 'Job title is too short' }
-  if (t.length > 100) return { valid: false, reason: 'Job title is too long' }
-
-  // Only numbers or symbols
+  // ── Hard rejects: gibberish / keyboard mashing ──
+  // Only symbols/numbers, no letters at all
   if (/^[^a-zA-Z\u0600-\u06FF]+$/.test(t))
-    return { valid: false, reason: 'Job title must contain real words' }
+    return { valid: false, reason: 'This input does not appear to be a job title.' }
 
-  // Repeated single characters: "aaaa", "xxxx"
+  // Repeated characters: "aaaa", "zzzz"
   if (/^(.)\1{3,}$/.test(t))
-    return { valid: false, reason: 'Please enter a real job title' }
+    return { valid: false, reason: 'This input does not appear to be a job title.' }
 
-  // Random keyboard mashing: consonant clusters > 4 with no vowels
-  const noVowels = t.replace(/[aeiouAEIOU\s\u0600-\u06FF]/g, '')
-  if (noVowels.length > 6 && noVowels.length / t.replace(/\s/g, '').length > 0.85)
-    return { valid: false, reason: 'This doesn\'t look like a valid job title' }
+  // Keyboard sequences
+  if (/^(qwer|asdf|zxcv|qazwsx|abcd|1234|aaaa|bbbb|cccc|dddd)/i.test(t))
+    return { valid: false, reason: 'This input does not appear to be a job title.' }
 
-  // Too many numbers
-  const digitRatio = (t.match(/\d/g) || []).length / t.length
-  if (digitRatio > 0.5)
-    return { valid: false, reason: 'Job title should not contain mostly numbers' }
+  // High consonant cluster ratio (mashing like "sdfghjk")
+  const lettersOnly = t.replace(/[^a-zA-Z]/g, '')
+  if (lettersOnly.length >= 6) {
+    const vowels = (lettersOnly.match(/[aeiouAEIOU]/g) || []).length
+    const ratio = vowels / lettersOnly.length
+    if (ratio < 0.1 && lettersOnly.length > 5)
+      return { valid: false, reason: 'This input does not appear to be a job title.' }
+  }
 
-  // Common gibberish patterns
-  const gibberish = /^(asdf|qwer|zxcv|test|abc|xyz|aaa|bbb|sss|ddd|fff|gggg|hhhh|jjjj)/i
-  if (gibberish.test(t))
-    return { valid: false, reason: 'Please enter a real job title' }
+  // ── Single-word checks ──
+  if (words.length === 1) {
+    // Is it a known first name?
+    if (COMMON_NAMES.has(lower))
+      return { valid: false, reason: 'Please enter a professional job title, not a name.' }
+
+    // Is it a clearly non-job word?
+    if (CLEARLY_NOT_JOBS.has(lower))
+      return { valid: false, reason: 'The entered text appears unrelated to a work position.' }
+
+    // Single word — must match a role indicator to be accepted
+    const hasRoleWord = ROLE_INDICATORS.some(w => lower.includes(w))
+    if (!hasRoleWord)
+      return { valid: false, reason: 'Please enter a valid professional job title.' }
+  }
+
+  // ── Multi-word checks ──
+  if (words.length >= 2) {
+    // All words are names?
+    const allNames = words.every(w => COMMON_NAMES.has(w))
+    if (allNames)
+      return { valid: false, reason: 'Please enter a professional job title, not a name.' }
+
+    // All words are non-job words?
+    const allNonJob = words.every(w => CLEARLY_NOT_JOBS.has(w))
+    if (allNonJob)
+      return { valid: false, reason: 'The entered text appears unrelated to a work position.' }
+
+    // Does it match any structural job title pattern?
+    const matchesPattern = JOB_TITLE_PATTERNS.some(p => p.test(t))
+    if (matchesPattern) return { valid: true }
+
+    // Does it contain any role indicator word?
+    const hasRoleWord = ROLE_INDICATORS.some(w => lower.includes(w))
+    if (hasRoleWord) return { valid: true }
+
+    // 2-3 word phrase with no role indicator — ambiguous, allow it
+    // (e.g. "Cleaning Worker", "Field Operator", "وظيفة حكومية")
+    if (words.length <= 4) return { valid: true }
+
+    // Long phrase with no role indicator — suspicious
+    return { valid: false, reason: 'Please provide a clearer professional role.' }
+  }
 
   return { valid: true }
 }
@@ -337,9 +441,6 @@ export default function OnboardingPage() {
                 />
                 {errors.jobTitle && (
                   <p style={{ fontSize: 11, color: '#DC2626', marginTop: 6, fontWeight: 600 }}>⚠ {errors.jobTitle}</p>
-                )}
-                {!errors.jobTitle && data.jobTitle.trim().length >= 3 && isValidJobTitle(data.jobTitle).valid && (
-                  <p style={{ fontSize: 11, color: '#22C55E', marginTop: 6, fontWeight: 600 }}>✓ Valid job title</p>
                 )}
               </div>
 

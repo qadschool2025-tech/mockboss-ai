@@ -125,8 +125,30 @@ function getInterviewPersonality(sector: string, institution: string): string {
 - Move fast — no time for padding or repetition`
 }
 
+// ─── Job Title Validator ──────────────────────────────────────────────────────
+function isJobTitleSuspicious(title: string): boolean {
+  const t = title.trim()
+  if (t.length < 3) return true
+
+  // Only numbers/symbols
+  if (/^[^a-zA-Z\u0600-\u06FF]+$/.test(t)) return true
+
+  // Repeated characters
+  if (/^(.)\1{3,}$/.test(t)) return true
+
+  // High consonant ratio (keyboard mashing)
+  const noVowels = t.replace(/[aeiouAEIOU\s\u0600-\u06FF]/g, '')
+  if (noVowels.length > 6 && noVowels.length / t.replace(/\s/g, '').length > 0.85) return true
+
+  // Common gibberish
+  if (/^(asdf|qwer|zxcv|test|abc|xyz|aaa|bbb|sss|ddd|fff)/i.test(t)) return true
+
+  return false
+}
+
 function buildPrompt(config: any, messages: any[]): string {
   const adaptiveLevel = getAdaptiveLevel(messages)
+  const jobTitleSuspicious = isJobTitleSuspicious(config.jobTitle)
 
   const adaptiveInstruction = adaptiveLevel === 'hard'
     ? `ADAPTIVE DIFFICULTY — HARD MODE (candidate is performing well):
@@ -163,7 +185,10 @@ This rule overrides everything else. No exceptions.`
 Use Arabic as the primary language.
 Use English ONLY for technical terms with no Arabic equivalent.`
 
-  const cvSection = config.cvText && !config.cvText.startsWith('[NO_CV]')
+  // ── CV Section ──────────────────────────────────────────────────────────────
+  const hasNoCv = !config.cvText || config.cvText.startsWith('[NO_CV]')
+
+  const cvSection = !hasNoCv
     ? `
 CANDIDATE CV — READ AND ANALYZE CAREFULLY:
 ${config.cvText}
@@ -179,9 +204,23 @@ CV ANALYSIS RULES — CRITICAL:
 8. If CV shows career switch, ask how previous experience adds value to this role.`
     : `
 NO CV PROVIDED:
-The candidate did not provide a CV. At the opening, mention this professionally:
-"I notice you have not provided a CV. A strong CV would have allowed me to tailor this interview more precisely. Let us proceed with what we have."
-Then conduct a general interview based on job title, sector, and experience level only.`
+The candidate did not upload a CV. Mention this ONCE at the start, using exactly this approach:
+"لم يتم إرفاق السيرة الذاتية. سيعتمد التقييم في هذه المقابلة على خبرتك، طريقة إجابتك، وأدائك الفعلي أثناء الجلسة." (if Arabic)
+Or: "No CV was provided. This interview will be evaluated based on your answers, experience, and performance." (if English)
+Then conduct the interview based on job title, sector, and experience level only.
+Do NOT repeat this note again during the interview.`
+
+  // ── Job Title Handling ───────────────────────────────────────────────────────
+  const jobTitleInstruction = jobTitleSuspicious
+    ? `
+JOB TITLE ALERT — CRITICAL, HANDLE IMMEDIATELY:
+The registered job title "${config.jobTitle}" appears unclear, incomplete, or invalid.
+At the very start of the interview — before any other question — ask professionally:
+"Before we begin, I want to confirm: what is the exact job title you are applying for? The information I have here is unclear."
+Wait for their answer. If they provide a clear title, use it for the rest of the interview.
+If they still cannot provide a clear job title, note this in your scoring as a red flag and conduct a general professional interview.
+Do NOT accept the unclear title and proceed without addressing it.`
+    : ''
 
   const upgradeHint = UPGRADE_HINTS[config.plan]
     ? `
@@ -211,6 +250,8 @@ ${config.jobRequirements ? `- Job Requirements:\n${config.jobRequirements}` : ''
 ${personality}
 
 ${adaptiveInstruction}
+
+${jobTitleInstruction}
 
 ${cvSection}
 
@@ -351,7 +392,7 @@ SCORING FIELDS — DEFINITIONS:
 - leadership: ownership, initiative, influence indicators (0-100)
 - hesitation_signals: count of um/uh/يعني/pauses detected (number)
 - question_type: one of: HR | Technical | Behavioral | Scenario | Pressure | CV_Deep_Dive
-- coaching_note: ONE short sentence — what the candidate should do differently. Examples: "Lead with the outcome before explaining the process." / "Your answer lacked measurable impact." / "Structure your response using a clear beginning and end." — Leave empty string if answer was strong.
+- coaching_note: ONE short sentence — what the candidate should do differently. Leave empty string if answer was strong.
 - notes: specific observations about this answer for the final report`
 }
 
@@ -369,7 +410,7 @@ export async function POST(req: NextRequest) {
         : 0
 
       const rebuiltAnswers = messages
-        .filter((m: any) => m.role === 'user' && m.score && m.content && !m.content.startsWith('['))
+        .filter((m: any) => m.role === 'user' && m.content && !m.content.startsWith('['))
         .slice(-5)
         .map((m: any) => ({
           original: m.content,
@@ -380,7 +421,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({
         success: true,
         content: config.language === 'ar'
-          ? `${config.candidateName}، انتهى وقتنا. شكراً على وقتك. تقريرك الكامل جاهز.`
+          ? `${config.candidateName}، انتهى وقتنا. تقريرك الكامل جاهز.`
           : `${config.candidateName}, our time is up. Your full report is ready.`,
         isEndOfSession: true,
         finalScore: avg,

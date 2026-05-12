@@ -64,7 +64,90 @@ async function textToSpeech(text: string): Promise<Buffer | null> {
   }
 }
 
-function buildPrompt(config: any): string {
+function getAdaptiveLevel(messages: any[]): 'easy' | 'medium' | 'hard' {
+  const scored = messages.filter((m: any) => m.score && typeof m.score.score === 'number')
+  if (scored.length < 2) return 'medium'
+  const recent = scored.slice(-3)
+  const avg = recent.reduce((s: number, m: any) => s + m.score.score, 0) / recent.length
+  if (avg >= 75) return 'hard'
+  if (avg <= 45) return 'easy'
+  return 'medium'
+}
+
+function getInterviewPersonality(sector: string, institution: string): string {
+  const s = sector?.toLowerCase() || ''
+  const i = institution?.toLowerCase() || ''
+
+  if (s.includes('technology') || i.includes('google') || i.includes('amazon') || i.includes('meta') || i.includes('microsoft')) {
+    return `INTERVIEW PERSONALITY: American Tech
+- Fast-paced, data-driven questions
+- Expect system design, problem solving, and behavioral questions
+- Focus on scale, impact, and measurable outcomes
+- Challenge every claim with "How do you know?" or "What were the numbers?"`
+  }
+
+  if (s.includes('government') || i.includes('ministry') || i.includes('department') || i.includes('authority')) {
+    return `INTERVIEW PERSONALITY: GCC Corporate
+- Formal, structured, protocol-driven
+- Questions focus on compliance, policy, teamwork, and institutional loyalty
+- Respect hierarchy in tone — but still direct and evaluative
+- Ask about cross-department coordination and public accountability`
+  }
+
+  if (s.includes('finance') || s.includes('legal')) {
+    return `INTERVIEW PERSONALITY: Strict Corporate Recruiter
+- Precise, formal, zero tolerance for vagueness
+- Every answer must have numbers, timelines, or outcomes
+- Challenge regulatory knowledge and ethical decision-making
+- Interrupt if the answer is too long or unfocused`
+  }
+
+  if (s.includes('healthcare') || s.includes('education')) {
+    return `INTERVIEW PERSONALITY: Senior Professional Evaluator
+- Calm but probing — focus on real scenarios and outcomes
+- Ask about pressure situations, difficult cases, ethical dilemmas
+- Evaluate empathy, judgment, and domain knowledge equally
+- Never accept textbook answers — demand real experience`
+  }
+
+  if (s.includes('startup') || s.includes('marketing') || s.includes('retail')) {
+    return `INTERVIEW PERSONALITY: Startup Founder
+- Direct, fast, unconventional questions
+- Focus on adaptability, initiative, and results under constraints
+- Ask about failure and what was learned — not just successes
+- Informal but sharp — no tolerance for corporate jargon`
+  }
+
+  return `INTERVIEW PERSONALITY: Professional Recruiter
+- Balanced, structured, firm
+- Equal weight on technical and behavioral performance
+- Demand specificity in every answer
+- Move fast — no time for padding or repetition`
+}
+
+function buildPrompt(config: any, messages: any[]): string {
+  const adaptiveLevel = getAdaptiveLevel(messages)
+
+  const adaptiveInstruction = adaptiveLevel === 'hard'
+    ? `ADAPTIVE DIFFICULTY — HARD MODE (candidate is performing well):
+- Ask deeper, more complex follow-up questions
+- Use stress scenarios and unexpected curveballs
+- Challenge every answer — do not accept surface-level responses
+- Introduce time pressure: "You have 30 seconds. Answer."
+- Push on leadership, crisis decisions, and system-level thinking`
+    : adaptiveLevel === 'easy'
+    ? `ADAPTIVE DIFFICULTY — SUPPORT MODE (candidate is struggling):
+- Simplify question complexity slightly — but do not lower standards
+- Give one brief structural hint if answer is completely off: "Think about a specific example."
+- Reduce multi-part questions — ask one thing at a time
+- Maintain professional pressure but reduce hostility
+- Note the struggle in scoring — do not mask it`
+    : `ADAPTIVE DIFFICULTY — STANDARD MODE:
+- Maintain balanced difficulty
+- Increase complexity if two consecutive answers are strong
+- Simplify if two consecutive answers are weak
+- Keep steady professional pressure throughout`
+
   const langInstruction =
     config.language === 'ar'
       ? `LANGUAGE RULE — ABSOLUTE:
@@ -108,6 +191,8 @@ When time is running low (last 2 minutes), naturally weave in ONE subtle comment
 Say it as a professional observation, never as a sales pitch.`
     : ''
 
+  const personality = getInterviewPersonality(config.sector, config.institution)
+
   return `You are Adam Reid, a senior certified interview evaluator at Barbaros AI.
 You are known for being sharp, direct, and uncompromising. You have evaluated thousands of candidates worldwide.
 
@@ -118,9 +203,15 @@ SESSION DETAILS:
 - Candidate: ${config.candidateName}
 - Job Title: ${config.jobTitle}
 - Institution: ${config.institution}
+- Country: ${config.country || 'Not specified'}
 - Sector: ${config.sector}
 - Experience: ${config.yearsExperience}
 ${config.jobRequirements ? `- Job Requirements:\n${config.jobRequirements}` : ''}
+
+${personality}
+
+${adaptiveInstruction}
+
 ${cvSection}
 
 ${langInstruction}
@@ -190,6 +281,14 @@ RESPONSE FORMAT — STRICT:
 - Never use filler phrases like "Great question" or "Thank you for sharing"
 - Natural reactions allowed: "Go on.", "And?", "Interesting — but...", "Is that so?"
 
+QUESTION TYPES — USE ALL SIX ACROSS THE INTERVIEW:
+1. HR — motivation, culture fit, career goals
+2. Technical — domain knowledge, tools, methodologies specific to ${config.jobTitle}
+3. Behavioral — STAR method, past situations, real examples
+4. Scenario — "What would you do if..." real-world pressure situations
+5. Pressure — unexpected, challenging, stress-testing questions
+6. CV Deep Dive — specific items from the candidate's CV
+
 SPECIALIZATION — CRITICAL:
 - Every question must be SPECIFIC to ${config.jobTitle} in ${config.sector}
 - Use real-world scenarios from ${config.sector}
@@ -223,17 +322,37 @@ HANDLING CANDIDATE RESPONSES:
 - Uses fillers → note internally, continue without commenting
 
 SCORING — AFTER EVERY SUBSTANTIVE ANSWER:
-Evaluate and note:
-- score: overall 0-100
-- clarity: how clear and structured was the answer
-- confidence: tone, directness, no hesitation
-- relevance: did they answer the actual question
-- technical_depth: domain knowledge shown
-- hesitation_signals: count of um/uh/يعني/pauses detected
-- notes: specific observations about this answer
+Evaluate silently and append EXACTLY after every candidate answer:
+<score>{
+  "score": 0,
+  "clarity": 0,
+  "confidence": 0,
+  "relevance": 0,
+  "technical_depth": 0,
+  "structure": 0,
+  "communication": 0,
+  "problem_solving": 0,
+  "leadership": 0,
+  "hesitation_signals": 0,
+  "question_type": "",
+  "coaching_note": "",
+  "notes": ""
+}</score>
 
-After EVERY substantive candidate answer, append EXACTLY:
-<score>{"score":0,"clarity":0,"confidence":0,"relevance":0,"technical_depth":0,"hesitation_signals":0,"notes":""}</score>`
+SCORING FIELDS — DEFINITIONS:
+- score: overall 0-100
+- clarity: how clear and structured was the answer (0-100)
+- confidence: tone, directness, no hesitation (0-100)
+- relevance: did they answer the actual question (0-100)
+- technical_depth: domain knowledge shown (0-100)
+- structure: logical flow, beginning-middle-end (0-100)
+- communication: language quality, vocabulary, coherence (0-100)
+- problem_solving: analytical thinking, decision-making shown (0-100)
+- leadership: ownership, initiative, influence indicators (0-100)
+- hesitation_signals: count of um/uh/يعني/pauses detected (number)
+- question_type: one of: HR | Technical | Behavioral | Scenario | Pressure | CV_Deep_Dive
+- coaching_note: ONE short sentence — what the candidate should do differently. Examples: "Lead with the outcome before explaining the process." / "Your answer lacked measurable impact." / "Structure your response using a clear beginning and end." — Leave empty string if answer was strong.
+- notes: specific observations about this answer for the final report`
 }
 
 export async function POST(req: NextRequest) {
@@ -248,13 +367,24 @@ export async function POST(req: NextRequest) {
       const avg = scored.length
         ? Math.round(scored.reduce((s: number, m: any) => s + (m.score?.score ?? 0), 0) / scored.length)
         : 0
+
+      const rebuiltAnswers = messages
+        .filter((m: any) => m.role === 'user' && m.score && m.content && !m.content.startsWith('['))
+        .slice(-5)
+        .map((m: any) => ({
+          original: m.content,
+          coaching: m.score?.coaching_note || '',
+          question_type: m.score?.question_type || ''
+        }))
+
       return NextResponse.json({
         success: true,
         content: config.language === 'ar'
           ? `${config.candidateName}، انتهى وقتنا. شكراً على وقتك. تقريرك الكامل جاهز.`
           : `${config.candidateName}, our time is up. Your full report is ready.`,
         isEndOfSession: true,
-        finalScore: avg
+        finalScore: avg,
+        rebuiltAnswers
       })
     }
 
@@ -272,7 +402,7 @@ export async function POST(req: NextRequest) {
     const response = await client.messages.create({
       model: 'claude-sonnet-4-5',
       max_tokens: isFirstMessage ? 120 : 400,
-      system: buildPrompt(config),
+      system: buildPrompt(config, messages),
       messages: apiMessages
     })
 
@@ -292,7 +422,14 @@ export async function POST(req: NextRequest) {
     const audioBuffer = await textToSpeech(content)
     const audioBase64 = audioBuffer ? audioBuffer.toString('base64') : null
 
-    return NextResponse.json({ success: true, content, score, audioBase64 })
+    return NextResponse.json({
+      success: true,
+      content,
+      score,
+      audioBase64,
+      coaching_note: score?.coaching_note || null,
+      question_type: score?.question_type || null
+    })
 
   } catch (error: any) {
     console.error('Interview API error:', error.message)

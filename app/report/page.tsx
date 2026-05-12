@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
 interface MessageScore {
@@ -37,7 +37,6 @@ interface BarbarosConfig {
   language: string;
   plan: string;
   country?: string;
-  freshGraduate?: boolean;
 }
 
 interface ReportData {
@@ -65,27 +64,54 @@ interface ReportData {
   readiness: number;
 }
 
-const CRITERIA_LABELS: Record<string, string> = {
-  clarity: "Clarity",
-  confidence: "Confidence",
-  relevance: "Relevance",
-  technical_depth: "Technical Depth",
-  structure: "Structure",
-  communication: "Communication",
-  problem_solving: "Problem Solving",
-  leadership: "Leadership",
-};
+// ── Arabic translations ───────────────────────────────────────────────────────
+const AR = {
+  reportTitle: "تقرير المقابلة",
+  print: "طباعة",
+  newInterview: "مقابلة جديدة",
+  jobReadiness: "الجاهزية الوظيفية",
+  questions: "الأسئلة",
+  plan: "الباقة",
+  experience: "الخبرة",
+  performanceCriteria: "معايير الأداء",
+  strongestAnswer: "أقوى إجابة",
+  weakestAnswer: "أضعف إجابة",
+  patterns: "الأنماط المتكررة",
+  hesitationIndex: "مؤشر التردد",
+  avgPerAnswer: "معدل/إجابة",
+  noIssues: "لا توجد أنماط سلبية متكررة ✓",
+  hiringRisks: "عوامل مخاطر التوظيف",
+  improvementPlan: "خطة التحسين المقترحة",
+  improvedAnswers: "أمثلة على إجابات محسّنة",
+  yourAnswer: "إجابتك",
+  improvedVersion: "النسخة المحسّنة",
+  recruiterEval: "تقييم المحاور",
+  generating: "جاري إنشاء التقييم الشخصي...",
+  generatingPlan: "جاري إنشاء خطة التحسين...",
+  practiceAgain: "تدرّب مجدداً ←",
+  practiceHint: "كل جلسة تقربك من العرض.",
+  noData: "لا توجد بيانات مقابلة.",
+  startInterview: "ابدأ مقابلة",
+  generating_report: "جاري إنشاء تقريرك...",
+  readinessLabels: ["غير جاهز بعد", "يحتاج تحضيراً", "توظيف مشروط", "مرشح قوي", "جاهز للتوظيف"],
+  scoreLabels: ["حرج", "يحتاج عمل", "في طور التطور", "قوي", "استثنائي"],
+  interviewIntelligence: "ذكاء المقابلات",
+  criteria: {
+    clarity: "الوضوح",
+    confidence: "الثقة",
+    relevance: "الصلة بالموضوع",
+    technical_depth: "العمق التقني",
+    structure: "البنية",
+    communication: "التواصل",
+    problem_solving: "حل المشكلات",
+    leadership: "القيادة",
+  }
+}
 
 const CRITERIA_ICONS: Record<string, string> = {
-  clarity: "◎",
-  confidence: "◈",
-  relevance: "◆",
-  technical_depth: "◉",
-  structure: "▣",
-  communication: "◐",
-  problem_solving: "◑",
-  leadership: "★",
-};
+  clarity: "◎", confidence: "◈", relevance: "◆", technical_depth: "◉",
+  structure: "▣", communication: "◐", problem_solving: "◑", leadership: "★",
+}
 
 function avg(arr: number[]): number {
   const valid = arr.filter((v) => typeof v === "number" && !isNaN(v));
@@ -99,7 +125,14 @@ function scoreColor(score: number): string {
   return "#C84B4B";
 }
 
-function scoreLabel(score: number): string {
+function scoreLabel(score: number, isArabic: boolean): string {
+  if (isArabic) {
+    if (score >= 85) return "استثنائي";
+    if (score >= 70) return "قوي";
+    if (score >= 55) return "في طور التطور";
+    if (score >= 40) return "يحتاج عمل";
+    return "حرج";
+  }
   if (score >= 85) return "Exceptional";
   if (score >= 70) return "Strong";
   if (score >= 55) return "Developing";
@@ -107,7 +140,14 @@ function scoreLabel(score: number): string {
   return "Critical";
 }
 
-function readinessLabel(pct: number): string {
+function readinessLabel(pct: number, isArabic: boolean): string {
+  if (isArabic) {
+    if (pct >= 80) return "جاهز للتوظيف";
+    if (pct >= 65) return "مرشح قوي";
+    if (pct >= 50) return "توظيف مشروط";
+    if (pct >= 35) return "يحتاج تحضيراً";
+    return "غير جاهز بعد";
+  }
   if (pct >= 80) return "Ready to Hire";
   if (pct >= 65) return "Strong Candidate";
   if (pct >= 50) return "Conditional Hire";
@@ -189,29 +229,15 @@ function buildReport(): ReportData | null {
       .map(([label]) => label.charAt(0).toUpperCase() + label.slice(1));
 
     const hiringRisks: string[] = [];
-    if ((criteria.confidence ?? 0) < 55) hiringRisks.push("Low confidence under pressure");
-    if ((criteria.technical_depth ?? 0) < 50) hiringRisks.push("Insufficient technical depth");
-    if ((criteria.structure ?? 0) < 55) hiringRisks.push("Unstructured responses");
-    if (fillerWords > 60) hiringRisks.push("Excessive filler words");
-    if ((criteria.relevance ?? 0) < 55) hiringRisks.push("Answers lack focus and relevance");
-    if (!hiringRisks.length) hiringRisks.push("No critical risks identified");
+    if ((criteria.confidence ?? 0) < 55) hiringRisks.push(config.language === 'ar' ? "ثقة منخفضة تحت الضغط" : "Low confidence under pressure");
+    if ((criteria.technical_depth ?? 0) < 50) hiringRisks.push(config.language === 'ar' ? "عمق تقني غير كافٍ" : "Insufficient technical depth");
+    if ((criteria.structure ?? 0) < 55) hiringRisks.push(config.language === 'ar' ? "إجابات غير منظمة" : "Unstructured responses");
+    if (fillerWords > 60) hiringRisks.push(config.language === 'ar' ? "كلمات حشو مفرطة" : "Excessive filler words");
+    if ((criteria.relevance ?? 0) < 55) hiringRisks.push(config.language === 'ar' ? "الإجابات تفتقر للتركيز" : "Answers lack focus and relevance");
+    if (!hiringRisks.length) hiringRisks.push(config.language === 'ar' ? "لا توجد مخاطر جوهرية" : "No critical risks identified");
 
+    // fallback improvement plan — will be replaced by AI
     const improvementPlan: string[] = [];
-    const plans: Record<string, string> = {
-      clarity: "Practice the STAR method — Situation, Task, Action, Result",
-      confidence: "Record yourself answering aloud; reduce hedging language",
-      relevance: "Before answering, pause 3 seconds and align to the question",
-      technical_depth: "Prepare 3 deep technical examples from your career",
-      structure: "Use signposting: 'First... Then... Finally...'",
-      communication: "Simplify vocabulary; speak in shorter, clearer sentences",
-      problem_solving: "Prepare case-study examples that show your process",
-      leadership: "Identify and rehearse 2 leadership moments from your experience",
-    };
-    criteriaKeys.forEach((key) => {
-      if ((criteria[key] ?? 0) < 60 && plans[key]) improvementPlan.push(plans[key]);
-    });
-    if (!improvementPlan.length)
-      improvementPlan.push("Excellent foundation — focus on refining technical depth with concrete examples");
 
     const userAnswers = messages.filter((m) => m.role === "user" && !m.content.startsWith("["));
     const rebuiltExamples = userAnswers
@@ -227,21 +253,28 @@ function buildReport(): ReportData | null {
       });
 
     const s = overallScore;
+    const isAr = config.language === 'ar';
     let recruiterEvaluation = "";
     if (s >= 80)
-      recruiterEvaluation = `${config.candidateName} presents as a confident, well-prepared candidate. Responses were structured, relevant, and demonstrated genuine command of their field. Recommend advancing to final stage.`;
+      recruiterEvaluation = isAr
+        ? `${config.candidateName} يقدم نفسه كمرشح واثق ومستعد جيداً. كانت الإجابات منظمة وذات صلة وأظهرت إلماماً حقيقياً بمجاله. يُوصى بالمضي قدماً في المراحل النهائية.`
+        : `${config.candidateName} presents as a confident, well-prepared candidate. Responses were structured, relevant, and demonstrated genuine command of their field. Recommend advancing to final stage.`;
     else if (s >= 65)
-      recruiterEvaluation = `${config.candidateName} shows solid potential with a few areas to develop. Core competencies are present; however, some responses lacked depth or specific examples. Consider a second interview with targeted questions.`;
+      recruiterEvaluation = isAr
+        ? `${config.candidateName} يُظهر إمكانات جيدة مع بعض المجالات التي تحتاج تطويراً. الكفاءات الأساسية موجودة لكن بعض الإجابات افتقرت للعمق. يُقترح إجراء مقابلة ثانية مع أسئلة موجّهة.`
+        : `${config.candidateName} shows solid potential with a few areas to develop. Core competencies are present; however, some responses lacked depth. Consider a second interview with targeted questions.`;
     else if (s >= 50)
-      recruiterEvaluation = `${config.candidateName} demonstrated foundational knowledge but struggled with confidence and structured delivery. Recommend preparation coaching before progressing in competitive roles.`;
+      recruiterEvaluation = isAr
+        ? `${config.candidateName} أظهر معرفة أساسية لكنه واجه صعوبة في الثقة والتسليم المنظم. يُوصى بتدريب على المقابلات قبل التقدم لأدوار تنافسية.`
+        : `${config.candidateName} demonstrated foundational knowledge but struggled with confidence and structured delivery. Recommend preparation coaching before progressing in competitive roles.`;
     else
-      recruiterEvaluation = `${config.candidateName} would benefit significantly from structured interview preparation. Key competencies were not sufficiently demonstrated. Not recommended for this position at this stage.`;
+      recruiterEvaluation = isAr
+        ? `${config.candidateName} يحتاج إلى تحضير منظم للمقابلات. لم تُثبت الكفاءات الأساسية بشكل كافٍ. غير موصى به لهذا المنصب في هذه المرحلة.`
+        : `${config.candidateName} would benefit significantly from structured interview preparation. Key competencies were not sufficiently demonstrated. Not recommended for this position at this stage.`;
 
     const readiness = Math.min(100, Math.round(
-      s * 0.5 +
-      (criteria.confidence ?? 0) * 0.15 +
-      (criteria.technical_depth ?? 0) * 0.2 +
-      (criteria.structure ?? 0) * 0.15
+      s * 0.5 + (criteria.confidence ?? 0) * 0.15 +
+      (criteria.technical_depth ?? 0) * 0.2 + (criteria.structure ?? 0) * 0.15
     ));
 
     return {
@@ -339,6 +372,8 @@ export default function ReportPage() {
   const [expandedRebuilt, setExpandedRebuilt] = useState<number | null>(null);
   const [recruiterEval, setRecruiterEval] = useState<string>('');
   const [evalLoading, setEvalLoading] = useState(true);
+  const [improvementPlan, setImprovementPlan] = useState<string[]>([]);
+  const [planLoading, setPlanLoading] = useState(true);
 
   useEffect(() => {
     const data = buildReport();
@@ -346,7 +381,6 @@ export default function ReportPage() {
     setLoading(false);
 
     if (data) {
-      setEvalLoading(true);
       fetch('/api/recruiter-eval', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -362,11 +396,24 @@ export default function ReportPage() {
       })
         .then((r) => r.json())
         .then((res) => {
-          if (res.success && res.evaluation) setRecruiterEval(res.evaluation);
-          else setRecruiterEval(data.recruiterEvaluation);
+          if (res.success) {
+            if (res.evaluation) setRecruiterEval(res.evaluation);
+            else setRecruiterEval(data.recruiterEvaluation);
+            if (res.improvementPlan?.length) setImprovementPlan(res.improvementPlan);
+            else setImprovementPlan(data.improvementPlan);
+          } else {
+            setRecruiterEval(data.recruiterEvaluation);
+            setImprovementPlan(data.improvementPlan);
+          }
         })
-        .catch(() => setRecruiterEval(data.recruiterEvaluation))
-        .finally(() => setEvalLoading(false));
+        .catch(() => {
+          setRecruiterEval(data.recruiterEvaluation);
+          setImprovementPlan(data.improvementPlan);
+        })
+        .finally(() => {
+          setEvalLoading(false);
+          setPlanLoading(false);
+        });
     }
   }, []);
 
@@ -395,6 +442,15 @@ export default function ReportPage() {
 
   const { config, overallScore, criteria, readiness } = report;
   const isArabic = config.language === "ar";
+  const t = isArabic ? AR : null;
+
+  const criteriaLabels: Record<string, string> = isArabic
+    ? AR.criteria
+    : {
+        clarity: "Clarity", confidence: "Confidence", relevance: "Relevance",
+        technical_depth: "Technical Depth", structure: "Structure",
+        communication: "Communication", problem_solving: "Problem Solving", leadership: "Leadership",
+      };
 
   return (
     <div
@@ -410,22 +466,30 @@ export default function ReportPage() {
         .fade-up { animation: fadeUp 0.5s ease both; }
       `}</style>
 
+      {/* Header */}
       <header style={{ background: "#1A1A1A", padding: "1rem 2rem", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <BrandLogo />
-        <span style={{ fontSize: "0.75rem", color: "#888", letterSpacing: "0.08em", textTransform: "uppercase" }}>Interview Report</span>
+        <span style={{ fontSize: "0.75rem", color: "#888", letterSpacing: "0.08em", textTransform: "uppercase" }}>
+          {isArabic ? AR.reportTitle : "Interview Report"}
+        </span>
         <div className="no-print" style={{ display: "flex", gap: "0.5rem" }}>
-          <button onClick={() => window.print()} style={{ background: "transparent", border: "1px solid #444", color: "#aaa", borderRadius: 6, padding: "0.35rem 0.9rem", fontSize: "0.78rem", cursor: "pointer" }}>Print</button>
-          <button onClick={() => router.push("/onboarding")} style={{ background: "#CC785C", border: "none", color: "#fff", borderRadius: 6, padding: "0.35rem 0.9rem", fontSize: "0.78rem", cursor: "pointer", fontWeight: 600 }}>New Interview</button>
+          <button onClick={() => window.print()} style={{ background: "transparent", border: "1px solid #444", color: "#aaa", borderRadius: 6, padding: "0.35rem 0.9rem", fontSize: "0.78rem", cursor: "pointer" }}>
+            {isArabic ? AR.print : "Print"}
+          </button>
+          <button onClick={() => router.push("/onboarding")} style={{ background: "#CC785C", border: "none", color: "#fff", borderRadius: 6, padding: "0.35rem 0.9rem", fontSize: "0.78rem", cursor: "pointer", fontWeight: 600 }}>
+            {isArabic ? AR.newInterview : "New Interview"}
+          </button>
         </div>
       </header>
 
       <main style={{ maxWidth: 860, margin: "0 auto", padding: "2rem 1.25rem 4rem" }}>
 
+        {/* Hero */}
         <div className="fade-up" style={{ background: "#FDFAF6", border: "1px solid #E5DDD0", borderRadius: 16, padding: "2rem", marginBottom: "1.5rem", display: "flex", flexWrap: "wrap", gap: "2rem", alignItems: "center" }}>
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "0.5rem" }}>
             <ScoreCircle score={overallScore} size={140} />
             <span style={{ fontSize: "0.78rem", fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: scoreColor(overallScore) }}>
-              {scoreLabel(overallScore)}
+              {scoreLabel(overallScore, isArabic)}
             </span>
           </div>
           <div style={{ flex: 1, minWidth: 200 }}>
@@ -435,8 +499,8 @@ export default function ReportPage() {
             </p>
             <div>
               <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.4rem" }}>
-                <span style={{ fontSize: "0.8rem", color: "#555", fontWeight: 500 }}>Job Readiness</span>
-                <span style={{ fontSize: "0.8rem", fontWeight: 700, color: scoreColor(readiness) }}>{readiness}% — {readinessLabel(readiness)}</span>
+                <span style={{ fontSize: "0.8rem", color: "#555", fontWeight: 500 }}>{isArabic ? AR.jobReadiness : "Job Readiness"}</span>
+                <span style={{ fontSize: "0.8rem", fontWeight: 700, color: scoreColor(readiness) }}>{readiness}% — {readinessLabel(readiness, isArabic)}</span>
               </div>
               <div style={{ height: 10, background: "#E5DDD0", borderRadius: 999, overflow: "hidden" }}>
                 <div style={{ height: "100%", width: `${readiness}%`, background: "linear-gradient(90deg, #CC785C88, #CC785C)", borderRadius: 999, transition: "width 1.4s cubic-bezier(0.4, 0, 0.2, 1)" }} />
@@ -445,9 +509,9 @@ export default function ReportPage() {
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: "0.6rem", minWidth: 130 }}>
             {[
-              { label: "Questions", value: report.messages.filter((m) => m.role === "assistant" && m.score).length },
-              { label: "Plan", value: config.plan.charAt(0).toUpperCase() + config.plan.slice(1) },
-              { label: "Experience", value: (config as any).yearsExperience || config.experienceLevel || "—" },
+              { label: isArabic ? AR.questions : "Questions", value: report.messages.filter((m) => m.role === "assistant" && m.score).length },
+              { label: isArabic ? AR.plan : "Plan", value: config.plan.charAt(0).toUpperCase() + config.plan.slice(1) },
+              { label: isArabic ? AR.experience : "Experience", value: (config as any).yearsExperience || config.experienceLevel || "—" },
             ].map(({ label, value }) => (
               <div key={label} style={{ background: "#F0EBE3", borderRadius: 8, padding: "0.45rem 0.8rem", fontSize: "0.78rem" }}>
                 <span style={{ color: "#888" }}>{label}: </span>
@@ -457,19 +521,21 @@ export default function ReportPage() {
           </div>
         </div>
 
-        <SectionCard title="Performance Criteria" icon="◈">
+        {/* Criteria */}
+        <SectionCard title={isArabic ? AR.performanceCriteria : "Performance Criteria"} icon="◈">
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: "0 2.5rem" }}>
             {Object.entries(criteria).map(([key, val], i) => (
-              <CriteriaBar key={key} label={CRITERIA_LABELS[key] || key} icon={CRITERIA_ICONS[key] || "●"} value={val as number} delay={i * 80} />
+              <CriteriaBar key={key} label={criteriaLabels[key] || key} icon={CRITERIA_ICONS[key] || "●"} value={val as number} delay={i * 80} />
             ))}
           </div>
         </SectionCard>
 
+        {/* Strongest + Weakest */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(360px, 1fr))", gap: "1.2rem", marginBottom: "1.2rem" }}>
           <div style={{ background: "rgba(76, 175, 122, 0.05)", border: "1px solid rgba(76, 175, 122, 0.3)", borderRadius: 12, padding: "1.3rem 1.5rem" }}>
             <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.75rem" }}>
               <span>✦</span>
-              <span style={{ fontSize: "0.8rem", fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", color: "#4CAF7A" }}>Strongest Answer</span>
+              <span style={{ fontSize: "0.8rem", fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", color: "#4CAF7A" }}>{isArabic ? AR.strongestAnswer : "Strongest Answer"}</span>
               <span style={{ marginLeft: "auto", fontWeight: 800, color: "#4CAF7A", fontSize: "0.9rem" }}>{report.strongestAnswer.score}/100</span>
             </div>
             {report.strongestAnswer.question && (
@@ -484,7 +550,7 @@ export default function ReportPage() {
           <div style={{ background: "rgba(200, 75, 75, 0.04)", border: "1px solid rgba(200, 75, 75, 0.25)", borderRadius: 12, padding: "1.3rem 1.5rem" }}>
             <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.75rem" }}>
               <span>⚠</span>
-              <span style={{ fontSize: "0.8rem", fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", color: "#C84B4B" }}>Weakest Answer</span>
+              <span style={{ fontSize: "0.8rem", fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", color: "#C84B4B" }}>{isArabic ? AR.weakestAnswer : "Weakest Answer"}</span>
               <span style={{ marginLeft: "auto", fontWeight: 800, color: "#C84B4B", fontSize: "0.9rem" }}>{report.weakestAnswer.score}/100</span>
             </div>
             {report.weakestAnswer.question && (
@@ -498,10 +564,13 @@ export default function ReportPage() {
           </div>
         </div>
 
-        <SectionCard title="Patterns & Filler Words" icon="⟲">
+        {/* Patterns */}
+        <SectionCard title={isArabic ? AR.patterns : "Patterns & Filler Words"} icon="⟲">
           <div style={{ display: "flex", flexWrap: "wrap", gap: "1.5rem" }}>
             <div style={{ flex: 1, minWidth: 200 }}>
-              <p style={{ fontSize: "0.8rem", color: "#888", marginBottom: "0.6rem", fontWeight: 500 }}>Repeated Patterns</p>
+              <p style={{ fontSize: "0.8rem", color: "#888", marginBottom: "0.6rem", fontWeight: 500 }}>
+                {isArabic ? "الأنماط المتكررة" : "Repeated Patterns"}
+              </p>
               {report.repeatedMistakes.length ? (
                 <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem" }}>
                   {report.repeatedMistakes.map((m) => (
@@ -509,43 +578,60 @@ export default function ReportPage() {
                   ))}
                 </div>
               ) : (
-                <span style={{ fontSize: "0.82rem", color: "#666" }}>No consistent issues detected ✓</span>
+                <span style={{ fontSize: "0.82rem", color: "#666" }}>{isArabic ? AR.noIssues : "No consistent issues detected ✓"}</span>
               )}
             </div>
             <div style={{ minWidth: 160, textAlign: "center" }}>
-              <p style={{ fontSize: "0.8rem", color: "#888", marginBottom: "0.5rem", fontWeight: 500 }}>Hesitation Index</p>
+              <p style={{ fontSize: "0.8rem", color: "#888", marginBottom: "0.5rem", fontWeight: 500 }}>
+                {isArabic ? AR.hesitationIndex : "Hesitation Index"}
+              </p>
               <div style={{ width: 72, height: 72, borderRadius: "50%", background: report.fillerWords > 60 ? "rgba(200,75,75,0.1)" : "rgba(76,175,122,0.1)", border: `2px solid ${report.fillerWords > 60 ? "#C84B4B" : "#4CAF7A"}`, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto", flexDirection: "column" }}>
                 <span style={{ fontSize: "1.4rem", fontWeight: 800, color: report.fillerWords > 60 ? "#C84B4B" : "#4CAF7A", lineHeight: 1 }}>{report.fillerWords}</span>
-                <span style={{ fontSize: "0.6rem", color: "#888" }}>avg/answer</span>
+                <span style={{ fontSize: "0.6rem", color: "#888" }}>{isArabic ? AR.avgPerAnswer : "avg/answer"}</span>
               </div>
             </div>
           </div>
         </SectionCard>
 
-        <SectionCard title="Hiring Risk Factors" icon="⚑" accent>
+        {/* Hiring Risks */}
+        <SectionCard title={isArabic ? AR.hiringRisks : "Hiring Risk Factors"} icon="⚑" accent>
           <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-            {report.hiringRisks.map((risk, i) => (
-              <div key={i} style={{ display: "flex", alignItems: "center", gap: "0.6rem", fontSize: "0.86rem", color: risk.startsWith("No critical") ? "#4CAF7A" : "#1A1A1A" }}>
-                <span style={{ width: 6, height: 6, borderRadius: "50%", background: risk.startsWith("No critical") ? "#4CAF7A" : "#C84B4B", flexShrink: 0 }} />
-                {risk}
-              </div>
-            ))}
+            {report.hiringRisks.map((risk, i) => {
+              const isGood = risk.startsWith("No critical") || risk.startsWith("لا توجد");
+              return (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: "0.6rem", fontSize: "0.86rem", color: isGood ? "#4CAF7A" : "#1A1A1A" }}>
+                  <span style={{ width: 6, height: 6, borderRadius: "50%", background: isGood ? "#4CAF7A" : "#C84B4B", flexShrink: 0 }} />
+                  {risk}
+                </div>
+              );
+            })}
           </div>
         </SectionCard>
 
-        <SectionCard title="Suggested Improvement Plan" icon="◎">
-          <div style={{ display: "flex", flexDirection: "column", gap: "0.6rem" }}>
-            {report.improvementPlan.map((item, i) => (
-              <div key={i} style={{ display: "flex", gap: "0.75rem", alignItems: "flex-start", fontSize: "0.86rem", lineHeight: 1.5 }}>
-                <span style={{ background: "#CC785C", color: "#fff", borderRadius: "50%", width: 20, height: 20, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.65rem", fontWeight: 800, flexShrink: 0, marginTop: 1 }}>{i + 1}</span>
-                <span>{item}</span>
-              </div>
-            ))}
-          </div>
+        {/* Improvement Plan — Dynamic */}
+        <SectionCard title={isArabic ? AR.improvementPlan : "Suggested Improvement Plan"} icon="◎">
+          {planLoading ? (
+            <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", padding: "0.5rem 0" }}>
+              <div style={{ width: 16, height: 16, border: "2px solid #E5DDD0", borderTopColor: "#CC785C", borderRadius: "50%", animation: "spin 0.8s linear infinite", flexShrink: 0 }} />
+              <span style={{ fontSize: "0.85rem", color: "#888", fontStyle: "italic" }}>
+                {isArabic ? AR.generatingPlan : "Generating personalized plan..."}
+              </span>
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.6rem" }}>
+              {improvementPlan.map((item, i) => (
+                <div key={i} style={{ display: "flex", gap: "0.75rem", alignItems: "flex-start", fontSize: "0.86rem", lineHeight: 1.5 }}>
+                  <span style={{ background: "#CC785C", color: "#fff", borderRadius: "50%", width: 20, height: 20, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.65rem", fontWeight: 800, flexShrink: 0, marginTop: 1 }}>{i + 1}</span>
+                  <span>{item}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </SectionCard>
 
+        {/* Rebuilt Examples */}
         {report.rebuiltExamples.length > 0 && (
-          <SectionCard title="Example Improved Answers" icon="✦">
+          <SectionCard title={isArabic ? AR.improvedAnswers : "Example Improved Answers"} icon="✦">
             <div style={{ display: "flex", flexDirection: "column", gap: "0.8rem" }}>
               {report.rebuiltExamples.map((ex, i) => (
                 <div key={i} style={{ border: "1px solid #E5DDD0", borderRadius: 10, overflow: "hidden" }}>
@@ -557,11 +643,11 @@ export default function ReportPage() {
                   {expandedRebuilt === i && (
                     <div style={{ padding: "1rem" }}>
                       <div style={{ marginBottom: "0.75rem" }}>
-                        <p style={{ fontSize: "0.72rem", color: "#999", marginBottom: "0.35rem", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>Your Answer</p>
+                        <p style={{ fontSize: "0.72rem", color: "#999", marginBottom: "0.35rem", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>{isArabic ? AR.yourAnswer : "Your Answer"}</p>
                         <p style={{ fontSize: "0.84rem", color: "#555", lineHeight: 1.55, background: "#F5F1EB", padding: "0.6rem 0.8rem", borderRadius: 6 }}>{ex.original}</p>
                       </div>
                       <div>
-                        <p style={{ fontSize: "0.72rem", color: "#CC785C", marginBottom: "0.35rem", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>Improved Version</p>
+                        <p style={{ fontSize: "0.72rem", color: "#CC785C", marginBottom: "0.35rem", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>{isArabic ? AR.improvedVersion : "Improved Version"}</p>
                         <p style={{ fontSize: "0.84rem", color: "#1A1A1A", lineHeight: 1.6, background: "rgba(204,120,92,0.06)", padding: "0.6rem 0.8rem", borderRadius: 6, borderLeft: "3px solid #CC785C" }}>{ex.improved}</p>
                       </div>
                     </div>
@@ -577,43 +663,46 @@ export default function ReportPage() {
           <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.85rem" }}>
             <span>👔</span>
             <span style={{ fontSize: "0.8rem", fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "#CC785C" }}>
-              Recruiter Evaluation
+              {isArabic ? AR.recruiterEval : "Recruiter Evaluation"}
             </span>
           </div>
-
           {evalLoading ? (
             <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", padding: "0.25rem 0" }}>
               <div style={{ width: 16, height: 16, border: "2px solid #444", borderTopColor: "#CC785C", borderRadius: "50%", animation: "spin 0.8s linear infinite", flexShrink: 0 }} />
               <span style={{ fontSize: "0.85rem", color: "#666", fontStyle: "italic" }}>
-                Generating personalized evaluation...
+                {isArabic ? AR.generating : "Generating personalized evaluation..."}
               </span>
             </div>
           ) : (
             <p
-              dir="ltr"
+              dir={isArabic ? "rtl" : "ltr"}
               style={{ fontSize: "0.92rem", color: "#E5DDD0", lineHeight: 1.7, margin: 0, fontStyle: "italic", textAlign: isArabic ? "right" : "left" }}
             >
               "{recruiterEval}"
             </p>
           )}
-
           <div style={{ marginTop: "1rem", paddingTop: "0.75rem", borderTop: "1px solid #333", display: "flex", alignItems: "center", gap: "0.4rem" }}>
             <span style={{ fontWeight: 900, fontSize: "0.85rem" }}>
               <span style={{ color: "#fff" }}>Barbar</span>
               <span style={{ color: "#CC785C" }}>os</span>
             </span>
-            <span style={{ fontSize: "0.75rem", color: "#666" }}>Interview Intelligence</span>
+            <span style={{ fontSize: "0.75rem", color: "#666" }}>
+              {isArabic ? AR.interviewIntelligence : "Interview Intelligence"}
+            </span>
           </div>
         </div>
 
+        {/* CTA */}
         <div className="no-print" style={{ textAlign: "center", paddingTop: "1rem" }}>
           <button
             onClick={() => router.push("/onboarding")}
             style={{ background: "#CC785C", color: "#fff", border: "none", borderRadius: 10, padding: "0.85rem 2.4rem", fontSize: "0.95rem", fontWeight: 700, cursor: "pointer", letterSpacing: "0.02em", boxShadow: "0 4px 20px rgba(204,120,92,0.35)" }}
           >
-            Practice Again →
+            {isArabic ? AR.practiceAgain : "Practice Again →"}
           </button>
-          <p style={{ fontSize: "0.78rem", color: "#aaa", marginTop: "0.6rem" }}>Each session brings you closer to the offer.</p>
+          <p style={{ fontSize: "0.78rem", color: "#aaa", marginTop: "0.6rem" }}>
+            {isArabic ? AR.practiceHint : "Each session brings you closer to the offer."}
+          </p>
         </div>
       </main>
 

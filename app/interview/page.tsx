@@ -3,12 +3,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 
-// ─────────────────────────────────────────────────────────────
-// 🔊 VOICE SWITCH — false = Web Speech API (free)
-//                    true  = ElevenLabs (needs credits)
-const USE_ELEVENLABS = false
-// ─────────────────────────────────────────────────────────────
-
 interface VoiceAnalysis {
   wordsPerMinute: number
   duration: number
@@ -200,80 +194,6 @@ export default function InterviewPage() {
   const overallScoreRef = useRef<number | null>(null)
   const transcriptEndRef = useRef<HTMLDivElement>(null)
 
-  // ─── Web Speech API refs ───────────────────────────────────
-  const wsVoicesRef = useRef<SpeechSynthesisVoice[]>([])
-
-  useEffect(() => {
-    if (typeof window === 'undefined' || !window.speechSynthesis) return
-    const load = () => {
-      const v = window.speechSynthesis.getVoices()
-      if (v.length > 0) wsVoicesRef.current = v
-    }
-    load()
-    window.speechSynthesis.addEventListener('voiceschanged', load)
-    return () => window.speechSynthesis.removeEventListener('voiceschanged', load)
-  }, [])
-
-  const stopWebSpeech = useCallback(() => {
-    if (typeof window !== 'undefined' && window.speechSynthesis) {
-      window.speechSynthesis.cancel()
-    }
-  }, [])
-
-  const speakWithWebSpeech = useCallback((text: string) => {
-    if (typeof window === 'undefined' || !window.speechSynthesis) return
-    if (isMutedRef.current) return
-
-    window.speechSynthesis.cancel()
-
-    const utterance = new SpeechSynthesisUtterance(text)
-
-    // ── Stern authoritative settings ──
-    utterance.pitch  = 0.75  // deep, commanding
-    utterance.rate   = 0.88  // deliberate, serious
-    utterance.volume = 1.0
-
-    // ── Pick language & voice ──
-    const lang = CONFIG.language
-    const arabicText = /[\u0600-\u06FF]/.test(text)
-    const useLang: 'ar' | 'en' =
-      lang === 'ar' ? 'ar' :
-      lang === 'en' ? 'en' :
-      arabicText    ? 'ar' : 'en'  // mix: auto-detect per message
-
-    utterance.lang = useLang === 'ar' ? 'ar-SA' : 'en-GB'
-
-    const voices = wsVoicesRef.current
-    if (voices.length > 0) {
-      if (useLang === 'ar') {
-        const priority = ['ar-SA', 'ar-AE', 'ar-EG']
-        let picked: SpeechSynthesisVoice | undefined
-        for (const code of priority) {
-          picked = voices.find(v => v.lang === code)
-          if (picked) break
-        }
-        if (!picked) picked = voices.find(v => v.lang.startsWith('ar'))
-        if (picked) utterance.voice = picked
-      } else {
-        // British English sounds more formal & authoritative
-        const deepNames = ['daniel', 'oliver', 'arthur', 'reed', 'wayne', 'alex']
-        const gbVoices = voices.filter(v => v.lang === 'en-GB')
-        const deepGb = gbVoices.find(v => deepNames.some(n => v.name.toLowerCase().includes(n)))
-        const picked = deepGb || gbVoices[0] ||
-          voices.find(v => v.lang === 'en-US') ||
-          voices.find(v => v.lang.startsWith('en'))
-        if (picked) utterance.voice = picked
-      }
-    }
-
-    utterance.onstart = () => setInterviewerSpeaking(true)
-    utterance.onend   = () => setInterviewerSpeaking(false)
-    utterance.onerror = () => setInterviewerSpeaking(false)
-
-    window.speechSynthesis.speak(utterance)
-  }, [CONFIG.language])
-  // ───────────────────────────────────────────────────────────
-
   useEffect(() => { messagesRef.current = messages }, [messages])
   useEffect(() => { isLoadingRef.current = isLoading }, [isLoading])
   useEffect(() => { isEndedRef.current = isEnded }, [isEnded])
@@ -355,12 +275,8 @@ export default function InterviewPage() {
     const next = !isMuted
     setIsMuted(next)
     isMutedRef.current = next
-    if (next) {
-      // Stop both ElevenLabs and Web Speech
-      if (audioRef.current) {
-        audioRef.current.pause()
-      }
-      stopWebSpeech()
+    if (next && audioRef.current) {
+      audioRef.current.pause()
       setInterviewerSpeaking(false)
     }
   }
@@ -390,15 +306,11 @@ export default function InterviewPage() {
         handleFirstInteraction()
         setMicError(null)
         if (silenceTimer.current) clearTimeout(silenceTimer.current)
-
-        // Stop both audio sources when mic starts
         if (audioRef.current) {
           audioRef.current.pause()
           audioRef.current = null
           setInterviewerSpeaking(false)
         }
-        stopWebSpeech()
-
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
         const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' })
         mediaRecorderRef.current = mediaRecorder
@@ -501,13 +413,7 @@ export default function InterviewPage() {
       if (data.coaching_note) setLastCoachingNote(data.coaching_note)
       else setLastCoachingNote(null)
 
-      // ─── Voice: ElevenLabs or Web Speech API ───────────────
-      if (USE_ELEVENLABS) {
-        if (data.audioBase64) playAudio(data.audioBase64)
-      } else {
-        speakWithWebSpeech(data.content)
-      }
-      // ───────────────────────────────────────────────────────
+      if (data.audioBase64) playAudio(data.audioBase64)
 
       let latestScore = overallScoreRef.current
       if (data.score) {
@@ -537,7 +443,6 @@ export default function InterviewPage() {
     handleFirstInteraction()
     if (silenceTimer.current) clearTimeout(silenceTimer.current)
     if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; setInterviewerSpeaking(false) }
-    stopWebSpeech()
     const userMsg: Message = { role: 'user', content: input.trim() }
     const newMessages = [...messages, userMsg]
     setMessages(newMessages)
@@ -802,6 +707,7 @@ export default function InterviewPage() {
             </div>
           )}
 
+          {/* Hint — toggle based on state */}
           <div style={{ fontSize: 11, textAlign: 'center', marginBottom: 8, fontWeight: 600, color: isRecording ? '#DC2626' : 'rgba(26,26,26,0.4)' }}>
             {isRecording
               ? t.tapToStop

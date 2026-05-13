@@ -20,6 +20,60 @@ const UPGRADE_HINTS: Record<string, string> = {
 }
 
 /* =========================
+   🧠 BEHAVIOR ANALYSIS
+========================= */
+function analyzeBehavior(text: string) {
+  const lower = text.toLowerCase()
+  const specificity = (text.match(/\d+|%|years|months|projects|results/g) || []).length
+  const ownership   = (lower.match(/\bi\b/g) || []).length - (lower.match(/\bwe\b/g) || []).length
+  const hesitation  = (lower.match(/\bum\b|\buh\b|\blike\b|\byou know\b|\bيعني\b|\bايه\b|\bهممم\b/g) || []).length
+  const vague       = lower.includes('a lot') || lower.includes('many') || lower.includes('stuff') ||
+                      lower.includes('كثير') || lower.includes('أشياء') ? 1 : 0
+  return { specificity, ownership, hesitation, vague }
+}
+
+/* =========================
+   🏆 COMPETENCY BUILDER
+========================= */
+function buildCompetencies(config: any): string[] {
+  const job    = (config.jobTitle || '').toLowerCase()
+  const sector = (config.sector   || '').toLowerCase()
+  const base   = ['Communication', 'Problem Solving', 'Adaptability']
+
+  if (job.includes('teacher') || sector.includes('education'))
+    return [...base, 'Classroom Management', 'Student Engagement', 'Assessment Design', 'Curriculum Planning']
+  if (job.includes('engineer') || job.includes('developer'))
+    return [...base, 'System Design', 'Debugging', 'Performance Optimization', 'Code Review']
+  if (job.includes('manager') || job.includes('director'))
+    return [...base, 'Leadership', 'Decision Making', 'Team Coordination', 'Budget Management']
+  if (job.includes('doctor') || sector.includes('healthcare'))
+    return [...base, 'Clinical Judgment', 'Patient Communication', 'Protocol Adherence', 'Emergency Response']
+  if (sector.includes('finance') || sector.includes('legal'))
+    return [...base, 'Risk Assessment', 'Regulatory Compliance', 'Analytical Thinking', 'Ethical Judgment']
+  if (sector.includes('marketing') || sector.includes('sales'))
+    return [...base, 'Campaign Strategy', 'Data Interpretation', 'Stakeholder Management', 'Brand Positioning']
+  return [...base, 'Domain Knowledge', 'Initiative', 'Teamwork']
+}
+
+/* =========================
+   📊 BEHAVIOR SCORE ENRICHMENT
+   يُثري السكور القادم من Claude بمعطيات سلوكية حقيقية
+========================= */
+function enrichScoreWithBehavior(score: any, behavior: ReturnType<typeof analyzeBehavior>) {
+  if (!score) return score
+  return {
+    ...score,
+    confidence:        Math.min(100, Math.max(0, (score.confidence || 50) + behavior.ownership * 3)),
+    technical_depth:   Math.min(100, Math.max(0, (score.technical_depth || 50) + behavior.specificity * 5)),
+    hesitation_signals: behavior.hesitation,
+    coaching_note: score.coaching_note ||
+      (behavior.vague      ? 'Avoid vague language — use specific numbers and examples.' :
+       behavior.hesitation > 2 ? 'Reduce filler words to sound more confident.' :
+       behavior.specificity < 2 ? 'Add measurable outcomes to strengthen your answer.' : ''),
+  }
+}
+
+/* =========================
    🎙 ELEVENLABS
 ========================= */
 const ELEVENLABS_VOICE_SETTINGS = {
@@ -191,7 +245,7 @@ function isJobTitleSuspicious(title: string): boolean {
 /* =========================
    🧠 BUILD PROMPT
 ========================= */
-function buildPrompt(config: any, messages: any[]): string {
+function buildPrompt(config: any, messages: any[], competencies: string[]): string {
   const isAr    = config.language === 'ar'
   const isMixed = config.language === 'mixed'
 
@@ -298,6 +352,7 @@ SESSION:
 - Country: ${config.country || 'Not specified'}
 - Sector: ${config.sector}
 - Experience: ${config.yearsExperience}
+- Core Competencies to Evaluate: ${competencies.join(', ')}
 ${config.jobRequirements ? `- Requirements:\n${config.jobRequirements}` : ''}
 
 ${personality}
@@ -451,7 +506,7 @@ export async function POST(req: NextRequest) {
     const response = await client.messages.create({
       model: 'claude-sonnet-4-5',
       max_tokens: isFirst ? 120 : 400,
-      system: buildPrompt(config, messages),
+      system: buildPrompt(config, messages, buildCompetencies(config)),
       messages: apiMessages
     })
 
@@ -468,16 +523,26 @@ export async function POST(req: NextRequest) {
       } catch {}
     }
 
+    // ── Behavior Analysis + Score Enrichment ──
+    const lastUserMsg  = messages.filter((m: any) => m.role === 'user').slice(-1)[0]
+    const behavior     = lastUserMsg ? analyzeBehavior(lastUserMsg.content || '') : null
+    if (behavior && score) score = enrichScoreWithBehavior(score, behavior)
+
+    // ── Competencies (للتقرير لاحقاً) ──
+    const competencies = buildCompetencies(config)
+
     const audioBuffer = await textToSpeech(content)
     const audioBase64 = audioBuffer ? audioBuffer.toString('base64') : null
 
     return NextResponse.json({
-      success: true,
+      success:       true,
       content,
       score,
       audioBase64,
       coaching_note: score?.coaching_note || null,
-      question_type: score?.question_type || null
+      question_type: score?.question_type || null,
+      behavior:      behavior             || null,
+      competencies,
     })
 
   } catch (err: any) {

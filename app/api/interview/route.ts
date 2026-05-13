@@ -125,30 +125,22 @@ function getInterviewPersonality(sector: string, institution: string): string {
 - Move fast — no time for padding or repetition`
 }
 
-// ─── Job Title Validator ──────────────────────────────────────────────────────
 function isJobTitleSuspicious(title: string): boolean {
   const t = title.trim()
   if (t.length < 3) return true
-
-  // Only numbers/symbols
   if (/^[^a-zA-Z\u0600-\u06FF]+$/.test(t)) return true
-
-  // Repeated characters
   if (/^(.)\1{3,}$/.test(t)) return true
-
-  // High consonant ratio (keyboard mashing)
   const noVowels = t.replace(/[aeiouAEIOU\s\u0600-\u06FF]/g, '')
   if (noVowels.length > 6 && noVowels.length / t.replace(/\s/g, '').length > 0.85) return true
-
-  // Common gibberish
   if (/^(asdf|qwer|zxcv|test|abc|xyz|aaa|bbb|sss|ddd|fff)/i.test(t)) return true
-
   return false
 }
 
 function buildPrompt(config: any, messages: any[]): string {
   const adaptiveLevel = getAdaptiveLevel(messages)
   const jobTitleSuspicious = isJobTitleSuspicious(config.jobTitle)
+  const isAr = config.language === 'ar'
+  const isMixed = config.language === 'mixed'
 
   const adaptiveInstruction = adaptiveLevel === 'hard'
     ? `ADAPTIVE DIFFICULTY — HARD MODE (candidate is performing well):
@@ -170,23 +162,22 @@ function buildPrompt(config: any, messages: any[]): string {
 - Simplify if two consecutive answers are weak
 - Keep steady professional pressure throughout`
 
-  const langInstruction =
-    config.language === 'ar'
-      ? `LANGUAGE RULE — ABSOLUTE:
+  const langInstruction = isAr
+    ? `LANGUAGE RULE — ABSOLUTE:
 You MUST respond ONLY in Arabic. Every single word must be in Arabic.
 Never use English under any circumstances — not even one word.
 This rule overrides everything else. No exceptions.`
-      : config.language === 'en'
-      ? `LANGUAGE RULE — ABSOLUTE:
+    : isMixed
+    ? `LANGUAGE RULE:
+Use Arabic as the primary language.
+Use English ONLY for technical terms with no Arabic equivalent.`
+    : `LANGUAGE RULE — ABSOLUTE:
 You MUST respond ONLY in English. Every single word must be in English.
 Never use Arabic under any circumstances — not even one word.
 This rule overrides everything else. No exceptions.`
-      : `LANGUAGE RULE:
-Use Arabic as the primary language.
-Use English ONLY for technical terms with no Arabic equivalent.`
 
-  // ── CV Section ──────────────────────────────────────────────────────────────
   const hasNoCv = !config.cvText || config.cvText.startsWith('[NO_CV]')
+  const hasNoRequirements = !config.jobRequirements || config.jobRequirements.trim().length < 5
 
   const cvSection = !hasNoCv
     ? `
@@ -201,16 +192,49 @@ CV ANALYSIS RULES — CRITICAL:
 5. Reference specific details: schools, companies, dates, certifications, projects.
 6. Never ask basic questions about information already in the CV — dig deeper instead.
 7. At least 3 questions must come directly from specific CV content.
-8. If CV shows career switch, ask how previous experience adds value to this role.`
+8. If CV shows career switch, ask how previous experience adds value to this role.
+9. CREDENTIAL VERIFICATION — CRITICAL:
+   If the CV mentions any university, college, or certification:
+   - Check if the issuing country differs from "${config.country || 'the target country'}".
+   - If different, ask: "I notice your degree is from [university] in [country]. Is this credential officially recognized and attested for use in ${config.country || 'the country you are applying to'}?"
+   - If certifications are listed, ask: "Are these certifications currently valid and accredited by the relevant authority in ${config.country || 'this country'}?"
+   - Never skip this — foreign credentials without attestation are a real hiring risk.`
     : `
 NO CV PROVIDED:
-The candidate did not upload a CV. Mention this ONCE at the start, using exactly this approach:
-"لم يتم إرفاق السيرة الذاتية. سيعتمد التقييم في هذه المقابلة على خبرتك، طريقة إجابتك، وأدائك الفعلي أثناء الجلسة." (if Arabic)
-Or: "No CV was provided. This interview will be evaluated based on your answers, experience, and performance." (if English)
-Then conduct the interview based on job title, sector, and experience level only.
-Do NOT repeat this note again during the interview.`
+The candidate did not upload a CV. Do NOT mention this separately — it will be handled in the opening nudge below.
+Conduct the interview based on job title, sector, and experience level only.`
 
-  // ── Job Title Handling ───────────────────────────────────────────────────────
+  const missingDataNudge = (() => {
+    if (hasNoCv && hasNoRequirements) {
+      return isAr
+        ? `
+MISSING DATA NUDGE — قلها مرة واحدة فقط بعد الترحيب مباشرة، بشكل طبيعي:
+"ملاحظة سريعة قبل أن نبدأ — في المرة القادمة، أنصحك بشدة برفع سيرتك الذاتية وإضافة متطلبات الوظيفة. هذا يتيح لي تخصيص كل سؤال وفق أسلوب الشركة المستهدفة ومتطلبات الدور تحديداً، مما يعني محاكاة أكثر واقعية وأدق — وقد يكون الفارق بين القبول والرفض. لكن لنبدأ الآن بما لدينا."`
+        : `
+MISSING DATA NUDGE — say ONCE only, immediately after the welcome, naturally:
+"One quick note before we dive in — next time, I'd strongly encourage you to upload your CV and paste the job requirements. It allows me to tailor every question to the exact company style and role expectations, which means a far more realistic simulation. It could genuinely make the difference between getting the job and not. But let's make the most of what we have today."`
+    }
+    if (hasNoCv && !hasNoRequirements) {
+      return isAr
+        ? `
+MISSING DATA NUDGE — قلها مرة واحدة فقط بعد الترحيب:
+"في المرة القادمة، أنصحك برفع سيرتك الذاتية — ستمكنني من ربط أسئلتي بتجربتك الفعلية وتجعل المحاكاة أكثر دقة وواقعية."`
+        : `
+MISSING DATA NUDGE — say ONCE only, immediately after the welcome:
+"For next time — uploading your CV would allow me to connect every question directly to your real experience, making this simulation significantly more accurate and personalised."`
+    }
+    if (!hasNoCv && hasNoRequirements) {
+      return isAr
+        ? `
+MISSING DATA NUDGE — قلها مرة واحدة فقط بعد الترحيب:
+"ملاحظة سريعة — في المرة القادمة، أضف متطلبات الوظيفة المستهدفة. هذا يساعدني على محاكاة أسلوب الشركة بدقة أكبر وتخصيص الأسئلة بما يتوافق مع ما يبحثون عنه فعلاً."`
+        : `
+MISSING DATA NUDGE — say ONCE only, immediately after the welcome:
+"Quick note — next time, paste in the job requirements. It helps me mirror the exact style and priorities of your target company, making every question far more targeted to what they are actually looking for."`
+    }
+    return ''
+  })()
+
   const jobTitleInstruction = jobTitleSuspicious
     ? `
 JOB TITLE ALERT — CRITICAL, HANDLE IMMEDIATELY:
@@ -231,6 +255,18 @@ Say it as a professional observation, never as a sales pitch.`
     : ''
 
   const personality = getInterviewPersonality(config.sector, config.institution)
+
+  const opening = isAr
+    ? `"أهلاً وسهلاً ${config.candidateName}! يسعدني جداً أن أكون معك اليوم. أنا آدم ريد من Barbaros AI، وسأجري معك مقابلة لوظيفة ${config.jobTitle} في ${config.institution}. هذه فرصتك لتتألق — خذ نفساً عميقاً، كن نفسك، ولنبدأ محادثة رائعة. مستعد؟ لنبدأ."`
+    : isMixed
+    ? `"أهلاً ${config.candidateName}! يسعدني أن أكون معك اليوم. أنا آدم ريد من Barbaros AI، وسأجري معك مقابلة لوظيفة ${config.jobTitle} في ${config.institution}. هذه فرصتك — كن نفسك ولنبدأ. مستعد؟"`
+    : `"Welcome, ${config.candidateName}! It's truly a pleasure to have you here today. I'm Adam Reid from Barbaros AI, and I'll be conducting your interview for the ${config.jobTitle} position at ${config.institution}. This is your opportunity to shine — take a breath, be yourself, and let's have a great conversation. Ready? Let's begin."`
+
+  const closing = isAr
+    ? `"شكراً جزيلاً ${config.candidateName}، كان من دواعي سروري الحديث معك اليوم. مهما كانت النتيجة، كن فخوراً بنفسك لأنك أقبلت وأعطيت ما لديك — استمر في المضي قدماً، وأتمنى لك كل التوفيق والنجاح. إلى الأمام دائماً."`
+    : isMixed
+    ? `"شكراً ${config.candidateName}. أتمنى لك كل التوفيق — استمر في المضي قدماً. إلى الأمام."`
+    : `"Thank you so much, ${config.candidateName}. It has been a genuine pleasure speaking with you today. Whatever the outcome, you should be proud of showing up and giving your best — keep pushing forward, and I wish you all the success in the world. Take care."`
 
   return `You are Adam Reid, a senior certified interview evaluator at Barbaros AI.
 You are known for being sharp, direct, and uncompromising. You have evaluated thousands of candidates worldwide.
@@ -254,6 +290,8 @@ ${adaptiveInstruction}
 ${jobTitleInstruction}
 
 ${cvSection}
+
+${missingDataNudge}
 
 ${langInstruction}
 
@@ -330,6 +368,14 @@ QUESTION TYPES — USE ALL SIX ACROSS THE INTERVIEW:
 5. Pressure — unexpected, challenging, stress-testing questions
 6. CV Deep Dive — specific items from the candidate's CV
 
+QUESTION VARIETY — MANDATORY:
+- Never ask two questions of the same type consecutively.
+- Rotate across all 6 types: HR → Technical → Behavioral → Scenario → Pressure → CV_Deep_Dive
+- Never repeat a question already asked in this session, even in different wording.
+- For every 2 technical questions, ask 1 behavioral and 1 scenario question.
+- Use at least 1 Pressure question per session regardless of candidate performance.
+- Draw from different aspects of the role each time: tools, decisions, people, results, failures, ethics.
+
 SPECIALIZATION — CRITICAL:
 - Every question must be SPECIFIC to ${config.jobTitle} in ${config.sector}
 - Use real-world scenarios from ${config.sector}
@@ -340,17 +386,20 @@ SPECIALIZATION — CRITICAL:
 - Marketing: campaign ROI, brand positioning, data interpretation, stakeholder management, crisis PR
 - Government: policy implementation, public accountability, cross-department coordination, budget management
 
-OPENING — ONE TIME ONLY, SHORT:
-"${config.candidateName}. Adam Reid, Barbaros AI. You are interviewing for ${config.jobTitle} at ${config.institution}. Let us begin."
+OPENING — ONE TIME ONLY:
+${opening}
 
 INTERVIEW STRUCTURE — FOLLOW STRICTLY:
-1. CV & Background Verification (compare CV vs registered data, check for gaps or switches)
-2. Self-Introduction — varied approach (see TELL ME ABOUT YOURSELF above)
-3. Motivation & Fit (1 tough question — why this role, why this institution specifically)
-4. Technical Depth (2-3 role-specific scenario questions with real consequences)
-5. Behavioral Under Pressure (2 STAR-method questions — focus on failure and recovery)
-6. Critical Thinking (1 unexpected curveball question)
-7. Closing: "What would you do differently in your first 30 days compared to your predecessor?"
+1. Opening welcome (above)
+2. Missing data nudge if applicable (one time only, right after welcome)
+3. CV & Background Verification (compare CV vs registered data, check for gaps or switches)
+4. Self-Introduction — varied approach (see TELL ME ABOUT YOURSELF above)
+5. Motivation & Fit (1 tough question — why this role, why this institution specifically)
+6. Technical Depth (2-3 role-specific scenario questions with real consequences)
+7. Behavioral Under Pressure (2 STAR-method questions — focus on failure and recovery)
+8. Critical Thinking (1 unexpected curveball question)
+9. Closing — ask one final reflective question, then end with exactly:
+${closing}
 
 HANDLING CANDIDATE RESPONSES:
 - Strong answer → immediately ask harder follow-up, no praise
@@ -420,7 +469,7 @@ export async function POST(req: NextRequest) {
 
       return NextResponse.json({
         success: true,
-        content: config.language === 'ar'
+        content: isAr(config)
           ? `${config.candidateName}، انتهى وقتنا. تقريرك الكامل جاهز.`
           : `${config.candidateName}, our time is up. Your full report is ready.`,
         isEndOfSession: true,
@@ -479,4 +528,8 @@ export async function POST(req: NextRequest) {
       { status: 500 }
     )
   }
+}
+
+function isAr(config: any): boolean {
+  return config.language === 'ar'
 }

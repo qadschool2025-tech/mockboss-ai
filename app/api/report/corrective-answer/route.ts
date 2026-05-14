@@ -9,9 +9,17 @@ export async function POST(req: NextRequest) {
   try {
     const { question, userAnswer, jobTitle, sector, score, language } = await req.json()
 
-    // ✅ فقط للأسئلة الضعيفة score < 75
-    if (!question || !userAnswer || (score && score >= 75)) {
+    if (!question || !userAnswer) {
       return NextResponse.json({ correctiveAnswer: null })
+    }
+
+    // ✅ لا توليد للأسئلة القوية
+    if (score && score >= 75) {
+      return NextResponse.json({
+        correctiveAnswer: language === 'ar'
+          ? '✅ إجابة قوية — لا تحتاج تصحيحاً.'
+          : '✅ Strong answer — no correction needed.'
+      })
     }
 
     const isAr = language === 'ar'
@@ -25,7 +33,8 @@ export async function POST(req: NextRequest) {
 4. كن مباشراً وواقعياً — لا مجاملة
 5. استخدم أسلوب STAR إذا كان السؤال سلوكياً
 6. اذكر أرقاماً ونتائج قابلة للقياس
-7. أجب بالعربية فقط`
+7. طابق مستوى الخبرة المطلوبة للوظيفة
+8. أجب بالعربية فقط`
       : `You are a senior hiring coach. Your task is to give direct feedback and a strong corrective answer.
 Strict rules:
 1. One sentence explaining why the answer was weak
@@ -34,7 +43,7 @@ Strict rules:
 4. Be direct and realistic — no flattery
 5. Use STAR format if behavioral question
 6. Include numbers and measurable outcomes
-7. Match the candidate's seniority level
+7. Match the candidate seniority level
 8. Respond in English only`
 
     const userPrompt = isAr

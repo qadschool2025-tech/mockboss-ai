@@ -1,7 +1,7 @@
 'use client'
-
-import { useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
+import { saveConfig, deriveRoleLevel } from '../../lib/getInterviewConfig'
+import { useState, useRef } from 'react'
 
 interface OnboardingData {
   candidateName: string
@@ -222,7 +222,22 @@ export default function OnboardingPage() {
   }
 
   const startInterview = () => {
-    sessionStorage.setItem('barbaros_config', JSON.stringify(data))
+  import { saveConfig, deriveRoleLevel } from '../../lib/getInterviewConfig'
+
+// داخل startInterview:
+const config = {
+  ...data,
+  targetRoleLevel: deriveRoleLevel(
+    data.yearsExperience === 'Fresh Graduate' ? '0'
+    : data.yearsExperience === 'Less than 1 year' ? '0'
+    : data.yearsExperience === '1-3 years' ? '2'
+    : data.yearsExperience === '3-5 years' ? '4'
+    : data.yearsExperience === '5-10 years' ? '7'
+    : '15'
+  ),
+}
+saveConfig(config)
+router.push('/interview')
     router.push('/interview')
   }
 

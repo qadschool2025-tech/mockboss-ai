@@ -84,10 +84,10 @@ function analyzeBehavior(text: string): BehaviorSignals {
   ).length
 
   const vague = (
-    lower.includes('a lot')         ||
-    lower.includes('many things')   ||
-    lower.includes('stuff')         ||
-    lower.includes('كثير')          ||
+    lower.includes('a lot')       ||
+    lower.includes('many things') ||
+    lower.includes('stuff')       ||
+    lower.includes('كثير')        ||
     lower.includes('أشياء كثيرة')
   ) ? 1 : 0
 
@@ -110,8 +110,8 @@ function enhanceScoreWithBehavior(rawScore: any, behavior: BehaviorSignals): any
   return {
     ...rawScore,
     score,
-    confidence:        Math.min(100, (rawScore.confidence       ?? 50) + behavior.ownership   * 8),
-    technical_depth:   Math.min(100, (rawScore.technical_depth  ?? 50) + behavior.specificity * 6),
+    confidence:         Math.min(100, (rawScore.confidence      ?? 50) + behavior.ownership   * 8),
+    technical_depth:    Math.min(100, (rawScore.technical_depth ?? 50) + behavior.specificity * 6),
     hesitation_signals: (rawScore.hesitation_signals ?? 0) + behavior.hesitation,
     coaching_note: rawScore.coaching_note || (
       score < 50
@@ -150,7 +150,6 @@ function buildCompetencies(config: any): string[] {
 
 /* =========================
    🎭 FIXED CORE PERSONA
-   ✅ تعديل: Adam Reid → Barbaros
 ========================= */
 const CORE_PERSONA = `
 You are Barbaros — Senior Interview Evaluator at Barbaros AI.
@@ -278,9 +277,14 @@ function isJobTitleSuspicious(title: string): boolean {
 
 /* =========================
    🧠 BUILD PROMPT
-   ✅ تعديل: يأخذ elapsedSeconds و timeLimit
 ========================= */
-function buildPrompt(config: any, messages: any[], competencies: string[], elapsedSeconds: number, timeLimit: number): string {
+function buildPrompt(
+  config: any,
+  messages: any[],
+  competencies: string[],
+  elapsedSeconds: number,
+  timeLimit: number
+): string {
   const isAr    = config.language === 'ar'
   const isMixed = config.language === 'mixed'
 
@@ -293,7 +297,7 @@ function buildPrompt(config: any, messages: any[], competencies: string[], elaps
   const remaining        = timeLimit - elapsedSeconds
   const remainingMinutes = Math.floor(remaining / 60)
 
-  // ✅ تعديل: تعليمات الوقت المتبقي
+  // ✅ إدارة الوقت
   const timingLayer = remaining <= 90
     ? `
 FINAL 90 SECONDS — CRITICAL:
@@ -305,7 +309,11 @@ FINAL 90 SECONDS — CRITICAL:
 - Keep entire closing under 3 sentences.`
     : remaining <= 180
     ? `TIME WARNING: ${remainingMinutes} minute(s) left. Begin wrapping up. No new topics. Final 1–2 questions only.`
-    : `TIME REMAINING: ${remainingMinutes} minutes. Fill the session fully — do NOT end early. Target 6–8 strong questions total.`
+    : `TIME REMAINING: ${remainingMinutes} minutes.
+- Fill the session fully — do NOT end early under any circumstances.
+- Target 6–8 strong questions total across the session.
+- If candidate is slow to respond: "Time is passing — I need your response."
+- Keep the pressure consistent until the final 3 minutes.`
 
   const behaviorLayer = behavior === 'rude'
     ? `USER MODE: LOW RESPECT — Ultra strict tone. Very short responses. No friendliness. Immediate redirection.`
@@ -326,6 +334,7 @@ FINAL 90 SECONDS — CRITICAL:
   const hasNoCv           = !config.cvText || config.cvText.startsWith('[NO_CV]')
   const hasNoRequirements = !config.jobRequirements || config.jobRequirements.trim().length < 5
 
+  // ✅ بدون CV: باربروس يسأل عن الشهادات والخبرة والفجوات والكورسات
   const cvSection = !hasNoCv
     ? `
 CV PROVIDED — ANALYZE CAREFULLY:
@@ -339,7 +348,14 @@ CV RULES:
 5. At least 3 questions must come directly from CV content.
 6. If career switch — ask how previous experience adds value.
 7. CREDENTIAL CHECK: If university/cert from different country than "${config.country || 'target country'}" — ask about attestation.`
-    : `NO CV — conduct interview based on job title, sector, and experience level only.`
+    : `
+NO CV PROVIDED — build candidate profile through targeted questions woven naturally into the interview:
+1. Ask about their educational background and field of specialization.
+2. Ask about their total years of experience and the specific roles they have held.
+3. If any employment gaps are detected from their answers — ask about them professionally and directly.
+4. Ask about relevant courses, certifications, or self-learning they have pursued.
+5. Ask about a notable project or achievement that defines their professional identity.
+Do NOT ask all these as a list. Weave them naturally into the flow of the interview.`
 
   const missingDataNudge = (() => {
     if (hasNoCv && hasNoRequirements)
@@ -452,7 +468,7 @@ RESPONSE FORMAT — STRICT:
 INTERVIEW STRUCTURE:
 1. Opening (once only): ${opening}
 2. Missing data nudge if applicable (once only)
-3. CV verification (gaps, switches, credentials)
+3. CV verification or profile-building questions (if no CV)
 4. Self-introduction (varied)
 5. Motivation & Fit
 6. Technical Depth — test competencies directly (2–3 questions)
@@ -516,7 +532,7 @@ export async function POST(req: NextRequest) {
           behavior_signals: m.score?.behavior_signals || null
         }))
 
-      // ✅ تعديل: بناء reportData عند انتهاء الوقت
+      // ✅ بناء reportData عند انتهاء الوقت
       const reportData = {
         candidateName:   config.candidateName,
         jobTitle:        config.jobTitle,
@@ -560,7 +576,6 @@ export async function POST(req: NextRequest) {
     const response = await client.messages.create({
       model: 'claude-sonnet-4-5',
       max_tokens: isFirst ? 120 : 400,
-      // ✅ تعديل: تمرير elapsed و limit للبرومبت
       system: buildPrompt(config, messages, competencies, elapsed, limit),
       messages: apiMessages
     })
@@ -579,7 +594,7 @@ export async function POST(req: NextRequest) {
       } catch {}
     }
 
-    // ✅ تعديل: كشف إشارة نهاية الجلسة من رد باربروس
+    // ✅ كشف إشارة نهاية الجلسة
     const isEndSignal =
       content.toLowerCase().includes('barbaros report is ready') ||
       content.toLowerCase().includes('best of luck') ||
@@ -589,7 +604,7 @@ export async function POST(req: NextRequest) {
     const audioBuffer = await textToSpeech(content)
     const audioBase64 = audioBuffer ? audioBuffer.toString('base64') : null
 
-    // ✅ تعديل: بناء reportData عند إشارة النهاية
+    // ✅ بناء reportData عند إشارة النهاية
     let reportData = null
     if (isEndSignal) {
       const scored = [...messages.filter((m: any) => m.score), ...(score ? [{ score }] : [])]

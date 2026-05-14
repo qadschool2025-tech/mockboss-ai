@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { useRouter } from 'next/navigation'
+import { loadConfig } from '../../lib/getInterviewConfig'
 
 interface VoiceAnalysis {
   wordsPerMinute: number

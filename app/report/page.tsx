@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 
 interface ScoreData {
@@ -39,6 +39,13 @@ interface Config {
   plan: string
 }
 
+interface QAPair {
+  question: string
+  answer: string
+  score: ScoreData
+  qType: string
+}
+
 const Barbaros = ({ size = 22 }: { size?: number }) => (
   <span style={{ fontWeight: 900, fontSize: size }}>
     <span style={{ color: '#1A1A1A' }}>Barbar</span>
@@ -61,7 +68,6 @@ const getScoreLabel = (score: number, isAr: boolean) => {
   return isAr ? 'لم يُقيَّم' : 'Not Assessed'
 }
 
-// ── Criteria definitions ──────────────────────────────────────────────────────
 const criteriaInfo = [
   {
     key: 'clarity', en: 'Clarity', ar: 'الوضوح',
@@ -97,7 +103,6 @@ const criteriaInfo = [
       : 'خرجت عدة إجابات عن الموضوع. احرص على ربط ردودك مباشرة بالدور ومتطلبات المحاور.',
   },
   {
-    // ✅ تعديل: technical_depth → Domain Expertise
     key: 'technical_depth', en: 'Domain Expertise', ar: 'الخبرة التخصصية',
     descEn: 'The depth of specialized knowledge you demonstrated for this specific role — regardless of field.',
     descAr: 'عمق المعرفة المتخصصة التي أظهرتها في مجال هذا الدور — بغض النظر عن المجال.',
@@ -153,34 +158,6 @@ const criteriaInfo = [
       : 'نادراً ما قدّمت نفسك كصاحب قرار. استخدم "أنا" أكثر من "نحن" وتملّك مساهماتك.',
   },
 ] as const
-
-// ── Corrective answer generator ───────────────────────────────────────────────
-function getCorrectiveAnswer(score: ScoreData, answer: string, isAr: boolean): string {
-  const qt   = score.question_type || 'General'
-  const note = score.coaching_note || ''
-
-  if (isAr) {
-    if (note.includes('محدد') || note.includes('specific') || note.includes('رقم') || note.includes('number'))
-      return `مثال على إجابة أفضل: بدلاً من "${answer.slice(0, 60)}..." — قل: "في [موقف محدد]، قمت بـ [إجراء واضح] وحققت [نتيجة قابلة للقياس مثل 20% تحسن / 3 أشهر / 5 مشاريع]."`
-    if (qt === 'Behavioral')
-      return 'مثال على إجابة أفضل: استخدم أسلوب STAR — "في [الموقف]، كانت مهمتي [المهمة]، فقمت بـ [الإجراء الذي اتخذته شخصياً]، والنتيجة كانت [نتيجة ملموسة]."'
-    if (qt === 'Technical' || qt === 'CV_Deep_Dive')
-      return 'مثال على إجابة أفضل: اذكر أدوات أو منهجيات محددة استخدمتها في مجالك، مع نتيجة واضحة — "استخدمت [أداة/منهجية] في [مشروع]، وأدى ذلك إلى [نتيجة]."'
-    if (qt === 'Pressure')
-      return 'مثال على إجابة أفضل: أظهر هدوءاً وتفكيراً منطقياً — "في [موقف ضغط حقيقي]، قررت [قرار واضح] لأن [سبب منطقي]، وكانت النتيجة [نتيجة]."'
-    return 'مثال على إجابة أفضل: كن مباشراً وادعم إجابتك بمثال واحد محدد من تجربتك الفعلية — الموقف، ما فعلته، والنتيجة.'
-  }
-
-  if (note.includes('specific') || note.includes('number') || note.includes('example'))
-    return `Better answer example: Instead of "${answer.slice(0, 60)}..." — say: "In [specific situation], I [clear action] and achieved [measurable result — e.g. 20% improvement / 3 months / 5 projects]."`
-  if (qt === 'Behavioral')
-    return 'Better answer example: Use STAR — "In [Situation], my task was [Task], so I personally [Action], and the result was [measurable Outcome]."'
-  if (qt === 'Technical' || qt === 'CV_Deep_Dive')
-    return 'Better answer example: Name specific tools or methods from your field — "I used [tool/method] in [project], which led to [result]."'
-  if (qt === 'Pressure')
-    return 'Better answer example: Show calm and logic — "In [real pressure situation], I decided [clear decision] because [logical reason], and the outcome was [result]."'
-  return 'Better answer example: Be direct and support your answer with one specific example from your actual experience — the situation, what you did, and the outcome.'
-}
 
 function getHiringVerdict(score: number, isAr: boolean) {
   if (score >= 80) return { label: '✅ Strong Hire', verdict: isAr ? 'بناءً على هذا الأداء — أنت مؤهل للمقابلات الحقيقية. معظم المحاورين سيكملون معك.' : 'Based on this performance — you are ready for real interviews. Most interviewers would move you forward.', color: '#065F46', bg: '#D1FAE5', border: '#6EE7B7' }
@@ -246,18 +223,27 @@ function getBestAndWorst(scoredMessages: Message[]): { best: Message | null; wor
 function getRecommendation(score: number, plan: string, isAr: boolean): { title: string; body: string; cta: string; isUpgrade: boolean } {
   if (score < 50) return {
     title: isAr ? '🎯 خطوتك التالية' : '🎯 Your Next Step',
-    body: isAr ? `درجتك الحالية ${score}/100 تُظهر أن هناك فرصة حقيقية للتطور. مقابلة أخرى مع باربروس ستساعدك على:\n• تحديد الأنماط المتكررة في إجاباتك\n• بناء ثقة أعلى تحت الضغط\n• الوصول لدرجة تؤهلك للوظائف التنافسية\n\nالمرشحون الذين أجروا مقابلتين أو أكثر حققوا تحسناً بمعدل 28 نقطة في المتوسط.` : `Your current score of ${score}/100 shows there is real room for growth. Another session with Barbaros will help you:\n• Identify recurring patterns in your answers\n• Build higher confidence under pressure\n• Reach a score that qualifies you for competitive roles\n\nCandidates who completed two or more sessions improved by an average of 28 points.`,
-    cta: isAr ? '🔁 ابدأ مقابلة جديدة' : '🔁 Start a New Interview', isUpgrade: false
+    body: isAr
+      ? `درجتك الحالية ${score}/100 تُظهر أن هناك فرصة حقيقية للتطور. مقابلة أخرى مع باربروس ستساعدك على:\n• تحديد الأنماط المتكررة في إجاباتك\n• بناء ثقة أعلى تحت الضغط\n• الوصول لدرجة تؤهلك للوظائف التنافسية\n\nالمرشحون الذين أجروا مقابلتين أو أكثر حققوا تحسناً بمعدل 28 نقطة في المتوسط.`
+      : `Your current score of ${score}/100 shows there is real room for growth. Another session with Barbaros will help you:\n• Identify recurring patterns in your answers\n• Build higher confidence under pressure\n• Reach a score that qualifies you for competitive roles\n\nCandidates who completed two or more sessions improved by an average of 28 points.`,
+    cta: isAr ? '🔁 ابدأ مقابلة جديدة' : '🔁 Start a New Interview',
+    isUpgrade: false
   }
   if (plan === 'go') return {
     title: isAr ? '⬆️ ارفع مستواك' : '⬆️ Take It Further',
-    body: isAr ? `درجتك ${score}/100 قوية — لكن جلسة الـ Go تمنحك 15 دقيقة فقط. مع باقة Pro أو Expert ستحصل على:\n• وقت أطول يكشف أداءك الحقيقي تحت الضغط المتراكم\n• أسئلة أعمق مخصصة لمستواك\n• تقرير أكثر تفصيلاً يُقنع أي مدير توظيف` : `Your score of ${score}/100 is strong — but the Go session gives you only 15 minutes. With Pro or Expert you get:\n• More time that reveals your true performance under accumulated pressure\n• Deeper questions tailored to your level\n• A more detailed report that convinces any hiring manager`,
-    cta: isAr ? '⬆️ ترقية للباقة Pro' : '⬆️ Upgrade to Pro', isUpgrade: true
+    body: isAr
+      ? `درجتك ${score}/100 قوية — لكن جلسة الـ Go تمنحك 15 دقيقة فقط. مع باقة Pro ($15/شهر) ستحصل على 7 جلسات كاملة، أو Expert ($49/شهر) لـ 20 جلسة:\n• وقت أطول يكشف أداءك الحقيقي تحت الضغط المتراكم\n• أسئلة أعمق مخصصة لمستواك\n• باربروس يتذكر نقاط ضعفك ويشدد عليها في كل جلسة`
+      : `Your score of ${score}/100 is strong — but the Go session gives you only 15 minutes. With Pro ($15/mo) you get 7 sessions, or Expert ($49/mo) for 20 full sessions:\n• More time that reveals your true performance under accumulated pressure\n• Deeper questions tailored to your level\n• Barbaros remembers your weaknesses and targets them every session`,
+    cta: isAr ? '⬆️ ترقية للباقة Pro' : '⬆️ Upgrade to Pro',
+    isUpgrade: true
   }
   return {
     title: isAr ? '⬆️ الخطوة التالية' : '⬆️ Next Level',
-    body: isAr ? `درجتك ${score}/100 تضعك في الفئة العليا. باقة Expert تمنحك 60 دقيقة كاملة:\n• أسئلة CV معمّقة\n• سيناريوهات ضغط حقيقية\n• تقرير شامل يُغطي كل كفاءة بالتفصيل` : `Your score of ${score}/100 puts you in the top tier. The Expert plan gives you 60 full minutes:\n• Deep CV-based questions\n• Real pressure scenarios\n• A comprehensive report covering every competency in detail`,
-    cta: isAr ? '⬆️ ترقية للباقة Expert' : '⬆️ Upgrade to Expert', isUpgrade: true
+    body: isAr
+      ? `درجتك ${score}/100 تضعك في الفئة العليا. باقة Expert ($49/شهر) تمنحك 20 جلسة كاملة 45 دقيقة:\n• أسئلة CV معمّقة\n• سيناريوهات ضغط حقيقية\n• تقرير شامل يُغطي كل كفاءة بالتفصيل`
+      : `Your score of ${score}/100 puts you in the top tier. The Expert plan ($49/mo) gives you 20 full 45-minute sessions:\n• Deep CV-based questions\n• Real pressure scenarios\n• A comprehensive report covering every competency in detail`,
+    cta: isAr ? '⬆️ ترقية للباقة Expert' : '⬆️ Upgrade to Expert',
+    isUpgrade: true
   }
 }
 
@@ -270,40 +256,108 @@ const SectionTitle = ({ children }: { children: React.ReactNode }) => (
 
 export default function ReportPage() {
   const router = useRouter()
-  const [mounted, setMounted]           = useState(false)
-  const [messages, setMessages]         = useState<Message[]>([])
-  const [config, setConfig]             = useState<Config | null>(null)
-  const [overallScore, setOverallScore] = useState<number>(0)
-  const [isAr, setIsAr]                 = useState(false)
-  const [showConvo, setShowConvo]       = useState(false)
-  const [showQA, setShowQA]             = useState(false)
+  const [mounted, setMounted]                     = useState(false)
+  const [messages, setMessages]                   = useState<Message[]>([])
+  const [config, setConfig]                       = useState<Config | null>(null)
+  const [overallScore, setOverallScore]           = useState<number>(0)
+  const [isAr, setIsAr]                           = useState(false)
+  const [showConvo, setShowConvo]                 = useState(false)
+  const [showQA, setShowQA]                       = useState(false)
+  const [correctiveAnswers, setCorrectiveAnswers] = useState<Record<number, string>>({})
+  const [loadingIdx, setLoadingIdx]               = useState<number | null>(null)
 
   useEffect(() => {
     try {
       const raw = sessionStorage.getItem('barbaros_report')
       if (raw) {
-        const report = JSON.parse(raw)
+        const report  = JSON.parse(raw)
         const msgs: Message[] = report.messages || []
         const score: number   = report.finalScore || 0
         const cfg: Config     = {
-          candidateName: report.candidateName || '', jobTitle: report.jobTitle || '',
-          institution: report.institution || '', sector: report.sector || '',
-          yearsExperience: report.yearsExperience || '', language: report.language || 'en', plan: report.plan || 'go',
+          candidateName:  report.candidateName  || '',
+          jobTitle:       report.jobTitle        || '',
+          institution:    report.institution     || '',
+          sector:         report.sector          || '',
+          yearsExperience:report.yearsExperience || '',
+          language:       report.language        || 'en',
+          plan:           report.plan            || 'go',
         }
-        setMessages(msgs); setOverallScore(isNaN(score) ? 0 : score); setConfig(cfg); setIsAr(cfg.language === 'ar')
+        setMessages(msgs)
+        setOverallScore(isNaN(score) ? 0 : score)
+        setConfig(cfg)
+        setIsAr(cfg.language === 'ar')
       } else {
         const msgs: Message[] = JSON.parse(sessionStorage.getItem('barbaros_messages') || '[]')
         const score = parseInt(sessionStorage.getItem('barbaros_score') || '0')
         const cfg: Config = JSON.parse(sessionStorage.getItem('barbaros_config') || '{}')
-        setMessages(msgs); setOverallScore(isNaN(score) ? 0 : score); setConfig(cfg); setIsAr(cfg?.language === 'ar')
+        setMessages(msgs)
+        setOverallScore(isNaN(score) ? 0 : score)
+        setConfig(cfg)
+        setIsAr(cfg?.language === 'ar')
       }
-    } catch { setMessages([]); setOverallScore(0) }
+    } catch {
+      setMessages([])
+      setOverallScore(0)
+    }
     setMounted(true)
+  }, [])
+
+  // ✅ Fetch corrective answer with localStorage cache
+  const fetchCorrective = useCallback(async (
+    index: number,
+    pair: QAPair,
+    cfg: Config,
+    ar: boolean
+  ) => {
+    // تحقق من Cache أولاً
+    const cacheKey = `barbaros_corrective_${cfg.candidateName}_${cfg.jobTitle}_${index}`
+    try {
+      const cached = localStorage.getItem(cacheKey)
+      if (cached) {
+        setCorrectiveAnswers(prev => ({ ...prev, [index]: cached }))
+        return
+      }
+    } catch {}
+
+    // إجابة قوية لا تحتاج توليد
+    if (pair.score.score >= 75) {
+      const msg = ar ? '✅ إجابة قوية — لا تحتاج تصحيحاً.' : '✅ Strong answer — no correction needed.'
+      setCorrectiveAnswers(prev => ({ ...prev, [index]: msg }))
+      try { localStorage.setItem(cacheKey, msg) } catch {}
+      return
+    }
+
+    setLoadingIdx(index)
+    try {
+      const res = await fetch('/api/report/corrective-answer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          question:   pair.question,
+          userAnswer: pair.answer,
+          jobTitle:   cfg.jobTitle,
+          sector:     cfg.sector,
+          score:      pair.score.score,
+          language:   cfg.language
+        })
+      })
+      const data = await res.json()
+      const answer = data.correctiveAnswer || (ar ? 'تعذّر توليد الإجابة.' : 'Could not generate answer.')
+      setCorrectiveAnswers(prev => ({ ...prev, [index]: answer }))
+      try { localStorage.setItem(cacheKey, answer) } catch {}
+    } catch {
+      const err = ar ? 'تعذّر التوليد. حاول مرة أخرى.' : 'Generation failed. Please try again.'
+      setCorrectiveAnswers(prev => ({ ...prev, [index]: err }))
+    } finally {
+      setLoadingIdx(null)
+    }
   }, [])
 
   if (!mounted) return (
     <div style={{ minHeight: '100vh', background: '#F5F1EB', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <div style={{ fontSize: 14, color: 'rgba(26,26,26,0.4)', fontFamily: 'system-ui' }}>{isAr ? 'جاري تحميل التقرير...' : 'Loading report...'}</div>
+      <div style={{ fontSize: 14, color: 'rgba(26,26,26,0.4)', fontFamily: 'system-ui' }}>
+        {isAr ? 'جاري تحميل التقرير...' : 'Loading report...'}
+      </div>
     </div>
   )
 
@@ -317,27 +371,27 @@ export default function ReportPage() {
 
   const questionTypes = scoredMessages.reduce((acc, m) => {
     const qt = m.question_type || (m.score as any)?.question_type || 'General'
-    acc[qt] = (acc[qt] || 0) + 1; return acc
+    acc[qt] = (acc[qt] || 0) + 1
+    return acc
   }, {} as Record<string, number>)
 
-  const verdict      = getHiringVerdict(overallScore, isAr)
-  const hirePct      = getHireProbability(overallScore)
-  const persona      = getInterviewPersona(scoredMessages, isAr)
-  const hiddenWeak   = scoredMessages.length ? getHiddenWeakness(scoredMessages, isAr) : null
-  const hiringRisk   = scoredMessages.length ? getHiringRisk(scoredMessages, overallScore, isAr) : null
+  const verdict        = getHiringVerdict(overallScore, isAr)
+  const hirePct        = getHireProbability(overallScore)
+  const persona        = getInterviewPersona(scoredMessages, isAr)
+  const hiddenWeak     = scoredMessages.length ? getHiddenWeakness(scoredMessages, isAr) : null
+  const hiringRisk     = scoredMessages.length ? getHiringRisk(scoredMessages, overallScore, isAr) : null
   const { best, worst } = getBestAndWorst(scoredMessages)
-  const pressureData = scoredMessages.map((m, i) => ({ i: i + 1, s: m.score?.score ?? 0 }))
-  const barbarosEval = getBarbarosEvaluation(overallScore, isAr)
+  const pressureData   = scoredMessages.map((m, i) => ({ i: i + 1, s: m.score?.score ?? 0 }))
+  const barbarosEval   = getBarbarosEvaluation(overallScore, isAr)
   const recommendation = getRecommendation(overallScore, config?.plan || 'go', isAr)
 
-  // ✅ إصلاح qaPairs: assistant question + user answer with score
-  const qaPairs: Array<{ question: string; answer: string; score: ScoreData; qType: string }> = []
+  // بناء Q&A pairs
+  const qaPairs: QAPair[] = []
   for (let i = 0; i < visibleMessages.length - 1; i++) {
     const msg  = visibleMessages[i]
     const next = visibleMessages[i + 1]
     if (msg.role === 'assistant' && next?.role === 'user' && next.score) {
-      // ✅ إصلاح السؤال الأول الناقص: نأخذ آخر جملة تنتهي بـ ?
-      const questionText = msg.content
+      const questionText  = msg.content
       const questionMatch = questionText.match(/[^.!؟?]*[?؟][^?؟]*$/)?.[0]?.trim() || questionText.slice(-200).trim()
       qaPairs.push({
         question: questionMatch,
@@ -351,6 +405,7 @@ export default function ReportPage() {
   return (
     <div dir={isAr ? 'rtl' : 'ltr'} style={{ fontFamily: 'system-ui, sans-serif', background: '#F5F1EB', color: '#1A1A1A', minHeight: '100vh' }}>
 
+      {/* NAV */}
       <nav style={{ background: '#F5F1EB', borderBottom: '0.5px solid #E5DDD0', padding: '14px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <Barbaros size={20} />
         <div style={{ fontSize: 13, fontWeight: 700, color: '#CC785C' }}>{isAr ? 'تقرير المقابلة' : 'Interview Report'}</div>
@@ -373,7 +428,9 @@ export default function ReportPage() {
           </div>
           <div style={{ fontSize: 18, fontWeight: 800, color: getScoreColor(overallScore), marginBottom: 6 }}>{getScoreLabel(overallScore, isAr)}</div>
           <div style={{ fontSize: 12, color: 'rgba(26,26,26,0.45)', marginBottom: 16 }}>
-            {scoredMessages.length > 0 ? (isAr ? `بناءً على ${scoredMessages.length} إجابة` : `Based on ${scoredMessages.length} answer${scoredMessages.length !== 1 ? 's' : ''}`) : (isAr ? 'لم تُسجَّل إجابات كافية' : 'No answers recorded')}
+            {scoredMessages.length > 0
+              ? (isAr ? `بناءً على ${scoredMessages.length} إجابة` : `Based on ${scoredMessages.length} answer${scoredMessages.length !== 1 ? 's' : ''}`)
+              : (isAr ? 'لم تُسجَّل إجابات كافية' : 'No answers recorded')}
           </div>
           <div style={{ margin: '16px 0', padding: '14px 16px', background: '#F5F1EB', border: '0.5px solid #E5DDD0', borderRadius: 12, textAlign: isAr ? 'right' : 'left' }}>
             <div style={{ fontSize: 10, fontWeight: 700, color: '#CC785C', marginBottom: 6, letterSpacing: 0.5, textTransform: 'uppercase' }}>{isAr ? 'تقييم باربروس' : 'Barbaros Assessment'}</div>
@@ -437,7 +494,13 @@ export default function ReportPage() {
               const first = pressureData.slice(0, Math.ceil(pressureData.length / 2))
               const last  = pressureData.slice(Math.ceil(pressureData.length / 2))
               const diff  = Math.round((last.reduce((a, b) => a + b.s, 0) / last.length) - (first.reduce((a, b) => a + b.s, 0) / first.length))
-              return <div style={{ marginTop: 10, fontSize: 12, color: diff >= 0 ? '#065F46' : '#DC2626', fontWeight: 700 }}>{diff >= 0 ? (isAr ? `✅ تحسّن أداؤك بمقدار ${diff} نقطة` : `✅ Performance improved by ${diff} points`) : (isAr ? `⚠️ انخفض أداؤك بمقدار ${Math.abs(diff)} نقطة` : `⚠️ Performance dropped ${Math.abs(diff)} points`)}</div>
+              return (
+                <div style={{ marginTop: 10, fontSize: 12, color: diff >= 0 ? '#065F46' : '#DC2626', fontWeight: 700 }}>
+                  {diff >= 0
+                    ? (isAr ? `✅ تحسّن أداؤك بمقدار ${diff} نقطة` : `✅ Performance improved by ${diff} points`)
+                    : (isAr ? `⚠️ انخفض أداؤك بمقدار ${Math.abs(diff)} نقطة` : `⚠️ Performance dropped ${Math.abs(diff)} points`)}
+                </div>
+              )
             })()}
           </Section>
         )}
@@ -494,11 +557,22 @@ export default function ReportPage() {
           </Section>
         )}
 
-        {/* ✅ 10. Q&A + COACHING NOTES MERGED */}
+        {/* 10. Q&A BREAKDOWN */}
         {qaPairs.length > 0 && (
           <Section>
             <button
-              onClick={() => setShowQA(prev => !prev)}
+              onClick={() => {
+                const next = !showQA
+                setShowQA(next)
+                // ✅ Go Plan: يولّد عند فتح Q&A
+                if (next && config?.plan === 'go' && config) {
+                  qaPairs.forEach((pair, i) => {
+                    if (correctiveAnswers[i] === undefined) {
+                      fetchCorrective(i, pair, config, isAr)
+                    }
+                  })
+                }
+              }}
               style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'inherit' }}
             >
               <span style={{ fontSize: 13, fontWeight: 800 }}>{isAr ? '📋 تفصيل الأسئلة والأجوبة' : '📋 Questions & Answers Breakdown'}</span>
@@ -549,13 +623,33 @@ export default function ReportPage() {
                       </div>
                     )}
 
-                    {/* ④ إجابة تصحيحية */}
+                    {/* ④ إجابة تصحيحية ذكية */}
                     <div>
                       <div style={{ fontSize: 10, fontWeight: 700, color: '#10B981', marginBottom: 4, letterSpacing: 0.5, textTransform: 'uppercase' }}>
                         {isAr ? '✅ إجابة تصحيحية' : '✅ Corrective Answer'}
                       </div>
-                      <div style={{ fontSize: 12, color: '#065F46', lineHeight: 1.8, padding: '10px 14px', background: 'rgba(16,185,129,0.05)', border: '0.5px solid rgba(16,185,129,0.25)', borderRadius: 10 }}>
-                        {getCorrectiveAnswer(pair.score, pair.answer, isAr)}
+                      <div style={{ fontSize: 12, color: '#065F46', lineHeight: 1.8, padding: '10px 14px', background: 'rgba(16,185,129,0.05)', border: '0.5px solid rgba(16,185,129,0.25)', borderRadius: 10, minHeight: 44 }}>
+                        {loadingIdx === i ? (
+                          <span style={{ color: '#CC785C', fontStyle: 'italic' }}>
+                            {isAr ? '⏳ باربروس يحلل إجابتك...' : '⏳ Barbaros is analyzing your answer...'}
+                          </span>
+                        ) : correctiveAnswers[i] !== undefined ? (
+                          correctiveAnswers[i]
+                        ) : (
+                          // Pro/Expert: زر توليد يدوي
+                          config?.plan !== 'go' ? (
+                            <button
+                              onClick={() => config && fetchCorrective(i, pair, config, isAr)}
+                              style={{ background: '#CC785C', color: '#fff', border: 'none', borderRadius: 8, padding: '6px 14px', fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}
+                            >
+                              {isAr ? '🔍 توليد إجابة تصحيحية' : '🔍 Generate Corrective Answer'}
+                            </button>
+                          ) : (
+                            <span style={{ color: 'rgba(26,26,26,0.35)', fontStyle: 'italic' }}>
+                              {isAr ? 'جاري التوليد...' : 'Generating...'}
+                            </span>
+                          )
+                        )}
                       </div>
                     </div>
 
@@ -600,10 +694,44 @@ export default function ReportPage() {
           </button>
         </div>
 
-        {/* CTA */}
+        {/* 13. GO MOTIVATIONAL MESSAGE */}
+        {config?.plan === 'go' && (
+          <div style={{ background: 'rgba(204,120,92,0.05)', border: '1px solid rgba(204,120,92,0.2)', borderRadius: 20, padding: '24px 20px', marginBottom: 16, textAlign: 'center' }}>
+            <div style={{ fontSize: 28, marginBottom: 12 }}>🎯</div>
+            <div style={{ fontSize: 15, fontWeight: 800, color: '#1A1A1A', marginBottom: 10, lineHeight: 1.5 }}>
+              {isAr ? 'هذه المقابلة أخذت 15 دقيقة من وقتك.' : 'This interview took 15 minutes of your time.'}
+            </div>
+            <div style={{ fontSize: 13, color: 'rgba(26,26,26,0.65)', lineHeight: 1.9, marginBottom: 20, whiteSpace: 'pre-line' }}>
+              {isAr
+                ? `الوظيفة التي تستهدفها تستحق أكثر.\n\nالمرشحون الذين تدربوا 3 جلسات أو أكثر\nحسّنوا أداءهم بمعدل 31 نقطة.\n\nأنت الآن تعرف بالضبط أين تحتاج التحسين\n— استثمر هذا.`
+                : `The job you are targeting deserves more.\n\nCandidates who practiced 3+ sessions\nimproved by an average of 31 points.\n\nYou now know exactly where you need to improve\n— use that.`}
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <button
+                onClick={() => router.push('/onboarding')}
+                style={{ background: '#1A1A1A', color: '#fff', border: 'none', borderRadius: 12, padding: '13px 24px', fontSize: 13, fontWeight: 800, cursor: 'pointer', fontFamily: 'inherit' }}
+              >
+                {isAr ? '🔁 تدرب مجدداً — $2.50' : '🔁 Practice Again — $2.50'}
+              </button>
+              <button
+                onClick={() => router.push('/pricing')}
+                style={{ background: '#CC785C', color: '#fff', border: 'none', borderRadius: 12, padding: '13px 24px', fontSize: 13, fontWeight: 800, cursor: 'pointer', fontFamily: 'inherit' }}
+              >
+                {isAr ? '⬆️ احصل على Pro — 7 جلسات / $15 شهرياً' : '⬆️ Get Pro — 7 sessions / $15 per month'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* 14. CTA */}
         <div style={{ textAlign: 'center', marginTop: 8 }}>
           <button
-            onClick={() => { sessionStorage.removeItem('barbaros_report'); sessionStorage.removeItem('barbaros_messages'); sessionStorage.removeItem('barbaros_score'); router.push('/onboarding') }}
+            onClick={() => {
+              sessionStorage.removeItem('barbaros_report')
+              sessionStorage.removeItem('barbaros_messages')
+              sessionStorage.removeItem('barbaros_score')
+              router.push('/onboarding')
+            }}
             style={{ background: 'transparent', color: '#CC785C', border: '1px solid #CC785C', borderRadius: 14, padding: '12px 36px', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', width: '100%', marginBottom: 12 }}
           >
             {isAr ? '🔁 مقابلة جديدة' : '🔁 Start New Interview'}

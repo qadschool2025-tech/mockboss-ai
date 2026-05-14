@@ -331,7 +331,7 @@ FINAL 90 SECONDS — CRITICAL:
     ? `LANGUAGE: Arabic primary. English only for technical terms.`
     : `LANGUAGE: RESPOND ONLY IN ENGLISH. Not a single Arabic word. No exceptions.`
 
-  const hasNoCv           = !config.cvText || config.cvText.startsWith('[NO_CV]')
+ const hasNoCv = !config.cvText || config.cvText.trim().length < 10 || config.cvText.startsWith('[NO_CV]')
   const hasNoRequirements = !config.jobRequirements || config.jobRequirements.trim().length < 5
 
   // ✅ بدون CV: باربروس يسأل عن الشهادات والخبرة والفجوات والكورسات

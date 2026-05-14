@@ -11,12 +11,12 @@ const client = new Anthropic({
 const TIME_LIMITS: Record<string, number> = {
   go: 15 * 60,
   pro: 30 * 60,
-  expert: 60 * 60
+  expert: 45 * 60  // ✅ updated from 60 to 45
 }
 
 const UPGRADE_HINTS: Record<string, string> = {
-  go: "We're just getting started — in a full session, this line of questioning alone could reveal a lot more.",
-  pro: "In an Expert session, we'd have time to stress-test every answer you just gave.",
+  go: "We're just getting started — a Pro plan gives you 7 full sessions at $15/month to build real consistency.",
+  pro: "In an Expert plan, you get 20 sessions at $49/month — enough to walk into any interview fully prepared.",
 }
 
 /* =========================
@@ -276,6 +276,59 @@ function isJobTitleSuspicious(title: string): boolean {
 }
 
 /* =========================
+   🤖 AI ADOPTION QUESTION
+========================= */
+function getAIAdoptionQuestion(sector: string, jobTitle: string, isAr: boolean): string {
+  const s = sector?.toLowerCase()   || ''
+  const j = jobTitle?.toLowerCase() || ''
+
+  if (isAr) {
+    if (s.includes('education') || j.includes('teacher') || j.includes('معلم') || j.includes('مدرس'))
+      return `سؤال الذكاء الاصطناعي (إلزامي مرة واحدة بين السؤال 3 و5):
+"كيف تستخدم أدوات الذكاء الاصطناعي في تدريسك اليوم — وكيف تثبت للطلاب وأولياء الأمور أن المعلم البشري لا غنى عنه؟"`
+    if (s.includes('technology') || j.includes('engineer') || j.includes('developer') || j.includes('مهندس'))
+      return `سؤال الذكاء الاصطناعي (إلزامي مرة واحدة بين السؤال 3 و5):
+"Copilot والذكاء الاصطناعي يكتبان الكود الآن — ما دورك الحقيقي في الفريق الذي لا يستطيع الذكاء الاصطناعي الاضطلاع به؟"`
+    if (s.includes('finance') || j.includes('accountant') || j.includes('محاسب') || j.includes('analyst'))
+      return `سؤال الذكاء الاصطناعي (إلزامي مرة واحدة بين السؤال 3 و5):
+"الذكاء الاصطناعي يولّد 80% من التقارير المالية اليوم — ماذا تضيف أنت فوق ما ينتجه النموذج؟"`
+    if (s.includes('healthcare') || j.includes('doctor') || j.includes('nurse') || j.includes('طبيب'))
+      return `سؤال الذكاء الاصطناعي (إلزامي مرة واحدة بين السؤال 3 و5):
+"الذكاء الاصطناعي يقرأ الصور الطبية ويكتشف الحالات بسرعة أعلى من البشر — أين يبدأ حكمك السريري الذي لا يستطيع الذكاء الاصطناعي استبداله؟"`
+    if (s.includes('government') || j.includes('policy') || j.includes('حكومة'))
+      return `سؤال الذكاء الاصطناعي (إلزامي مرة واحدة بين السؤال 3 و5):
+"الذكاء الاصطناعي يستطيع صياغة السياسات وتحليل البيانات على نطاق واسع — ما الحكم البشري الذي تجلبه أنت ولا تستطيع الآلة تقديمه؟"`
+    if (s.includes('marketing') || j.includes('marketing') || j.includes('تسويق'))
+      return `سؤال الذكاء الاصطناعي (إلزامي مرة واحدة بين السؤال 3 و5):
+"الذكاء الاصطناعي يكتب الإعلانات ويصمم المحتوى ويحلل الحملات في ثوانٍ — ما مساهمتك التي لا يمكن استبدالها في فريق التسويق؟"`
+    return `سؤال الذكاء الاصطناعي (إلزامي مرة واحدة بين السؤال 3 و5):
+"الذكاء الاصطناعي يُؤتمت أجزاء كبيرة من مجالك — كيف تكيّفت مع هذا؟ وما الذي يجعلك لا غنى عنك لأي صاحب عمل؟"`
+  }
+
+  if (s.includes('education') || j.includes('teacher') || j.includes('instructor'))
+    return `AI ADOPTION QUESTION (mandatory once between Q3 and Q5):
+"How are you using AI tools in your teaching today — and how do you prove to students and parents that a human teacher is irreplaceable?"`
+  if (s.includes('technology') || j.includes('engineer') || j.includes('developer'))
+    return `AI ADOPTION QUESTION (mandatory once between Q3 and Q5):
+"Copilot and AI write code now. What is your actual role in the team that AI cannot replace?"`
+  if (s.includes('finance') || j.includes('accountant') || j.includes('analyst'))
+    return `AI ADOPTION QUESTION (mandatory once between Q3 and Q5):
+"AI generates 80% of financial reports today. What do you add beyond what the model produces?"`
+  if (s.includes('healthcare') || j.includes('doctor') || j.includes('nurse'))
+    return `AI ADOPTION QUESTION (mandatory once between Q3 and Q5):
+"AI reads scans and flags anomalies faster than humans. Where does your clinical judgment begin — and what can AI never replace?"`
+  if (s.includes('government') || j.includes('policy') || j.includes('public'))
+    return `AI ADOPTION QUESTION (mandatory once between Q3 and Q5):
+"AI can draft policies and analyze public data at scale. What human judgment do you bring that machines cannot?"`
+  if (s.includes('marketing') || j.includes('marketing'))
+    return `AI ADOPTION QUESTION (mandatory once between Q3 and Q5):
+"AI generates ad copy, designs visuals, and analyzes campaigns in seconds. What is your irreplaceable contribution to a marketing team?"`
+
+  return `AI ADOPTION QUESTION (mandatory once between Q3 and Q5):
+"AI is automating large parts of your field. How have you adapted — and what makes you genuinely irreplaceable to any employer?"`
+}
+
+/* =========================
    🧠 BUILD PROMPT
 ========================= */
 function buildPrompt(
@@ -293,11 +346,11 @@ function buildPrompt(
   const adaptiveLevel   = getAdaptiveLevel(messages)
   const personality     = getInterviewPersonality(config.sector, config.institution)
   const suspiciousTitle = isJobTitleSuspicious(config.jobTitle)
+  const aiQuestion      = getAIAdoptionQuestion(config.sector, config.jobTitle, isAr)
 
   const remaining        = timeLimit - elapsedSeconds
   const remainingMinutes = Math.floor(remaining / 60)
 
-  // ✅ إدارة الوقت
   const timingLayer = remaining <= 90
     ? `
 FINAL 90 SECONDS — CRITICAL:
@@ -331,10 +384,9 @@ FINAL 90 SECONDS — CRITICAL:
     ? `LANGUAGE: Arabic primary. English only for technical terms.`
     : `LANGUAGE: RESPOND ONLY IN ENGLISH. Not a single Arabic word. No exceptions.`
 
- const hasNoCv = !config.cvText || config.cvText.trim().length < 10 || config.cvText.startsWith('[NO_CV]')
+  const hasNoCv = !config.cvText || config.cvText.trim().length < 10 || config.cvText.startsWith('[NO_CV]')
   const hasNoRequirements = !config.jobRequirements || config.jobRequirements.trim().length < 5
 
-  // ✅ بدون CV: باربروس يسأل عن الشهادات والخبرة والفجوات والكورسات
   const cvSection = !hasNoCv
     ? `
 CV PROVIDED — ANALYZE CAREFULLY:
@@ -433,6 +485,8 @@ ${cvSection}
 
 ${missingDataNudge}
 
+${aiQuestion}
+
 ${langRule}
 
 ${upgradeHint}
@@ -472,9 +526,10 @@ INTERVIEW STRUCTURE:
 4. Self-introduction (varied)
 5. Motivation & Fit
 6. Technical Depth — test competencies directly (2–3 questions)
-7. Behavioral Under Pressure (2 STAR questions — focus on failure)
-8. Critical Thinking (1 curveball)
-9. Closing → ${closing}
+7. AI Adoption Question — mandatory between Q3 and Q5
+8. Behavioral Under Pressure (2 STAR questions — focus on failure)
+9. Critical Thinking (1 curveball)
+10. Closing → ${closing}
 
 SCORING — append after EVERY substantive candidate answer:
 <score>{
@@ -495,7 +550,7 @@ SCORING — append after EVERY substantive candidate answer:
   "answer_summary": ""
 }</score>
 
-question_type: HR | Technical | Behavioral | Scenario | Pressure | CV_Deep_Dive
+question_type: HR | Technical | Behavioral | Scenario | Pressure | CV_Deep_Dive | AI_Adoption
 coaching_note: one short sentence on what to improve (empty if strong)
 question: the exact question Barbaros just asked
 answer_summary: one sentence summary of candidate's answer
@@ -532,7 +587,6 @@ export async function POST(req: NextRequest) {
           behavior_signals: m.score?.behavior_signals || null
         }))
 
-      // ✅ بناء reportData عند انتهاء الوقت
       const reportData = {
         candidateName:   config.candidateName,
         jobTitle:        config.jobTitle,
@@ -594,7 +648,6 @@ export async function POST(req: NextRequest) {
       } catch {}
     }
 
-    // ✅ كشف إشارة نهاية الجلسة
     const isEndSignal =
       content.toLowerCase().includes('barbaros report is ready') ||
       content.toLowerCase().includes('best of luck') ||
@@ -604,7 +657,6 @@ export async function POST(req: NextRequest) {
     const audioBuffer = await textToSpeech(content)
     const audioBase64 = audioBuffer ? audioBuffer.toString('base64') : null
 
-    // ✅ بناء reportData عند إشارة النهاية
     let reportData = null
     if (isEndSignal) {
       const scored = [...messages.filter((m: any) => m.score), ...(score ? [{ score }] : [])]

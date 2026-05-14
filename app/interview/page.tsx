@@ -124,24 +124,7 @@ const Barbaros = ({ size = 22 }: { size?: number }) => (
 export default function InterviewPage() {
   const router = useRouter()
 
-  const [CONFIG] = useState(() => {
-    if (typeof window === 'undefined') {
-      return {
-        candidateName: 'Candidate', jobTitle: 'Professional', institution: 'Company',
-        country: '', sector: 'General', yearsExperience: '1–3 years',
-        language: 'en', jobRequirements: '', cvText: '', plan: 'go',
-      }
-    }
-    try {
-      const saved = sessionStorage.getItem('barbaros_config')
-      if (saved) return JSON.parse(saved)
-    } catch {}
-    return {
-      candidateName: 'Candidate', jobTitle: 'Professional', institution: 'Company',
-      country: '', sector: 'General', yearsExperience: '1–3 years',
-      language: 'en', jobRequirements: '', cvText: '', plan: 'go',
-    }
-  })
+const [CONFIG] = useState(() => loadConfig())
 
   const t = translations[CONFIG.language === 'ar' ? 'ar' : 'en']
   const isRTL = CONFIG.language === 'ar'

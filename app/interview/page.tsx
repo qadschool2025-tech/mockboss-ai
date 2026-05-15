@@ -785,9 +785,15 @@ const [CONFIG] = useState(() => loadConfig())
           <div style={{ fontWeight: 800, fontSize: 15, color: '#CC785C' }}>{overallScore ?? '—'}</div>
         </div>
         <button
-          onClick={() => { if (confirm(t.endConfirm)) endSession(messagesRef.current, overallScoreRef.current) }}
-          style={{ background: 'rgba(220,38,38,0.08)', border: '0.5px solid rgba(220,38,38,0.25)', color: '#DC2626', borderRadius: 8, padding: '8px 18px', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
-          {t.end}
+         onClick={() => {
+    const isAr = CONFIG.language === 'ar'
+    const msg = isAr
+      ? 'للحصول على أفضل تقييم، أكمل المقابلة حتى نهايتها.\n\nهل تريد الإنهاء الآن؟'
+      : 'For the best evaluation, complete the interview until the end.\n\nEnd interview now?'
+    if (confirm(msg)) endSession(messagesRef.current, overallScoreRef.current)
+  }}
+  style={{ background: 'rgba(220,38,38,0.08)', border: '0.5px solid rgba(220,38,38,0.25)', color: '#DC2626', borderRadius: 8, padding: '8px 18px', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
+  {t.end}
         </button>
       </div>
 

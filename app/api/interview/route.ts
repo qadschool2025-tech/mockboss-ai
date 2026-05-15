@@ -374,13 +374,15 @@ SCORING — append after EVERY substantive candidate answer:
   "hesitation_signals": 0,
   "question_type": "",
   "coaching_note": "",
+  "ideal_answer": "",
   "notes": "",
   "question": "",
   "answer_summary": ""
 }</score>
 
 question_type: HR | Technical | Behavioral | Scenario | Pressure | CV_Deep_Dive | AI_Adoption
-coaching_note: one short sentence on what to improve (empty if strong)
+coaching_note: one short sentence on what to improve (empty if strong answer)
+ideal_answer: one concrete example of a strong answer to this specific question — max 3 sentences — always in the same language as the interview — start with "Example: " in English or "مثال: " in Arabic — this is a GUIDELINE not a definitive answer
 question: the exact question Barbaros just asked
 answer_summary: one sentence summary of candidate's answer
 `
@@ -388,37 +390,79 @@ answer_summary: one sentence summary of candidate's answer
 
 function isAr(config: any) { return config.language === 'ar' }
 
+function buildReportData(config: any, messages: any[], finalScore: number) {
+  const scored = messages.filter((m: any) => m.score)
+  return {
+    candidateName:   config.candidateName,
+    jobTitle:        config.jobTitle,
+    institution:     config.institution,
+    sector:          config.sector,
+    yearsExperience: config.yearsExperience,
+    language:        config.language,
+    plan:            config.plan,
+    finalScore,
+    scores:   scored.map((m: any) => m.score),
+    messages,
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
     const { config, messages, sessionStartTime } = await req.json()
     const elapsed = (Date.now() - sessionStartTime) / 1000
     const limit   = TIME_LIMITS[config.plan] ?? TIME_LIMITS.go
 
+    // ✅ انتهاء الوقت — تقرير كامل حتى لو إجابة واحدة
     if (elapsed >= limit) {
       const scored = messages.filter((m: any) => m.score)
-      const avg = scored.length ? Math.round(scored.reduce((s: number, m: any) => s + (m.score?.score ?? 0), 0) / scored.length) : 0
-      const rebuiltAnswers = messages.filter((m: any) => m.role === 'user' && m.content && !m.content.startsWith('[')).slice(-5).map((m: any) => ({ original: m.content, coaching: m.score?.coaching_note || '', question_type: m.score?.question_type || '', behavior_signals: m.score?.behavior_signals || null }))
-      const reportData = { candidateName: config.candidateName, jobTitle: config.jobTitle, institution: config.institution, sector: config.sector, yearsExperience: config.yearsExperience, language: config.language, plan: config.plan, finalScore: avg, scores: scored.map((m: any) => m.score), messages }
-      return NextResponse.json({ success: true, content: isAr(config) ? `${config.candidateName}، انتهى وقتنا. تقرير باربروس جاهز.` : `${config.candidateName}, our time is up. Your Barbaros Report is ready.`, isEndOfSession: true, finalScore: avg, rebuiltAnswers, reportData })
+      const avg = scored.length
+        ? Math.round(scored.reduce((s: number, m: any) => s + (m.score?.score ?? 0), 0) / scored.length)
+        : 0
+      const reportData = buildReportData(config, messages, avg)
+      const rebuiltAnswers = messages
+        .filter((m: any) => m.role === 'user' && m.content && !m.content.startsWith('['))
+        .slice(-5)
+        .map((m: any) => ({
+          original:        m.content,
+          coaching:        m.score?.coaching_note    || '',
+          ideal_answer:    m.score?.ideal_answer     || '',
+          question_type:   m.score?.question_type    || '',
+          behavior_signals: m.score?.behavior_signals || null
+        }))
+      return NextResponse.json({
+        success:        true,
+        content:        isAr(config)
+          ? `${config.candidateName}، انتهى وقتنا. تقرير باربروس جاهز.`
+          : `${config.candidateName}, our time is up. Your Barbaros Report is ready.`,
+        isEndOfSession: true,
+        finalScore:     avg,
+        rebuiltAnswers,
+        reportData,
+      })
     }
 
     const competencies = buildCompetencies(config)
     const isFirst      = messages.length === 0
-    const apiMessages  = isFirst ? [{ role: 'user', content: 'Start the interview now.' }] : messages.map((m: any) => ({ role: m.role, content: m.content }))
+    const apiMessages  = isFirst
+      ? [{ role: 'user', content: 'Start the interview now.' }]
+      : messages.map((m: any) => ({ role: m.role, content: m.content }))
+
     const last = apiMessages[apiMessages.length - 1]
-    if (last?.role === 'user' && !last.content?.trim()) last.content = '[Candidate is silent — waiting for response]'
+    if (last?.role === 'user' && !last.content?.trim()) {
+      last.content = '[Candidate is silent — waiting for response]'
+    }
 
     const lastUserMsg     = [...messages].reverse().find((m: any) => m.role === 'user')
     const behaviorSignals = lastUserMsg ? analyzeBehavior(lastUserMsg.content || '') : null
 
     const response = await client.messages.create({
-      model: 'claude-sonnet-4-5',
+      model:      'claude-sonnet-4-5',
       max_tokens: isFirst ? 120 : 400,
-      system: buildPrompt(config, messages, competencies, elapsed, limit),
-      messages: apiMessages
+      system:     buildPrompt(config, messages, competencies, elapsed, limit),
+      messages:   apiMessages,
     })
 
-    const raw = response.content[0].type === 'text' ? response.content[0].text : ''
+    const raw        = response.content[0].type === 'text' ? response.content[0].text : ''
     const scoreMatch = raw.match(/<score>([\s\S]*?)<\/score>/)
     let score = null, content = raw
 
@@ -430,18 +474,39 @@ export async function POST(req: NextRequest) {
       } catch {}
     }
 
-    const isEndSignal = content.toLowerCase().includes('barbaros report is ready') || content.toLowerCase().includes('best of luck') || content.includes('تقريرك جاهز') || (elapsed >= limit - 30)
+    const isEndSignal =
+      content.toLowerCase().includes('barbaros report is ready') ||
+      content.toLowerCase().includes('best of luck') ||
+      content.includes('تقريرك جاهز') ||
+      (elapsed >= limit - 30)
+
     const audioBuffer = await textToSpeech(content)
     const audioBase64 = audioBuffer ? audioBuffer.toString('base64') : null
 
+    // ✅ بناء reportData عند نهاية الجلسة — حتى لو إجابة واحدة
     let reportData = null
     if (isEndSignal) {
-      const scored = [...messages.filter((m: any) => m.score), ...(score ? [{ score }] : [])]
-      const avg    = scored.length ? Math.round(scored.reduce((s: number, m: any) => s + (m.score?.score ?? 0), 0) / scored.length) : 0
-      reportData = { candidateName: config.candidateName, jobTitle: config.jobTitle, institution: config.institution, sector: config.sector, yearsExperience: config.yearsExperience, language: config.language, plan: config.plan, finalScore: avg, scores: scored.map((m: any) => m.score), messages: [...messages, { role: 'assistant', content, score }] }
+      const allMsgs  = [...messages, { role: 'assistant', content, score }]
+      const scored   = allMsgs.filter((m: any) => m.score)
+      const avg      = scored.length
+        ? Math.round(scored.reduce((s: number, m: any) => s + (m.score?.score ?? 0), 0) / scored.length)
+        : 0
+      reportData = buildReportData(config, allMsgs, avg)
     }
 
-    return NextResponse.json({ success: true, content, score, audioBase64, coaching_note: score?.coaching_note || null, question_type: score?.question_type || null, behavior_signals: behaviorSignals || null, competencies, isEndOfSession: isEndSignal, reportData })
+    return NextResponse.json({
+      success:         true,
+      content,
+      score,
+      audioBase64,
+      coaching_note:   score?.coaching_note   || null,
+      ideal_answer:    score?.ideal_answer     || null,
+      question_type:   score?.question_type    || null,
+      behavior_signals: behaviorSignals        || null,
+      competencies,
+      isEndOfSession:  isEndSignal,
+      reportData,
+    })
 
   } catch (err: any) {
     console.error('Interview API error:', err.message)

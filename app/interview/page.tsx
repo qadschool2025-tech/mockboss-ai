@@ -18,6 +18,7 @@ interface Message {
   voiceAnalysis?: VoiceAnalysis
   coaching_note?: string
   question_type?: string
+  ideal_answer?: string
 }
 
 const getPlanTime = (plan: string) => {
@@ -81,6 +82,10 @@ const translations = {
     hideTranscript: 'Hide Transcript',
     transcript: 'Conversation',
     recruiterNote: 'Recruiter Note',
+    endWarningTitle: 'Are you sure?',
+    endWarningBody: 'For the most accurate evaluation, completing the full interview gives Barbaros enough data to assess all competencies. Are you sure you want to end now?',
+    endWarningConfirm: 'Yes, end interview',
+    endWarningCancel: 'Continue interview',
   },
   ar: {
     basedOn: 'وفق أعلى معايير التوظيف',
@@ -111,6 +116,10 @@ const translations = {
     hideTranscript: 'إخفاء المحادثة',
     transcript: 'المحادثة',
     recruiterNote: 'ملاحظة المحاور',
+    endWarningTitle: 'هل أنت متأكد؟',
+    endWarningBody: 'للحصول على تقييم دقيق يغطي جميع المعايير، يُنصح بإكمال المقابلة حتى النهاية. هل تريد الإنهاء الآن؟',
+    endWarningConfirm: 'نعم، أنهِ المقابلة',
+    endWarningCancel: 'أكمل المقابلة',
   }
 }
 
@@ -123,9 +132,7 @@ const Barbaros = ({ size = 22 }: { size?: number }) => (
 
 export default function InterviewPage() {
   const router = useRouter()
-
-const [CONFIG] = useState(() => loadConfig())
-
+  const [CONFIG] = useState(() => loadConfig())
   const t = translations[CONFIG.language === 'ar' ? 'ar' : 'en']
   const isRTL = CONFIG.language === 'ar'
 
@@ -159,6 +166,8 @@ const [CONFIG] = useState(() => loadConfig())
   const [lastCoachingNote, setLastCoachingNote] = useState<string | null>(null)
   const [showTranscript, setShowTranscript] = useState(false)
   const [recordingSeconds, setRecordingSeconds] = useState(0)
+  // ✅ إضافة: state لنافذة تحذير الإنهاء
+  const [showEndWarning, setShowEndWarning] = useState(false)
 
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const hasStarted = useRef(false)
@@ -278,7 +287,6 @@ const [CONFIG] = useState(() => loadConfig())
 
   const toggleRecording = async () => {
     if (isLoading || isTranscribing || isEnded) return
-
     if (isRecordingRef.current) {
       if (mediaRecorderRef.current) {
         mediaRecorderRef.current.stop()
@@ -362,7 +370,6 @@ const [CONFIG] = useState(() => loadConfig())
     return 'GO · 15 min'
   }
 
-  // ✅ تعديل: endSession يحفظ barbaros_report أيضاً
   const endSession = (msgs: Message[], finalScore: number | null) => {
     const scored = msgs.filter(m => m.score)
     const reportData = {
@@ -396,30 +403,35 @@ const [CONFIG] = useState(() => loadConfig())
       const data = await res.json()
       if (!data.success) throw new Error(data.error)
 
+      // ✅ إضافة ideal_answer للـ assistant message
       const newMsg: Message = {
         role: 'assistant',
         content: data.content,
         score: data.score,
         coaching_note: data.coaching_note,
         question_type: data.question_type,
+        ideal_answer: data.ideal_answer,
       }
-      const updatedMsgs = [...msgs, newMsg]
-      // ✅ أضيفي score على آخر user message
-if (data.score) {
-  const lastUserIdx = updatedMsgs.map(m => m.role).lastIndexOf('user')
-  if (lastUserIdx !== -1) {
-    updatedMsgs[lastUserIdx] = {
-      ...updatedMsgs[lastUserIdx],
-      score: data.score,
-      question_type: data.question_type,
-      coaching_note: data.coaching_note,
-    }
-  }
-}
-setMessages(updatedMsgs)
-      setMessages(updatedMsgs)
-      setLastInterviewerText(data.content)
 
+      // ✅ إزالة التكرار — setMessages مرة واحدة فقط
+      let updatedMsgs = [...msgs]
+      if (data.score) {
+        const lastUserIdx = updatedMsgs.map(m => m.role).lastIndexOf('user')
+        if (lastUserIdx !== -1) {
+          updatedMsgs[lastUserIdx] = {
+            ...updatedMsgs[lastUserIdx],
+            score: data.score,
+            question_type: data.question_type,
+            coaching_note: data.coaching_note,
+            ideal_answer: data.ideal_answer,
+          }
+        }
+      }
+      const finalMsgs = [...updatedMsgs, newMsg]
+      setMessages(finalMsgs)
+      messagesRef.current = finalMsgs
+
+      setLastInterviewerText(data.content)
       if (data.question_type) setLastQuestionType(data.question_type)
       if (data.coaching_note) setLastCoachingNote(data.coaching_note)
       else setLastCoachingNote(null)
@@ -438,15 +450,14 @@ setMessages(updatedMsgs)
         if (data.rebuiltAnswers) {
           sessionStorage.setItem('barbaros_rebuilt', JSON.stringify(data.rebuiltAnswers))
         }
-        // ✅ تعديل: حفظ reportData من API إذا موجود
         if (data.reportData) {
           sessionStorage.setItem('barbaros_report', JSON.stringify(data.reportData))
-          sessionStorage.setItem('barbaros_messages', JSON.stringify(updatedMsgs))
+          sessionStorage.setItem('barbaros_messages', JSON.stringify(finalMsgs))
           sessionStorage.setItem('barbaros_score', String(latestScore ?? 0))
           setIsEnded(true)
           setTimeout(() => router.push('/report'), 2000)
         } else {
-          endSession(updatedMsgs, latestScore)
+          endSession(finalMsgs, latestScore)
         }
       } else {
         resetSilenceTimer()
@@ -524,6 +535,52 @@ setMessages(updatedMsgs)
       dir={isRTL ? 'rtl' : 'ltr'}
       style={{ fontFamily: 'system-ui, sans-serif', background: '#F5F1EB', color: '#1A1A1A', minHeight: '100vh', display: 'flex', flexDirection: 'column' }}
     >
+      {/* ✅ إضافة: نافذة تحذير الإنهاء */}
+      {showEndWarning && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          zIndex: 1000, padding: '20px'
+        }}>
+          <div style={{
+            background: '#FFFFFF', borderRadius: 20, padding: '28px 24px',
+            maxWidth: 380, width: '100%', textAlign: 'center',
+            boxShadow: '0 20px 60px rgba(0,0,0,0.15)'
+          }}>
+            <div style={{ fontSize: 36, marginBottom: 16 }}>⚠️</div>
+            <div style={{ fontSize: 15, fontWeight: 800, color: '#1A1A1A', marginBottom: 12 }}>
+              {t.endWarningTitle}
+            </div>
+            <div style={{ fontSize: 13, color: 'rgba(26,26,26,0.6)', lineHeight: 1.7, marginBottom: 24 }}>
+              {t.endWarningBody}
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <button
+                onClick={() => {
+                  setShowEndWarning(false)
+                  endSession(messagesRef.current, overallScoreRef.current)
+                }}
+                style={{
+                  background: 'rgba(220,38,38,0.08)', border: '0.5px solid rgba(220,38,38,0.25)',
+                  color: '#DC2626', borderRadius: 10, padding: '12px',
+                  fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit'
+                }}>
+                {t.endWarningConfirm}
+              </button>
+              <button
+                onClick={() => setShowEndWarning(false)}
+                style={{
+                  background: '#CC785C', border: 'none',
+                  color: '#fff', borderRadius: 10, padding: '12px',
+                  fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit'
+                }}>
+                {t.endWarningCancel}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <nav style={{ background: '#F5F1EB', borderBottom: '0.5px solid #E5DDD0', padding: '12px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <Barbaros size={20} />
         <div style={{ textAlign: 'center' }}>
@@ -779,7 +836,6 @@ setMessages(updatedMsgs)
             {t.sessionEnded} · {t.score}: {overallScore ?? '—'}/100
           </div>
           <div style={{ fontSize: 12, color: 'rgba(26,26,26,0.5)', marginBottom: 12 }}>{t.redirecting}</div>
-          {/* ✅ تعديل: زر التقرير يتأكد من وجود البيانات */}
           <button
             onClick={() => router.push('/report')}
             style={{ background: '#CC785C', color: '#fff', border: 'none', borderRadius: 8, padding: '10px 24px', fontSize: 14, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
@@ -797,16 +853,11 @@ setMessages(updatedMsgs)
           <div style={{ fontSize: 8, color: 'rgba(26,26,26,0.4)', textTransform: 'uppercase', fontWeight: 700 }}>{t.performance}</div>
           <div style={{ fontWeight: 800, fontSize: 15, color: '#CC785C' }}>{overallScore ?? '—'}</div>
         </div>
+        {/* ✅ تعديل: زر End يفتح نافذة التحذير بدل confirm() */}
         <button
-         onClick={() => {
-    const isAr = CONFIG.language === 'ar'
-    const msg = isAr
-      ? 'للحصول على أفضل تقييم، أكمل المقابلة حتى نهايتها.\n\nهل تريد الإنهاء الآن؟'
-      : 'For the best evaluation, complete the interview until the end.\n\nEnd interview now?'
-    if (confirm(msg)) endSession(messagesRef.current, overallScoreRef.current)
-  }}
-  style={{ background: 'rgba(220,38,38,0.08)', border: '0.5px solid rgba(220,38,38,0.25)', color: '#DC2626', borderRadius: 8, padding: '8px 18px', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
-  {t.end}
+          onClick={() => setShowEndWarning(true)}
+          style={{ background: 'rgba(220,38,38,0.08)', border: '0.5px solid rgba(220,38,38,0.25)', color: '#DC2626', borderRadius: 8, padding: '8px 18px', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
+          {t.end}
         </button>
       </div>
 

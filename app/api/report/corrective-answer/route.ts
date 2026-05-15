@@ -13,7 +13,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ correctiveAnswer: null })
     }
 
-    // ✅ لا توليد للأسئلة القوية
     if (score && score >= 75) {
       return NextResponse.json({
         correctiveAnswer: language === 'ar'

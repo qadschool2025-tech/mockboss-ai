@@ -404,6 +404,19 @@ const [CONFIG] = useState(() => loadConfig())
         question_type: data.question_type,
       }
       const updatedMsgs = [...msgs, newMsg]
+      // ✅ أضيفي score على آخر user message
+if (data.score) {
+  const lastUserIdx = updatedMsgs.map(m => m.role).lastIndexOf('user')
+  if (lastUserIdx !== -1) {
+    updatedMsgs[lastUserIdx] = {
+      ...updatedMsgs[lastUserIdx],
+      score: data.score,
+      question_type: data.question_type,
+      coaching_note: data.coaching_note,
+    }
+  }
+}
+setMessages(updatedMsgs)
       setMessages(updatedMsgs)
       setLastInterviewerText(data.content)
 

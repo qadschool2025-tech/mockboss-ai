@@ -122,7 +122,7 @@ export interface LongitudinalStrength {
   topic: string;
   description: string;
   category: PatternCategory;
-  confirmedAt: string;          // sessionId when confirmed
+ confirmedSessionId: string;        // sessionId when confirmed
   consistencyScore: number;     // 0-1, how consistently demonstrated
 }
 

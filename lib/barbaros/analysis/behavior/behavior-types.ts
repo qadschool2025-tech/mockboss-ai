@@ -1,9 +1,8 @@
 // lib/barbaros/analysis/behavior/behavior-types.ts
-// CONTRACT: Behavioral ontology for Barbaros V4. Version 3.
-// Changes from v2:
-//   - Added PatternCategory enum (removes LLM text coupling)
-//   - Removed averageResponseLength (was computed from messageIndex — wrong)
-//   - SessionBehaviorPattern now has patternCategory field
+// CONTRACT: Behavioral ontology for Barbaros V4. Version 4.
+// Changes from v3:
+//   - Added trendDirection to SessionBehaviorPattern
+//   - Removes all text-matching dependency from session-snapshot
 
 import type { InterviewPhase, Message } from '../../types';
 
@@ -38,17 +37,14 @@ export type BehaviorSignalType =
   | 'self_correction'
   | 'keyword_repetition';
 
-/**
- * PatternCategory — stable enum for pattern classification.
- * Replaces LLM free-text matching in session-snapshot.ts.
- * Tier3 assigns this when creating patterns.
- */
 export type PatternCategory =
-  | 'engagement'    // response length, participation trends
-  | 'evasion'       // deflection, topic avoidance, vague answers
-  | 'confidence'    // instability, drops, overconfidence
-  | 'depth'         // example usage, elaboration patterns
-  | 'credibility';  // contradictions, inconsistent framing
+  | 'engagement'
+  | 'evasion'
+  | 'confidence'
+  | 'depth'
+  | 'credibility';
+
+export type TrendDirection = 'expanding' | 'shrinking' | 'stable';
 
 // ─── Primitives ───────────────────────────────────────────────────────────────
 
@@ -90,13 +86,15 @@ export interface BehaviorInsight {
 }
 
 /**
- * SessionBehaviorPattern — v3 adds patternCategory.
- * Removes LLM text dependency for classification.
+ * SessionBehaviorPattern — v4 adds trendDirection.
+ * trendDirection: null when category has no directional meaning (credibility, depth).
+ * Assigned by tier3-insights.ts from signal types — zero text matching.
  */
 export interface SessionBehaviorPattern {
   id: string;
   description: string;
-  patternCategory: PatternCategory;       // ← NEW in v3
+  patternCategory: PatternCategory;
+  trendDirection: TrendDirection | null;  // ← NEW in v4
   sourceInsightIds: string[];
   confidenceScore: SignalConfidenceScore;
   stabilityScore: number;

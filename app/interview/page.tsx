@@ -218,7 +218,7 @@ function InterviewRoom() {
       if (!data.success) throw new Error(data.error)
       const newMsg: Message = { role: 'assistant', content: data.content, score: data.score }
       setMessages(prev => [...prev, newMsg])
-      if (data.audio) playAudio(data.audio)
+    if (data.audioBase64) playAudio(data.audioBase64)
       if (data.score) {
         setOverallScore(prev => {
           const all = [...msgs.filter(m => m.score).map(m => m.score.score), data.score.score]

@@ -220,7 +220,7 @@ export function recordTopicsFromText(
   const keywords = extractTopicKeywords(text);
   if (keywords.length === 0) return state;
 
-  const phase = options.phase ?? state.currentPhase;
+ const phase = options.phase ?? state.phase;
   const revisitAllowed = options.revisitAllowed ?? false;
 
   let recentTopics = [...state.recentTopics];

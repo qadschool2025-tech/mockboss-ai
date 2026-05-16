@@ -33,7 +33,6 @@ import type {
   CandidateProfile,
   SessionMetrics,
   CompetencyCoverage,
-  TopicMemory,
   Contradiction,
   PressureMode,
   NormalizedScore,
@@ -250,11 +249,13 @@ export function getNextPhase(
   return PHASE_ORDER[idx + 1];
 }
 
-// ─────────────────────────────────────────────────────────────
-// SECTION 5 — TOPIC MEMORY (basic add — richer operations in topic-memory.ts)
-// ─────────────────────────────────────────────────────────────
 
-
+// ─────────────────────────────────────────────────────────────
+// SECTION 5 — TOPIC MEMORY
+// ─────────────────────────────────────────────────────────────
+// Topic logic lives entirely in topic-memory.ts.
+// session-state.ts only owns state creation and primitive operations.
+// See: recordTopicsFromText() in state/topic-memory.ts
 
 // ─────────────────────────────────────────────────────────────
 // SECTION 6 — COMPETENCY OPERATIONS

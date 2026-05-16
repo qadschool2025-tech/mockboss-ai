@@ -146,3 +146,15 @@ export function stripTag(text: string, tag: string): string {
 export function isEffectivelyEmpty(text: string): boolean {
   return wordCount(text) < LIMITS.MIN_ANSWER_WORDS
 }
+
+import { TOPIC_SYNONYMS } from "../constants";
+
+/**
+ * Normalize a keyword to its canonical topic label.
+ * Falls back to the original keyword (lowercased) if no synonym exists.
+ */
+export function normalizeTopicKeyword(keyword: string): string {
+  const lower = keyword.trim().toLowerCase();
+  if (!lower) return "";
+  return TOPIC_SYNONYMS[lower] ?? lower;
+}

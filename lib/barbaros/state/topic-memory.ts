@@ -1,7 +1,13 @@
 // lib/barbaros/state/topic-memory.ts
-// Tracks topics discussed to prevent repetition and enable smart revisits
+// Tracks topics discussed to prevent repetition and enable smart revisits.
 //
-// Architectural rules:
+// CONTRACT CHECK (against types.ts v3):
+//   InterviewState fields used: phase, recentTopics, askedQuestionFingerprints
+//   Message fields used: role, content
+//   TopicMemory fields used: topic, phase, timesVisited,
+//                            firstVisitedAt, lastVisitedAt, revisitAllowed
+//
+// ARCHITECTURAL RULES:
 //   - This module NEVER reads state.messages directly.
 //     Conversation history is passed in as an explicit parameter.
 //   - All time-sensitive operations accept `now` as a parameter for
@@ -26,9 +32,6 @@ import {
 // SECTION 1 — KEYWORD CACHE (memoization)
 // ─────────────────────────────────────────────────────────────
 
-// LRU-style cache. extractTopicKeywords is called frequently
-// (duplicate checks, similarity, recording, prompt context)
-// so memoization gives measurable speedup with negligible memory.
 const KEYWORD_CACHE_MAX = 500;
 const keywordCache = new Map<string, string[]>();
 
@@ -38,7 +41,6 @@ function getCachedKeywords(text: string): string[] | undefined {
 
 function setCachedKeywords(text: string, keywords: string[]): void {
   if (keywordCache.size >= KEYWORD_CACHE_MAX) {
-    // Drop oldest entry (Map preserves insertion order)
     const firstKey = keywordCache.keys().next().value;
     if (firstKey !== undefined) keywordCache.delete(firstKey);
   }
@@ -99,8 +101,8 @@ export function isQuestionDuplicate(
 
 /**
  * Find prior assistant questions similar to the given text.
- * IMPORTANT: messages are passed explicitly — this module does
- * NOT read state.messages directly (decoupling rule).
+ * Messages are passed explicitly — this module does NOT read
+ * state.messages directly (decoupling rule).
  */
 export function findSimilarQuestions(
   messages: ReadonlyArray<Message>,
@@ -146,9 +148,7 @@ export function isTopicRecentlyDiscussed(
   const normalized = normalizeTopicKeyword(topic);
   if (!normalized) return false;
 
-  const entry = state.recentTopics.find(
-    (t) => t.topic === normalized
-  );
+  const entry = state.recentTopics.find((t) => t.topic === normalized);
   if (!entry) return false;
 
   const elapsed = now - entry.lastVisitedAt;
@@ -160,9 +160,7 @@ export function canRevisitTopic(
   topic: string
 ): boolean {
   const normalized = normalizeTopicKeyword(topic);
-  const entry = state.recentTopics.find(
-    (t) => t.topic === normalized
-  );
+  const entry = state.recentTopics.find((t) => t.topic === normalized);
   if (!entry) return true;
   return entry.revisitAllowed;
 }
@@ -206,7 +204,7 @@ export function getTopicsByPhase(
 /**
  * Record topics extracted from a piece of text.
  * Caller MUST pass `now` (deterministic) and optionally `phase`.
- * If phase is omitted, falls back to state.currentPhase.
+ * If phase is omitted, falls back to state.phase.
  */
 export function recordTopicsFromText(
   state: InterviewState,
@@ -220,7 +218,7 @@ export function recordTopicsFromText(
   const keywords = extractTopicKeywords(text);
   if (keywords.length === 0) return state;
 
- const phase = options.phase ?? state.phase;
+  const phase = options.phase ?? state.phase;
   const revisitAllowed = options.revisitAllowed ?? false;
 
   let recentTopics = [...state.recentTopics];
@@ -265,18 +263,17 @@ export function recordTopicsFromText(
 export function getRecentTopicsSummary(
   state: InterviewState,
   limit: number = 10
-): string[] {
+): TopicMemory[] {
   return [...state.recentTopics]
     .sort((a, b) => b.lastVisitedAt - a.lastVisitedAt)
-    .slice(0, limit)
-    .map((t) => t.topic);
+    .slice(0, limit);
 }
 
 export function getTopicMemoryStats(state: InterviewState): {
   total: number;
   overused: number;
   revisitable: number;
-  byPhase: Record<InterviewPhase, number>;
+  byPhase: Record<string, number>;
 } {
   const byPhase: Record<string, number> = {};
   for (const t of state.recentTopics) {
@@ -289,6 +286,6 @@ export function getTopicMemoryStats(state: InterviewState): {
       (t) => t.timesVisited >= 2 && !t.revisitAllowed
     ).length,
     revisitable: state.recentTopics.filter((t) => t.revisitAllowed).length,
-    byPhase: byPhase as Record<InterviewPhase, number>,
+    byPhase,
   };
 }

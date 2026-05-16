@@ -1,8 +1,11 @@
 // lib/barbaros/analysis/behavior/behavior-types.ts
-// CONTRACT: Behavioral ontology for Barbaros V4. Version 4.
-// Changes from v3:
-//   - Added trendDirection to SessionBehaviorPattern
-//   - Removes all text-matching dependency from session-snapshot
+// CONTRACT: Behavioral ontology for Barbaros V4. Version 5.
+// Changes from v4:
+//   - Added canonicalKey to SessionBehaviorPattern (opaque stable id — Debt #5)
+//   - Added canonicalType to SessionBehaviorPattern (semantic type, survives key changes)
+//   - Added polarity to SessionBehaviorPattern (set by tier3-insights, read by longitudinal)
+//   - Added occurrences as alias for occurrenceCount (consumed by session-delta)
+// Rule: interpretation belongs to tier3-insights — longitudinal layer never guesses polarity.
 
 import type { InterviewPhase, Message } from '../../types';
 
@@ -42,7 +45,10 @@ export type PatternCategory =
   | 'evasion'
   | 'confidence'
   | 'depth'
-  | 'credibility';
+  | 'credibility'
+  | 'unknown';   // Debt #6 — analytics handles explicitly
+
+export type PatternPolarity = 'positive' | 'negative';
 
 export type TrendDirection = 'expanding' | 'shrinking' | 'stable';
 
@@ -86,20 +92,41 @@ export interface BehaviorInsight {
 }
 
 /**
- * SessionBehaviorPattern — v4 adds trendDirection.
+ * SessionBehaviorPattern — v5 adds canonicalKey, canonicalType, polarity, occurrences.
+ *
+ * canonicalKey:  opaque stable identifier (currently truncated string — Debt #5).
+ *                Used for cross-session matching. Never parsed or decomposed.
+ *
+ * canonicalType: semantic type string that survives canonicalKey changes.
+ *                Example: 'confidence_instability', 'depth_avoidance', 'example_usage'.
+ *                Set by tier3-insights. Consumed by longitudinal layer for grouping.
+ *
+ * polarity:      set exclusively by tier3-insights — never guessed downstream.
+ *                'positive' = more occurrences is better (e.g. example_usage).
+ *                'negative' = more occurrences is worse (e.g. topic_avoidance).
+ *
+ * occurrences:   alias for occurrenceCount — longitudinal layer reads this field.
+ *                Both fields kept for backward compatibility with existing consumers.
+ *
  * trendDirection: null when category has no directional meaning (credibility, depth).
- * Assigned by tier3-insights.ts from signal types — zero text matching.
  */
 export interface SessionBehaviorPattern {
   id: string;
   description: string;
   patternCategory: PatternCategory;
-  trendDirection: TrendDirection | null;  // ← NEW in v4
+
+  // v5 additions
+  canonicalKey: string;           // opaque — do not decompose
+  canonicalType: string;          // semantic — e.g. 'confidence_instability'
+  polarity: PatternPolarity;      // set by tier3-insights ONLY
+
+  trendDirection: TrendDirection | null;
   sourceInsightIds: string[];
   confidenceScore: SignalConfidenceScore;
   stabilityScore: number;
   decayCount: number;
   occurrenceCount: number;
+  occurrences: number;            // alias for occurrenceCount — kept in sync by tier3
   crossPhaseConfirmed: boolean;
   phasesObserved: InterviewPhase[];
   firstObservedAt: number;

@@ -15,6 +15,7 @@ import type { SessionState }              from './state/session-state'
 import type { WeaknessTrackerState }      from './longitudinal/weakness-tracker'
 import type { GrowthTrackerState }        from './longitudinal/growth-tracker'
 import type { SessionSnapshot }           from './artifacts/session-snapshot'
+import type { SessionDelta }              from './longitudinal/session-delta'
 
 import { advancePhase, isSessionComplete } from './state/phase-engine'
 import { updateTopicMemory }               from './state/topic-memory'
@@ -32,45 +33,35 @@ import { updateGrowthTracker }            from './longitudinal/growth-tracker'
 import { computeSessionDelta }            from './longitudinal/session-delta'
 
 import { buildPrompt }                    from './prompt/prompt-builder'
+import { BARBAROS_CLOSING_TEMPLATE }      from './prompt/personality'
 import { callClaude }                     from './llm/claude-client'
 import { synthesizeSpeech }               from './llm/tts'
 
 // ─── Engine Input / Output ────────────────────────────────────────────────────
 
 export interface EngineInput {
-  config:          InterviewConfig
-  messages:        Message[]
-  state:           SessionState
-  weaknessState:   WeaknessTrackerState
-  growthState:     GrowthTrackerState
-  previousSnapshot: SessionSnapshot | null   // null on first session ever
+  config:           InterviewConfig
+  messages:         Message[]
+  state:            SessionState
+  weaknessState:    WeaknessTrackerState
+  growthState:      GrowthTrackerState
+  previousSnapshot: SessionSnapshot | null
   sessionStartTime: number
-  now:             number                     // injected — never Date.now() inside engine
+  now:              number
 }
 
 export interface EngineOutput {
-  // LLM response
-  content:       string
-  audioBase64:   string | null
-
-  // Score for this turn
-  score:         ReturnType<typeof computeAggregateScore> | null
-
-  // Updated state patches (immutable — caller merges)
-  statePatch:          Partial<SessionState>
-  weaknessPatch:       WeaknessTrackerState
-  growthPatch:         GrowthTrackerState
-
-  // Session lifecycle
-  isEndOfSession:  boolean
-  phaseChanged:    boolean
-
-  // Snapshot (built after session ends — null during active session)
-  snapshot:        SessionSnapshot | null
-
-  // Diagnostics
+  content:        string
+  audioBase64:    string | null
+  score:          ReturnType<typeof computeAggregateScore> | null
+  statePatch:     Partial<SessionState>
+  weaknessPatch:  WeaknessTrackerState
+  growthPatch:    GrowthTrackerState
+  isEndOfSession: boolean
+  phaseChanged:   boolean
+  snapshot:       SessionSnapshot | null
   promptCharCount: number
-  truncated:       boolean
+  truncated:      boolean
 }
 
 // ─── Time Limits ──────────────────────────────────────────────────────────────
@@ -80,6 +71,17 @@ const TIME_LIMITS: Record<string, number> = {
   go:     15 * 60,
   pro:    30 * 60,
   expert: 45 * 60,
+}
+
+// ─── Score Tag Helper ─────────────────────────────────────────────────────────
+
+/**
+ * stripScoreTag
+ * Removes <score>...</score> from LLM content before passing to TTS.
+ * The full content (with score tag) is returned to the frontend for parsing.
+ */
+function stripScoreTag(content: string): string {
+  return content.replace(/<score>[\s\S]*?<\/score>/g, '').trim()
 }
 
 // ─── Main Engine Function ─────────────────────────────────────────────────────
@@ -104,12 +106,7 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
   // ── 1. Session end check ────────────────────────────────────────────────────
 
   if (elapsedSeconds >= totalSeconds || isSessionComplete(state)) {
-    return buildEndOfSessionOutput(
-      input,
-      elapsedMinutes,
-      totalMinutes,
-      now
-    )
+    return buildEndOfSessionOutput(input, elapsedMinutes, totalMinutes, now)
   }
 
   // ── 2. Phase advancement ────────────────────────────────────────────────────
@@ -125,7 +122,6 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
     : state
 
   // ── 3. Behavior pipeline ────────────────────────────────────────────────────
-  // phaseChanged passed explicitly — engine does not track it internally (Decision #15)
 
   const behaviorContext: BehaviorContext = {
     runtime: {
@@ -137,9 +133,9 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
     historical: {
       contradictionCount:    stateWithPhase.contradictionCount,
       lastSilenceRisk:       stateWithPhase.silenceRisk,
-      weakCompetencyTopics:  stateWithPhase.weakCompetencyTopics ?? [],
-      existingInsights:      stateWithPhase.behaviorInsights     ?? [],
-      existingPatterns:      stateWithPhase.behaviorPatterns     ?? [],
+      weakCompetencyTopics:  stateWithPhase.weakCompetencyTopics   ?? [],
+      existingInsights:      stateWithPhase.behaviorInsights        ?? [],
+      existingPatterns:      stateWithPhase.behaviorPatterns        ?? [],
     },
     pressure: {
       silenceRisk:                 stateWithPhase.silenceRisk,
@@ -148,35 +144,32 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
     },
   }
 
-  const behaviorResult = await orchestrateBehavior(
-    behaviorContext,
-    phaseChanged
-  )
+  const behaviorResult = await orchestrateBehavior(behaviorContext, phaseChanged)
 
-  // ── 4. State updates (patches — no mutation) ────────────────────────────────
+  // ── 4. State patches ────────────────────────────────────────────────────────
 
-  const updatedTopics       = updateTopicMemory(stateWithPhase.topicMemory, messages, now)
-  const updatedCompetencies = updateCompetencyTracker(stateWithPhase.competencyTracker, behaviorResult, config)
+  const updatedTopics         = updateTopicMemory(stateWithPhase.topicMemory, messages, now)
+  const updatedCompetencies   = updateCompetencyTracker(stateWithPhase.competencyTracker, behaviorResult, config)
   const updatedContradictions = updateContradictionTracker(
     stateWithPhase.contradictionCount,
     behaviorResult.validatedSignals
   )
 
   const statePatch: Partial<SessionState> = {
-    phase:                   newPhase,
-    pressureLevel:           behaviorResult.activeRisks.length > 0
-                               ? Math.min(10, stateWithPhase.pressureLevel + 1)
-                               : Math.max(0, stateWithPhase.pressureLevel - 1),
-    silenceRisk:             deriveSilenceRisk(behaviorResult.activeRisks),
-    contradictionCount:      updatedContradictions,
-    topicMemory:             updatedTopics,
-    competencyTracker:       updatedCompetencies,
-    behaviorInsights:        behaviorResult.insights,
-    behaviorPatterns:        behaviorResult.patterns,
+    phase:               newPhase,
+    pressureLevel:       behaviorResult.activeRisks.length > 0
+                           ? Math.min(10, stateWithPhase.pressureLevel + 1)
+                           : Math.max(0,  stateWithPhase.pressureLevel - 1),
+    silenceRisk:         deriveSilenceRisk(behaviorResult.activeRisks),
+    contradictionCount:  updatedContradictions,
+    topicMemory:         updatedTopics,
+    competencyTracker:   updatedCompetencies,
+    behaviorInsights:    behaviorResult.insights,
+    behaviorPatterns:    behaviorResult.patterns,
     pressureEscalationTriggered: behaviorResult.activeRisks.some(
       r => r.type === 'silence_risk' || r.type === 'dropout_risk'
     ),
-    weakCompetencyTopics:    updatedCompetencies.weakTopics ?? [],
+    weakCompetencyTopics: updatedCompetencies.weakTopics ?? [],
   }
 
   // ── 5. Score ────────────────────────────────────────────────────────────────
@@ -195,6 +188,7 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
     g => g.strength !== 'emerging' && g.status === 'active'
   )
 
+  // Opening message injected on the very first call (no messages yet)
   const isFirstMessage = messages.length === 0
 
   const built = buildPrompt(
@@ -212,9 +206,9 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
 
   // ── 7. LLM call ─────────────────────────────────────────────────────────────
 
-  // If there's an opening message, inject it as the assistant's first turn
+  // Fix: opening message prepended to messages — conversation history preserved
   const messagesForLLM: Message[] = built.openingMessage
-    ? [{ role: 'assistant', content: built.openingMessage }]
+    ? [{ role: 'assistant', content: built.openingMessage }, ...messages]
     : messages
 
   const content = await callClaude({
@@ -222,30 +216,28 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
     messages:     messagesForLLM,
   })
 
-  // ── 8. TTS ──────────────────────────────────────────────────────────────────
+  // ── 8. TTS — receives score-tag-stripped content ────────────────────────────
 
   let audioBase64: string | null = null
   try {
-    audioBase64 = await synthesizeSpeech(content)
+    const speechText = stripScoreTag(content)
+    if (speechText.length > 0) {
+      audioBase64 = await synthesizeSpeech(speechText)
+    }
   } catch {
-    // TTS failure is non-fatal — interview continues without audio
     audioBase64 = null
   }
 
   // ── 9. Longitudinal updates ─────────────────────────────────────────────────
-  // Only update if we have a previous session to delta against
-  // First-session longitudinal state stays empty until session ends
 
-  const sessionId        = stateWithPhase.sessionId
-  let weaknessPatch      = weaknessState
-  let growthPatch        = growthState
+  const sessionId   = stateWithPhase.sessionId
+  let weaknessPatch = weaknessState
+  let growthPatch   = growthState
 
-  // Lightweight per-turn longitudinal update (full delta computed at session end)
-  // This keeps trackers warm without requiring a full snapshot
   if (previousSnapshot !== null && score !== null) {
-    const miniDelta = buildMiniDelta(score, behaviorResult.patterns, sessionId, now)
-    weaknessPatch = updateWeaknessTracker(weaknessState, miniDelta, sessionId, now)
-    growthPatch   = updateGrowthTracker(growthState,   miniDelta, sessionId, now)
+    const miniDelta = buildMiniDelta(behaviorResult.patterns, sessionId, now)
+    weaknessPatch   = updateWeaknessTracker(weaknessState, miniDelta, sessionId, now)
+    growthPatch     = updateGrowthTracker(growthState,     miniDelta, sessionId, now)
   }
 
   return {
@@ -273,10 +265,10 @@ async function buildEndOfSessionOutput(
 ): Promise<EngineOutput> {
   const { config, state, weaknessState, growthState, previousSnapshot, messages } = input
 
-  // Build closing message
-  const closingContent = buildClosingMessage(config.candidateName)
+  // Use personality template — no drift
+  const closingContent = BARBAROS_CLOSING_TEMPLATE
+    .replace('{candidateName}', config.candidateName)
 
-  // TTS for closing
   let audioBase64: string | null = null
   try {
     audioBase64 = await synthesizeSpeech(closingContent)
@@ -284,31 +276,26 @@ async function buildEndOfSessionOutput(
     audioBase64 = null
   }
 
-  // Build full session snapshot
   const snapshot = buildSessionSnapshot(state, config, messages, now)
 
-  // Full delta + longitudinal updates at session end
-  const delta        = computeSessionDelta(snapshot, previousSnapshot, now)
+  // Full delta — computeSessionDelta handles null previousSnapshot safely
+  const delta         = computeSessionDelta(snapshot, previousSnapshot, now)
   const weaknessPatch = updateWeaknessTracker(weaknessState, delta, state.sessionId, now)
-  const growthPatch   = updateGrowthTracker(growthState,   delta, state.sessionId, now)
+  const growthPatch   = updateGrowthTracker(growthState,     delta, state.sessionId, now)
 
   return {
-    content:        closingContent,
+    content:         closingContent,
     audioBase64,
-    score:          null,
-    statePatch:     { phase: 'closing' },
+    score:           null,
+    statePatch:      { phase: 'closing' },
     weaknessPatch,
     growthPatch,
-    isEndOfSession: true,
-    phaseChanged:   false,
+    isEndOfSession:  true,
+    phaseChanged:    false,
     snapshot,
     promptCharCount: 0,
     truncated:       false,
   }
-}
-
-function buildClosingMessage(candidateName: string): string {
-  return `That concludes our interview, ${candidateName}. Thank you for your time today. You'll receive a full assessment shortly — I'd encourage you to review it carefully.`
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -325,16 +312,14 @@ function deriveSilenceRisk(
 
 /**
  * buildMiniDelta
- * Lightweight delta for per-turn longitudinal updates.
- * Full delta is computed at session end — this keeps trackers warm mid-session.
- * Returns a minimal SessionDelta with only the fields relevant to per-turn tracking.
+ * Lightweight per-turn delta for mid-session longitudinal updates.
+ * Full delta is computed once at session end via computeSessionDelta.
  */
 function buildMiniDelta(
-  score:          ReturnType<typeof computeAggregateScore>,
-  patterns:       Array<{ canonicalKey: string; canonicalType: string; polarity: 'positive' | 'negative'; occurrences: number; occurrenceCount: number }>,
-  sessionId:      string,
-  now:            number
-): import('./longitudinal/session-delta').SessionDelta {
+  patterns:  Array<{ canonicalKey: string; canonicalType: string; polarity: 'positive' | 'negative'; occurrences: number }>,
+  sessionId: string,
+  now:       number
+): SessionDelta {
   return {
     sessionId,
     previousSessionId:         null,
@@ -342,7 +327,16 @@ function buildMiniDelta(
     overallScoreDelta:         0,
     weightedScoreDelta:        0,
     scoreDimensions:           [],
-    behaviorsImproved:         [],
+    behaviorsImproved:         patterns
+      .filter(p => p.polarity === 'positive' && p.occurrences > 1)
+      .map(p => ({
+        canonicalKey:  p.canonicalKey,
+        canonicalType: p.canonicalType,
+        polarity:      'positive' as const,
+        direction:     'improved' as const,
+        previousCount: p.occurrences - 1,
+        currentCount:  p.occurrences,
+      })),
     behaviorsDeclined:         patterns
       .filter(p => p.polarity === 'negative' && p.occurrences > 1)
       .map(p => ({

@@ -1,16 +1,8 @@
 // lib/barbaros/artifacts/session-snapshot.ts
-// CONTRACT: Canonical session artifact. Version 2.
-// Changes from v1:
-//   - Fixed imports (BehaviorInsight, SessionBehaviorPattern from behavior-types)
-//   - Removed averageResponseLength (was computed from messageIndex — wrong)
-//   - responsesTrend now uses patternCategory enum (no LLM text matching)
-//
-// Consumed by: longitudinal/, report layer, analytics
-// Rules:
-//   - Never reads raw messages — consumes layer outputs only
-//   - longitudinal/ NEVER bypasses this
-//   - ScoreSnapshot not FinalScoreBreakdown
-//   - ContradictionSummary not raw Contradiction[]
+// CONTRACT: Canonical session artifact. Version 3.
+// Changes from v2:
+//   - deriveEngagementTrend uses trendDirection enum — zero text matching
+//   - Fully clean: no LLM text dependency anywhere
 
 import type { InterviewPhase } from '../types';
 import type {
@@ -47,43 +39,33 @@ export interface BehaviorArtifact {
   confirmedSignalTypes: string[];
   insights: BehaviorInsight[];
   patterns: SessionBehaviorPattern[];
-
-  // v2: derived from patternCategory enum — no LLM text matching
   responsesTrend: 'expanding' | 'stable' | 'shrinking';
-
   peakRisks: Array<{
     type: string;
     severity: 'low' | 'medium' | 'high';
     phase: InterviewPhase;
   }>;
-
-  // v2: removed averageResponseLength (was messageIndex, not word count)
-  // TODO: add wordCountAverage when engine.ts passes wordCounts[] explicitly
+  // wordCountAverage: number — TODO when engine.ts passes wordCounts[] explicitly
 }
 
 export interface SessionSnapshot {
   sessionId: string;
   candidateId: string;
   createdAt: number;
-
   jobTitle: string;
   institution: string;
   language: string;
   durationMinutes: number;
   totalMessages: number;
   completedPhases: InterviewPhase[];
-
   score: ScoreSnapshot;
   behavior: BehaviorArtifact;
   competencies: CompetencySummary[];
   contradictions: ContradictionSummary;
   phases: PhaseSummary[];
-
   longitudinalReady: boolean;
   promotablePatterns: string[];
 }
-
-// ─── Snapshot Input ───────────────────────────────────────────────────────────
 
 export interface SessionSnapshotInput {
   sessionId: string;
@@ -91,17 +73,14 @@ export interface SessionSnapshotInput {
   jobTitle: string;
   institution: string;
   language: string;
-
   completedPhases: InterviewPhase[];
   durationMinutes: number;
   totalMessages: number;
-
   scoreBreakdown: FinalScoreBreakdown;
   behaviorResult: BehaviorOrchestrationResult;
   competencies: Record<string, import('../types').CompetencyCoverage>;
   contradictionSummary: ContradictionSummary;
   phaseSummaries: PhaseSummary[];
-
   now: number;
 }
 
@@ -117,9 +96,9 @@ export function buildSessionSnapshot(
     contradictionSummary, phaseSummaries, now,
   } = input;
 
-  const score            = toScoreSnapshot(scoreBreakdown);
-  const behavior         = buildBehaviorArtifact(behaviorResult);
-  const competencyList   = buildCompetencySummaries(competencies);
+  const score          = toScoreSnapshot(scoreBreakdown);
+  const behavior       = buildBehaviorArtifact(behaviorResult);
+  const competencyList = buildCompetencySummaries(competencies);
 
   const promotablePatterns = behaviorResult.patterns
     .filter((p) => p.crossPhaseConfirmed && p.stabilityScore >= 0.6)
@@ -161,14 +140,12 @@ function buildBehaviorArtifact(
     ),
   ];
 
-  // v2: use patternCategory enum — no fragile text matching
+  // v3: trendDirection enum — zero text matching
   const engagementPattern = result.patterns.find(
     (p) => p.patternCategory === 'engagement'
   );
   const responsesTrend: BehaviorArtifact['responsesTrend'] =
-    engagementPattern
-      ? deriveEngagementTrend(engagementPattern)
-      : 'stable';
+    engagementPattern?.trendDirection ?? 'stable';
 
   // Peak risks: highest severity per type
   const riskMap = new Map<string, BehaviorArtifact['peakRisks'][0]>();
@@ -190,33 +167,11 @@ function buildBehaviorArtifact(
 
   return {
     confirmedSignalTypes,
-    insights:       result.insights,
-    patterns:       result.patterns,
+    insights:      result.insights,
+    patterns:      result.patterns,
     responsesTrend,
-    peakRisks:      [...riskMap.values()],
+    peakRisks:     [...riskMap.values()],
   };
-}
-
-/**
- * Derive trend from engagement pattern signals.
- * Uses confirmedSignalTypes — no LLM text matching.
- */
-function deriveEngagementTrend(
-  pattern: SessionBehaviorPattern
-): BehaviorArtifact['responsesTrend'] {
-  const shrinkSignals = pattern.sourceInsightIds.length > 0;
-  const hasExpanding  = false; // TODO: pass signalTypes through pattern in future
-
-  // Conservative: if engagement pattern exists, check description keywords
-  // as last resort — patternCategory is the primary filter
-  const desc = pattern.description.toLowerCase();
-  if (desc.includes('declin') || desc.includes('shrink') || desc.includes('shorter')) {
-    return 'shrinking';
-  }
-  if (desc.includes('expand') || desc.includes('grow') || desc.includes('longer')) {
-    return 'expanding';
-  }
-  return 'stable';
 }
 
 function buildCompetencySummaries(
@@ -281,9 +236,7 @@ export function toSnapshotDelta(snapshot: SessionSnapshot): SnapshotDelta {
     finalScore:       snapshot.score.finalScore,
     readinessLevel:   snapshot.score.readinessLevel,
     weakestArea:      snapshot.score.weakestArea,
-    topInsightTopics: snapshot.behavior.insights
-                        .slice(0, 3)
-                        .map((i) => i.topic),
+    topInsightTopics: snapshot.behavior.insights.slice(0, 3).map((i) => i.topic),
     patternCount:     snapshot.behavior.patterns.length,
     contradictions:   snapshot.contradictions.total,
     createdAt:        snapshot.createdAt,

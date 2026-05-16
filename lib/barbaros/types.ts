@@ -1,7 +1,23 @@
 // ============================================================================
-// Barbaros V4 — Type System
-// Production-grade domain model. Single source of truth.
-// Pure types only — zero runtime logic, zero helpers, zero validation.
+// Barbaros V4 — Type System (Unified Contract v3 — STABILIZED)
+// Single source of truth. Pure types only — zero runtime logic.
+//
+// CHANGELOG v2 → v3:
+//   - Removed: sessionStartTime (duplicate of metrics.startedAt)
+//   - Changed: Message.timestamp is now REQUIRED (was optional)
+//   - Changed: InterviewTurnInput simplified — state + newUserMessage + now
+//   - Changed: PromptContext.recentTopics is now TopicMemory[] (was string[])
+//
+// CHANGELOG v1 → v2:
+//   + Added: messages, config to InterviewState (persistence/replay)
+//   + Added: pressureMode, phaseStartedAt, lastActivityAt
+//   + Added: isComplete (session terminus flag)
+//   + Added: scores[] with TODO marker for V5 extraction
+//   + Unified: TopicMemory (phase + firstVisitedAt + revisitAllowed)
+//   + Unified: CandidateProfile (operational + analytical fields merged)
+//   + Unified: SessionMetrics (startedAt + lastActivityAt + pressureEscalations)
+//   + Kept:   phase (not currentPhase), severity: minor/moderate/major,
+//             Contradiction.id + indices
 // ============================================================================
 
 // ============================================================================
@@ -10,7 +26,6 @@
 
 /**
  * Core sectors with dedicated logic (competencies, question patterns).
- * Use this union for type-safe sector checks.
  */
 export type CoreSector =
   | 'technology'
@@ -46,7 +61,6 @@ export type ExperienceLevel =
 
 /**
  * Configuration passed from onboarding to the interview engine.
- * This is the full candidate context.
  */
 export interface InterviewConfig {
   candidateName: string
@@ -61,19 +75,30 @@ export interface InterviewConfig {
   cvSummary?: string
   jobRequirements?: string
   isCareerSwitch?: boolean
-  subject?: string // For teachers — subject area
+  subject?: string
 }
 
 /**
  * A single message in the conversation history.
+ *
  * `system` role is reserved for internal orchestration messages
- * (hidden injections, state hints) and is never shown to the candidate.
+ * (hidden injections, state hints) — never shown to the candidate.
+ *
+ * `timestamp` is REQUIRED because the system relies on it for:
+ *   - silence detection
+ *   - contradiction ordering
+ *   - replay determinism
+ *   - pacing analysis
+ *
+ * `isQuestion` is optional because only assistant messages need it
+ * (user/system messages have no use for the flag).
  */
 export interface Message {
   role: 'system' | 'user' | 'assistant'
   content: string
+  timestamp: number
   score?: NormalizedScore
-  timestamp?: number
+  isQuestion?: boolean
 }
 
 // ============================================================================
@@ -108,7 +133,7 @@ export type PressureMode =
  * Stored in a Record keyed by competency name for O(1) lookup.
  */
 export interface CompetencyCoverage {
-  coverage: number // 0-100
+  coverage: number          // 0-100
   evidenceCount: number
   lastUpdated: number
 }
@@ -117,13 +142,14 @@ export interface CompetencyCoverage {
  * A topic discussed in the interview, with metadata for repetition control.
  */
 export interface TopicMemory {
-  topic: string;
-  phase: InterviewPhase | null;
-  timesVisited: number;
-  lastVisitedAt: number;
-  firstVisitedAt: number;
-  revisitAllowed: boolean;
+  topic: string
+  phase: InterviewPhase | null
+  timesVisited: number
+  firstVisitedAt: number
+  lastVisitedAt: number
+  revisitAllowed: boolean
 }
+
 /**
  * A detected contradiction between two candidate statements.
  * The contradiction-tracker stores these and revisits them later.
@@ -137,10 +163,14 @@ export interface Contradiction {
   laterMessageIndex: number
   severity: 'minor' | 'moderate' | 'major'
   addressed: boolean
+  detectedAt: number
+  phase: InterviewPhase
 }
 
 /**
  * Aggregate session metrics. Updated each turn.
+ * `startedAt` is the canonical session start time — there is no duplicate
+ * field at the state root level (deliberately).
  */
 export interface SessionMetrics {
   averageScore: number
@@ -149,21 +179,35 @@ export interface SessionMetrics {
   vaguenessCount: number
   silenceEvents: number
   contradictionCount: number
-  specificityScore: number // 0-100
+  specificityScore: number       // 0-100
   totalQuestions: number
   totalAnswers: number
+  pressureEscalations: number
+  startedAt: number              // ms epoch — canonical session start
+  lastActivityAt: number         // ms epoch
 }
 
 /**
  * Running snapshot of the candidate based on accumulated evidence.
- * `ownershipScore` here is an aggregate across the session — distinct from
- * the per-answer `ownershipScore` in BehaviorSignals.
+ * Merges both analytical fields (strengths/weaknesses) and operational
+ * fields (clarity/depth/engagement) used by the prompt builder.
+ *
+ * `ownershipScore` here is the aggregate across the session —
+ * distinct from per-answer `ownershipScore` in BehaviorSignals.
  */
 export interface CandidateProfile {
   strengths: string[]
   weaknesses: string[]
-  confidenceLevel: number // 0-100
-  ownershipScore: number // 0-100 — aggregate ownership across session
+  confidenceLevel: number        // 0-100 — aggregate confidence
+  ownershipScore: number         // 0-100 — aggregate ownership
+
+  // Operational dimensions used by prompt builder & pressure selector
+  clarity: number                // 0-100
+  depth: number                  // 0-100
+  consistency: number            // 0-100
+  engagement: number             // 0-100
+
+  lastUpdatedAt: number
 }
 
 /**
@@ -171,29 +215,44 @@ export interface CandidateProfile {
  * Every layer reads from it and returns a patch to update it.
  * Treated as immutable — never mutate directly.
  *
- * `version` enables future migrations of persisted sessions
- * without breaking older clients.
+ * `version` enables future migrations of persisted sessions.
  */
 export interface InterviewState {
   version: 1
 
-  phase: InterviewPhase
-  phaseQuestionCount: number // questions asked within the current phase
-  phaseStartedAt: number // ms epoch — when current phase began
+  // Identity & configuration
+  config: InterviewConfig
 
+  // Conversation history (lives inside state for resume/replay)
+  messages: Message[]
+
+  // Phase machinery
+  phase: InterviewPhase
+  phaseQuestionCount: number
+  phaseStartedAt: number         // ms epoch
+
+  // Pressure state
   pressureMode: PressureMode
 
+  // Memory layers
   competencyCoverage: Record<string, CompetencyCoverage>
   recentTopics: TopicMemory[]
-  askedQuestionFingerprints: string[] // normalized fingerprints of asked questions
-
+  askedQuestionFingerprints: string[]
   contradictions: Contradiction[]
 
+  // Aggregates
   candidateProfile: CandidateProfile
   metrics: SessionMetrics
 
-  interviewProgress: number // 0-100, derived from time + phase completion
-  sessionStartTime: number // ms epoch
+  // Per-turn scores
+  // TODO(V5): Move historical scores outside InterviewState
+  // into analytics/reporting pipeline. Kept here for now to support
+  // simple session replay without an extra storage layer.
+  scores: NormalizedScore[]
+
+  // Lifecycle
+  interviewProgress: number      // 0-100, derived from time + phase completion
+  isComplete: boolean
 }
 
 // ============================================================================
@@ -210,15 +269,15 @@ export interface InterviewState {
 export interface BehaviorSignals {
   hesitation: 'low' | 'medium' | 'high'
   vagueness: 'low' | 'medium' | 'high'
-  specificity: number // 0-100 — concrete details, numbers, names
+  specificity: number            // 0-100
 
-  ownershipScore: number // 0-100 — per-answer ownership signal
+  ownershipScore: number         // 0-100 — per-answer
   ownershipType: 'individual' | 'collective' | 'unclear'
 
-  confidence: number // 0-100
+  confidence: number             // 0-100
   wordCount: number
-  hasMetrics: boolean // mentions numbers, percentages, timeframes
-  hasExamples: boolean // STAR-style concrete examples
+  hasMetrics: boolean            // numbers, percentages, timeframes
+  hasExamples: boolean           // STAR-style concrete examples
 }
 
 /**
@@ -227,9 +286,9 @@ export interface BehaviorSignals {
 export interface ResponseQuality {
   isOnTopic: boolean
   isComplete: boolean
-  isSilent: boolean // empty or near-empty
-  structureScore: number // 0-100 — how well-structured the answer is
-  depthScore: number // 0-100 — depth of insight
+  isSilent: boolean              // empty or near-empty
+  structureScore: number         // 0-100
+  depthScore: number             // 0-100
 }
 
 // ============================================================================
@@ -262,7 +321,7 @@ export type ScoreSeverity = 'weak' | 'average' | 'strong' | 'exceptional'
  * the normalization layer (catch inflation drift over time).
  */
 export interface NormalizedScore {
-  overall: number // 0-100, normalized (no inflation)
+  overall: number                // 0-100, normalized
 
   clarity: number
   confidence: number
@@ -275,8 +334,8 @@ export interface NormalizedScore {
   severity: ScoreSeverity
   notes: string
 
-  rawOverall: number // original LLM score before normalization
-  normalizedDelta: number // overall - rawOverall (negative = deflated)
+  rawOverall: number             // original LLM score before normalization
+  normalizedDelta: number        // overall - rawOverall (negative = deflated)
 }
 
 // ============================================================================
@@ -285,7 +344,6 @@ export interface NormalizedScore {
 
 /**
  * Result of a phase transition decision by phase-engine.
- * Carries the reason for transparency and debugging.
  */
 export interface PhaseTransitionResult {
   previousPhase: InterviewPhase
@@ -297,13 +355,17 @@ export interface PhaseTransitionResult {
 /**
  * Compact context passed to the prompt-builder.
  * Carries only what the LLM needs — keeps prompts lightweight.
+ *
+ * `recentTopics` is full TopicMemory[] (not just strings) so the
+ * prompt builder can apply recency weighting, repetition avoidance,
+ * and revisit logic.
  */
 export interface PromptContext {
   phase: InterviewPhase
   pressureMode: PressureMode
   missingCompetencies: string[]
   contradictions: Contradiction[]
-  recentTopics: string[]
+  recentTopics: TopicMemory[]
 }
 
 // ============================================================================
@@ -312,11 +374,16 @@ export interface PromptContext {
 
 /**
  * Everything the engine needs to process one interview turn.
+ *
+ * `newUserMessage` is the candidate's latest input — it is NOT yet
+ * inside `state.messages`. The engine is responsible for merging it.
+ *
+ * `now` is injected for deterministic time (testing, replay).
  */
 export interface InterviewTurnInput {
-  config: InterviewConfig
-  messages: Message[]
   state: InterviewState
+  newUserMessage: string
+  now: number
 }
 
 /**
@@ -327,7 +394,7 @@ export interface InterviewTurnOutput {
   content: string
   score: NormalizedScore | null
   audioBase64: string | null
-  state: InterviewState // updated state to persist on the client
+  state: InterviewState
   isEndOfSession: boolean
   finalScore?: number
 }

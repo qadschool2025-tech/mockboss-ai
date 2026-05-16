@@ -181,7 +181,7 @@ export interface PressureAdaptationProfile {
   adaptationTrend: TrendDirection;  // improving/stable/shrinking
   commonReactions: string[];        // recurring behaviors under pressure
   breakingPoints: string[];         // topics that consistently cause breakdown
-  resilenceScore: number;           // 0-1
+ resilienceScore: number;          // 0-1
 }
 
 // ─── Session Delta ────────────────────────────────────────────────────────────

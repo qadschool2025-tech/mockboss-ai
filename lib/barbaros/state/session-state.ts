@@ -202,6 +202,7 @@ export function getNextPhase(
 export function recordTopic(
   state: InterviewState,
   topic: string,
+  now: number,
   revisitAllowed: boolean = false
 ): InterviewState {
   const normalized = topic.trim().toLowerCase();
@@ -215,14 +216,16 @@ export function recordTopic(
   if (existing) {
     recentTopics = state.recentTopics.map((t) =>
       t.topic.toLowerCase() === normalized
-        ? { ...t, timesVisited: t.timesVisited + 1, lastVisitedAt: Date.now() }
+        ? { ...t, timesVisited: t.timesVisited + 1, lastVisitedAt: now }
         : t
     );
   } else {
     const newEntry: TopicMemory = {
       topic,
+      phase: state.currentPhase,
       timesVisited: 1,
-      lastVisitedAt: Date.now(),
+      firstVisitedAt: now,
+      lastVisitedAt: now,
       revisitAllowed,
     };
     recentTopics = [...state.recentTopics, newEntry].slice(
@@ -232,7 +235,6 @@ export function recordTopic(
 
   return { ...state, recentTopics };
 }
-
 // ─────────────────────────────────────────────────────────────
 // SECTION 6 — COMPETENCY OPERATIONS
 // ─────────────────────────────────────────────────────────────

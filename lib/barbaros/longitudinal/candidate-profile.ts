@@ -1,35 +1,28 @@
-
 // lib/barbaros/longitudinal/candidate-profile.ts
-// CONTRACT: Candidate profile merge APIs. Skeleton only.
-// Consumes: SessionSnapshot artifacts → updates CandidateEvolutionProfile
-// Rules:
-//   - Pure functions only — caller owns state
-//   - Never reads raw messages
-//   - Never calls LLM directly
-//   - 'unknown' PatternCategory handled explicitly
-//   - All time ops take `now: number`
+// CONTRACT: Candidate profile merge APIs. Version 2.
+// Changes from v1:
+//   - computeCoverTrend → computeCoverageTrend
+//   - toLongitudinalPromptContext: removed unused latestScore parameter
+//   - computeProfileDelta: receives previousProfile (before merge) — fixes empty newPatterns bug
+// DEBT:
+//   - category: 'depth' for competency weaknesses → needs real mapper per sector/jobTitle
 
-import type { SessionSnapshot } from '../artifacts/session-snapshot';
-import type { SnapshotDelta } from '../artifacts/session-snapshot';
+import type { SessionSnapshot, SnapshotDelta } from '../artifacts/session-snapshot';
 import type { PatternCategory, TrendDirection } from '../analysis/behavior/behavior-types';
 import type {
   CandidateEvolutionProfile,
   CompetencyProgressionRecord,
   LongitudinalPatternRecord,
+  LongitudinalPromptContext,
   LongitudinalStrength,
   LongitudinalWeakness,
   PressureAdaptationProfile,
   ScoreHistoryEntry,
   WeaknessStatus,
 } from './longitudinal-types';
-import type { ReadinessLevel } from '../scoring/score-aggregator';
 
 // ─── Create ───────────────────────────────────────────────────────────────────
 
-/**
- * Create a fresh profile from the first session snapshot.
- * Called when candidateId has no existing profile.
- */
 export function createInitialProfile(
   snapshot: SessionSnapshot,
   now: number
@@ -37,125 +30,123 @@ export function createInitialProfile(
   const scoreEntry = buildScoreEntry(snapshot, 1);
 
   return {
-    candidateId:    snapshot.candidateId,
-    createdAt:      now,
-    lastUpdatedAt:  now,
-
-    sessionCount:   1,
-    sessionIds:     [snapshot.sessionId],
-    lastSessionAt:  now,
-
-    scoreHistory:   [scoreEntry],
-    currentReadiness: snapshot.score.readinessLevel,
-    readinessTrend: null,   // need 2+ sessions for trend
-
-    recurringWeaknesses:  [],
-    resolvedWeaknesses:   [],
-    emergingStrengths:    [],
-
-    confirmedPatterns:    buildInitialPatterns(snapshot),
-    competencyProgression: buildInitialCompetencies(snapshot),
-    pressureProfile:      buildInitialPressureProfile(),
-
-    confidenceStabilityScore: 0.5,   // neutral until data accumulates
-
-    jobTitle:           snapshot.jobTitle,
-    targetInstitution:  snapshot.institution ?? null,
-    language:           snapshot.language,
+    candidateId:             snapshot.candidateId,
+    createdAt:               now,
+    lastUpdatedAt:           now,
+    sessionCount:            1,
+    sessionIds:              [snapshot.sessionId],
+    lastSessionAt:           now,
+    scoreHistory:            [scoreEntry],
+    currentReadiness:        snapshot.score.readinessLevel,
+    readinessTrend:          null,
+    recurringWeaknesses:     [],
+    resolvedWeaknesses:      [],
+    emergingStrengths:       [],
+    confirmedPatterns:       buildInitialPatterns(snapshot),
+    competencyProgression:   buildInitialCompetencies(snapshot),
+    pressureProfile:         buildInitialPressureProfile(),
+    confidenceStabilityScore: 0.5,
+    jobTitle:                snapshot.jobTitle,
+    targetInstitution:       snapshot.institution ?? null,
+    language:                snapshot.language,
   };
 }
 
 // ─── Merge ────────────────────────────────────────────────────────────────────
 
-/**
- * Merge a new session snapshot into an existing profile.
- * Returns a new profile — never mutates the existing one.
- */
 export function mergeSessionIntoProfile(
   profile: CandidateEvolutionProfile,
   snapshot: SessionSnapshot,
   now: number
 ): CandidateEvolutionProfile {
-  const sessionNumber = profile.sessionCount + 1;
-  const scoreEntry    = buildScoreEntry(snapshot, sessionNumber);
-
-  const updatedScoreHistory   = [...profile.scoreHistory, scoreEntry];
-  const readinessTrend        = computeReadinessTrend(updatedScoreHistory);
-  const updatedPatterns       = mergePatterns(profile.confirmedPatterns, snapshot);
-  const updatedCompetencies   = mergeCompetencies(profile.competencyProgression, snapshot, sessionNumber);
-  const updatedWeaknesses     = mergeWeaknesses(profile.recurringWeaknesses, snapshot, snapshot.sessionId);
-  const resolvedWeaknesses    = detectResolvedWeaknesses(updatedWeaknesses, snapshot);
-  const activeWeaknesses      = updatedWeaknesses.filter((w) => w.status !== 'resolved');
-  const emergingStrengths     = detectEmergingStrengths(profile.emergingStrengths, snapshot, snapshot.sessionId);
-  const confidenceStability   = updateConfidenceStability(profile.confidenceStabilityScore, snapshot);
-  const pressureProfile       = updatePressureProfile(profile.pressureProfile, snapshot);
+  const sessionNumber       = profile.sessionCount + 1;
+  const scoreEntry          = buildScoreEntry(snapshot, sessionNumber);
+  const updatedScoreHistory = [...profile.scoreHistory, scoreEntry];
+  const readinessTrend      = computeReadinessTrend(updatedScoreHistory);
+  const updatedPatterns     = mergePatterns(profile.confirmedPatterns, snapshot);
+  const updatedCompetencies = mergeCompetencies(profile.competencyProgression, snapshot, sessionNumber);
+  const updatedWeaknesses   = mergeWeaknesses(profile.recurringWeaknesses, snapshot, snapshot.sessionId);
+  const resolvedWeaknesses  = detectResolvedWeaknesses(updatedWeaknesses, snapshot);
+  const activeWeaknesses    = updatedWeaknesses.filter((w) => w.status !== 'resolved');
+  const emergingStrengths   = detectEmergingStrengths(profile.emergingStrengths, snapshot, snapshot.sessionId);
+  const confidenceStability = updateConfidenceStability(profile.confidenceStabilityScore, snapshot);
+  const pressureProfile     = updatePressureProfile(profile.pressureProfile, snapshot);
 
   return {
     ...profile,
-    lastUpdatedAt:           now,
-    sessionCount:            sessionNumber,
-    sessionIds:              [...profile.sessionIds, snapshot.sessionId],
-    lastSessionAt:           now,
-    scoreHistory:            updatedScoreHistory,
-    currentReadiness:        snapshot.score.readinessLevel,
+    lastUpdatedAt:            now,
+    sessionCount:             sessionNumber,
+    sessionIds:               [...profile.sessionIds, snapshot.sessionId],
+    lastSessionAt:            now,
+    scoreHistory:             updatedScoreHistory,
+    currentReadiness:         snapshot.score.readinessLevel,
     readinessTrend,
-    recurringWeaknesses:     activeWeaknesses,
-    resolvedWeaknesses:      [...profile.resolvedWeaknesses, ...resolvedWeaknesses],
+    recurringWeaknesses:      activeWeaknesses,
+    resolvedWeaknesses:       [...profile.resolvedWeaknesses, ...resolvedWeaknesses],
     emergingStrengths,
-    confirmedPatterns:       updatedPatterns,
-    competencyProgression:   updatedCompetencies,
+    confirmedPatterns:        updatedPatterns,
+    competencyProgression:    updatedCompetencies,
     pressureProfile,
     confidenceStabilityScore: confidenceStability,
   };
 }
 
 /**
- * Compute delta between last two sessions.
- * Used by session-delta.ts and prompt-builder.
+ * Compute delta between previous profile (before merge) and latest snapshot.
+ * MUST receive previousProfile before merge — not after.
+ * engine.ts responsibility: snapshot profile before calling mergeSessionIntoProfile.
  */
 export function computeProfileDelta(
-  profile: CandidateEvolutionProfile,
+  previousProfile: CandidateEvolutionProfile,   // ← before merge
   latestSnapshot: SessionSnapshot
 ): SnapshotDelta | null {
-  if (profile.sessionCount < 2) return null;
+  if (previousProfile.sessionCount < 1) return null;
 
-  const prev    = profile.scoreHistory[profile.scoreHistory.length - 2];
-  const current = profile.scoreHistory[profile.scoreHistory.length - 1];
+  const prevScore   = previousProfile.scoreHistory[previousProfile.scoreHistory.length - 1];
+  const currScore   = buildScoreEntry(latestSnapshot, previousProfile.sessionCount + 1);
 
-  if (!prev || !current) return null;
+  if (!prevScore) return null;
 
-  const prevWeaknessTopics = profile.recurringWeaknesses.map((w) => w.topic);
-  const currWeaknessTopics = latestSnapshot.behavior.insights.map((i) => i.topic);
+  // Weakness delta — compare previous topics vs current
+  const prevWeaknessTopics = new Set(previousProfile.recurringWeaknesses.map((w) => w.topic));
+  const currWeaknessTopics = new Set(
+    latestSnapshot.competencies
+      .filter((c) => c.coverage < 55)
+      .map((c) => c.topic)
+  );
 
-  const newWeaknesses      = currWeaknessTopics.filter((t) => !prevWeaknessTopics.includes(t));
-  const resolvedWeaknesses = prevWeaknessTopics.filter((t) => !currWeaknessTopics.includes(t));
+  const newWeaknesses      = [...currWeaknessTopics].filter((t) => !prevWeaknessTopics.has(t));
+  const resolvedWeaknesses = [...prevWeaknessTopics].filter((t) => !currWeaknessTopics.has(t));
 
-  const prevCompetencies = prev.dimensionScores;
-  const currCompetencies = current.dimensionScores;
+  // Competency delta
+  const prevDimensions = prevScore.dimensionScores;
+  const currDimensions = currScore.dimensionScores;
 
-  const improvedCompetencies = Object.entries(currCompetencies)
-    .filter(([k, v]) => (prevCompetencies[k] ?? 0) < v)
+  const improvedCompetencies = Object.entries(currDimensions)
+    .filter(([k, v]) => (prevDimensions[k] ?? 0) < v)
     .map(([k]) => k);
 
-  const declinedCompetencies = Object.entries(currCompetencies)
-    .filter(([k, v]) => (prevCompetencies[k] ?? 0) > v)
+  const declinedCompetencies = Object.entries(currDimensions)
+    .filter(([k, v]) => (prevDimensions[k] ?? 0) > v)
     .map(([k]) => k);
 
-  const prevPatternKeys = new Set(profile.confirmedPatterns.map((p) => p.canonicalKey));
+  // Pattern delta — compare against previousProfile patterns (before merge)
+  const prevPatternKeys = new Set(previousProfile.confirmedPatterns.map((p) => p.canonicalKey));
+
   const newPatterns = latestSnapshot.behavior.patterns
     .filter((p) => p.crossPhaseConfirmed && !prevPatternKeys.has(p.canonicalKey))
     .map((p) => p.canonicalKey);
 
-  const decayedPatterns = profile.confirmedPatterns
+  const decayedPatterns = previousProfile.confirmedPatterns
     .filter((p) => p.decayCount > 0)
     .map((p) => p.canonicalKey);
 
   return {
-    fromSessionId:          prev.sessionId,
-    toSessionId:            current.sessionId,
-    computedAt:             latestSnapshot.createdAt,
-    scoreDelta:             current.finalScore - prev.finalScore,
-    readinessChanged:       prev.readinessLevel !== current.readinessLevel,
+    fromSessionId:        prevScore.sessionId,
+    toSessionId:          latestSnapshot.sessionId,
+    computedAt:           latestSnapshot.createdAt,
+    scoreDelta:           currScore.finalScore - prevScore.finalScore,
+    readinessChanged:     prevScore.readinessLevel !== currScore.readinessLevel,
     newWeaknesses,
     resolvedWeaknesses,
     improvedCompetencies,
@@ -186,11 +177,9 @@ function computeReadinessTrend(
   history: ScoreHistoryEntry[]
 ): TrendDirection | null {
   if (history.length < 2) return null;
-
-  const first   = history[0].finalScore;
-  const last    = history[history.length - 1].finalScore;
-  const delta   = last - first;
-
+  const first = history[0].finalScore;
+  const last  = history[history.length - 1].finalScore;
+  const delta = last - first;
   if (delta > 5)  return 'expanding';
   if (delta < -5) return 'shrinking';
   return 'stable';
@@ -225,22 +214,21 @@ function mergePatterns(
 ): LongitudinalPatternRecord[] {
   const existingByKey = new Map(existing.map((p) => [p.canonicalKey, p]));
 
-  // Update existing or add new
   for (const pattern of snapshot.behavior.patterns) {
     if (!pattern.crossPhaseConfirmed) continue;
 
-    const key      = pattern.canonicalKey;
-    const existing = existingByKey.get(key);
+    const key  = pattern.canonicalKey;
+    const prev = existingByKey.get(key);
 
-    if (existing) {
+    if (prev) {
       existingByKey.set(key, {
-        ...existing,
+        ...prev,
         lastSessionId:        snapshot.sessionId,
-        sessionOccurrences:   existing.sessionOccurrences + 1,
-        totalOccurrenceCount: existing.totalOccurrenceCount + pattern.occurrenceCount,
-        stabilityScore:       Math.min(1, existing.stabilityScore + 0.1),
-        decayCount:           0,   // reset decay on re-occurrence
-        trendDirection:       pattern.trendDirection ?? existing.trendDirection,
+        sessionOccurrences:   prev.sessionOccurrences + 1,
+        totalOccurrenceCount: prev.totalOccurrenceCount + pattern.occurrenceCount,
+        stabilityScore:       Math.min(1, prev.stabilityScore + 0.1),
+        decayCount:           0,
+        trendDirection:       pattern.trendDirection ?? prev.trendDirection,
         requiresReview:       pattern.patternCategory === 'unknown',
       });
     } else {
@@ -262,14 +250,9 @@ function mergePatterns(
   }
 
   // Increment decay for patterns not seen this session
-  const seenKeys = new Set(
-    snapshot.behavior.patterns.map((p) => p.canonicalKey)
-  );
-
+  const seenKeys = new Set(snapshot.behavior.patterns.map((p) => p.canonicalKey));
   return [...existingByKey.values()].map((p) =>
-    seenKeys.has(p.canonicalKey)
-      ? p
-      : { ...p, decayCount: p.decayCount + 1 }
+    seenKeys.has(p.canonicalKey) ? p : { ...p, decayCount: p.decayCount + 1 }
   );
 }
 
@@ -279,7 +262,7 @@ function buildInitialCompetencies(
   snapshot: SessionSnapshot
 ): CompetencyProgressionRecord[] {
   return snapshot.competencies.map((c) => ({
-    topic:            c.topic,
+    topic:           c.topic,
     sessions: [{
       sessionId:     snapshot.sessionId,
       sessionNumber: 1,
@@ -287,10 +270,10 @@ function buildInitialCompetencies(
       evidenceCount: c.evidenceCount,
       label:         c.label,
     }],
-    currentCoverage:  c.coverage,
-    trend:            'stable',
-    peakCoverage:     c.coverage,
-    averageCoverage:  c.coverage,
+    currentCoverage: c.coverage,
+    trend:           'stable',
+    peakCoverage:    c.coverage,
+    averageCoverage: c.coverage,
   }));
 }
 
@@ -315,17 +298,16 @@ function mergeCompetencies(
           label:         competency.label,
         },
       ];
-      const avg   = Math.round(
+      const avg  = Math.round(
         newSessions.reduce((s, e) => s + e.coverage, 0) / newSessions.length
       );
-      const peak  = Math.max(...newSessions.map((e) => e.coverage));
-      const trend = computeCoverTrend(prev.currentCoverage, competency.coverage);
+      const peak = Math.max(...newSessions.map((e) => e.coverage));
 
       existingByTopic.set(competency.topic, {
         ...prev,
         sessions:        newSessions,
         currentCoverage: competency.coverage,
-        trend,
+        trend:           computeCoverageTrend(prev.currentCoverage, competency.coverage),
         peakCoverage:    peak,
         averageCoverage: avg,
       });
@@ -339,10 +321,10 @@ function mergeCompetencies(
           evidenceCount: competency.evidenceCount,
           label:         competency.label,
         }],
-        currentCoverage:  competency.coverage,
-        trend:            'stable',
-        peakCoverage:     competency.coverage,
-        averageCoverage:  competency.coverage,
+        currentCoverage: competency.coverage,
+        trend:           'stable',
+        peakCoverage:    competency.coverage,
+        averageCoverage: competency.coverage,
       });
     }
   }
@@ -350,7 +332,7 @@ function mergeCompetencies(
   return [...existingByTopic.values()];
 }
 
-function computeCoverTrend(prev: number, current: number): TrendDirection {
+function computeCoverageTrend(prev: number, current: number): TrendDirection {
   const delta = current - prev;
   if (delta > 5)  return 'expanding';
   if (delta < -5) return 'shrinking';
@@ -366,7 +348,8 @@ function mergeWeaknesses(
 ): LongitudinalWeakness[] {
   const existingByTopic = new Map(existing.map((w) => [w.topic, w]));
 
-  // Derive weaknesses from low-coverage competencies + behavior insights
+  // DEBT: category: 'unknown' for insight-derived weaknesses
+  // needs real mapper: competencyTopic → PatternCategory per sector/jobTitle
   const weakTopics = [
     ...snapshot.competencies
       .filter((c) => c.coverage < 55)
@@ -393,11 +376,11 @@ function mergeWeaknesses(
       });
     } else {
       existingByTopic.set(topic, {
-        id:                    `lw_${topic.replace(/\s+/g, '_')}`,
+        id:                     `lw_${topic.replace(/\s+/g, '_')}`,
         topic,
-        description:           `Recurring weakness in ${topic}`,
+        description:            `Recurring weakness in ${topic}`,
         category,
-        status:                'emerging',
+        status:                 'emerging',
         firstObservedSessionId: sessionId,
         lastObservedSessionId:  sessionId,
         occurrenceCount:        1,
@@ -452,14 +435,12 @@ function detectEmergingStrengths(
       description:        `Strong performance in ${c.topic}`,
       category:           'depth',
       confirmedSessionId: sessionId,
-      consistencyScore:   0.6,        // starts moderate — earned over time
+      consistencyScore:   0.6,
     }));
 
-  // Update consistency for existing strengths
   const updated = existing.map((s) => {
     const current = snapshot.competencies.find((c) => c.topic === s.topic);
     if (!current) return s;
-
     const delta = current.coverage >= 80 ? 0.1 : -0.1;
     return {
       ...s,
@@ -497,33 +478,28 @@ function updatePressureProfile(
   existing: PressureAdaptationProfile,
   snapshot: SessionSnapshot
 ): PressureAdaptationProfile {
-  const pressureInsights = snapshot.behavior.insights.filter((i) =>
-    i.phase === 'pressure'
+  const pressureInsights = snapshot.behavior.insights.filter(
+    (i) => i.phase === 'pressure'
   );
-
   if (pressureInsights.length === 0) return existing;
 
   const avgConfidence = pressureInsights.reduce(
     (sum, i) => sum + i.confidenceScore, 0
   ) / pressureInsights.length;
 
-  const quality     = Math.round(avgConfidence * 100);
-  const delta       = quality - existing.averageResponseQuality;
+  const quality = Math.round(avgConfidence * 100);
+  const delta   = quality - existing.averageResponseQuality;
   const trend: TrendDirection =
     delta > 5 ? 'expanding' : delta < -5 ? 'shrinking' : 'stable';
 
-  const newReactions = pressureInsights
-    .flatMap((i) => i.evidence)
-    .slice(0, 3);
+  const newReactions = pressureInsights.flatMap((i) => i.evidence).slice(0, 3);
 
   return {
     ...existing,
-    averageResponseQuality: Math.round(
-      (existing.averageResponseQuality + quality) / 2
-    ),
-    adaptationTrend:  trend,
-    commonReactions:  [...new Set([...existing.commonReactions, ...newReactions])].slice(0, 10),
-    resilienceScore:  Math.max(0, Math.min(1,
+    averageResponseQuality: Math.round((existing.averageResponseQuality + quality) / 2),
+    adaptationTrend:        trend,
+    commonReactions:        [...new Set([...existing.commonReactions, ...newReactions])].slice(0, 10),
+    resilienceScore:        Math.max(0, Math.min(1,
       existing.resilienceScore + (delta > 0 ? 0.05 : -0.05)
     )),
   };
@@ -531,9 +507,6 @@ function updatePressureProfile(
 
 // ─── Derived Queries ──────────────────────────────────────────────────────────
 
-/**
- * Top N recurring weaknesses — for prompt context.
- */
 export function getTopWeaknesses(
   profile: CandidateEvolutionProfile,
   n = 3
@@ -544,34 +517,26 @@ export function getTopWeaknesses(
     .slice(0, n);
 }
 
-/**
- * Is this a returning candidate with meaningful history?
- */
 export function hasHistory(profile: CandidateEvolutionProfile): boolean {
   return profile.sessionCount >= 2;
 }
 
-/**
- * Compact context slice for prompt-builder.
- * Never exposes full profile to prompt layer.
- */
 export function toLongitudinalPromptContext(
-  profile: CandidateEvolutionProfile,
-  latestScore: number
-): import('./longitudinal-types').LongitudinalPromptContext {
+  profile: CandidateEvolutionProfile
+): LongitudinalPromptContext {
   return {
-    sessionNumber:      profile.sessionCount,
-    previousScore:      profile.scoreHistory.length >= 2
+    sessionNumber:          profile.sessionCount,
+    previousScore:          profile.scoreHistory.length >= 2
       ? profile.scoreHistory[profile.scoreHistory.length - 2].finalScore
       : null,
-    scoreTrend:         profile.readinessTrend,
-    topWeaknesses:      getTopWeaknesses(profile).map((w) => ({
+    scoreTrend:             profile.readinessTrend,
+    topWeaknesses:          getTopWeaknesses(profile).map((w) => ({
       topic:           w.topic,
       status:          w.status,
       occurrenceCount: w.occurrenceCount,
     })),
-    recentInsights:     [],   // populated by longitudinal-insights layer (future)
-    pressureResilience: profile.pressureProfile.resilienceScore,
+    recentInsights:         [],
+    pressureResilience:     profile.pressureProfile.resilienceScore,
     hasLongitudinalHistory: hasHistory(profile),
   };
 }

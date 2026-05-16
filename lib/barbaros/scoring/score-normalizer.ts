@@ -285,18 +285,16 @@ function computeContradictionPenaltyRaw(
 // ─── Dimension Builder ────────────────────────────────────────────────────────
 
 function buildDimension(rawScore: number, weight: number): NormalizedDimension {
-  const score    = clamp(Math.round(rawScore), 0, 100);
-  const weighted = clamp(Math.round(score * weight), 0, 100);
+  const score = clamp(Math.round(rawScore), 0, 100);
 
   return {
-    raw: rawScore,
+    raw:      rawScore,
     score,
     weight,
-    weighted,
-    label: toScoreLabel(score),
+    weighted: score * weight,   // float preserved — rounding only in aggregator
+    label:    toScoreLabel(score),
   };
 }
-
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 export function clamp(value: number, min: number, max: number): number {

@@ -254,42 +254,7 @@ export function getNextPhase(
 // SECTION 5 — TOPIC MEMORY (basic add — richer operations in topic-memory.ts)
 // ─────────────────────────────────────────────────────────────
 
-export function recordTopic(
-  state: InterviewState,
-  topic: string,
-  now: number,
-  revisitAllowed: boolean = false
-): InterviewState {
-  const normalized = topic.trim().toLowerCase();
-  if (!normalized) return state;
 
-  const existingIdx = state.recentTopics.findIndex(
-    (t) => t.topic.toLowerCase() === normalized
-  );
-
-  let recentTopics: TopicMemory[];
-  if (existingIdx >= 0) {
-    recentTopics = state.recentTopics.map((t, i) =>
-      i === existingIdx
-        ? { ...t, timesVisited: t.timesVisited + 1, lastVisitedAt: now }
-        : t
-    );
-  } else {
-    const newEntry: TopicMemory = {
-      topic,
-      phase: state.phase,
-      timesVisited: 1,
-      firstVisitedAt: now,
-      lastVisitedAt: now,
-      revisitAllowed,
-    };
-    recentTopics = [...state.recentTopics, newEntry].slice(
-      -LIMITS.MAX_TOPIC_MEMORY
-    );
-  }
-
-  return { ...state, recentTopics };
-}
 
 // ─────────────────────────────────────────────────────────────
 // SECTION 6 — COMPETENCY OPERATIONS

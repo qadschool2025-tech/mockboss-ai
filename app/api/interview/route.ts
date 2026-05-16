@@ -2,12 +2,9 @@
 // Barbaros V4 — Interview API Route.
 // Thin adapter: HTTP ↔ engine. Zero business logic here.
 //
-// Responsibilities:
-// - Parse and validate request
-// - Manage session state between turns (in-memory, keyed by sessionId)
-// - Call runEngine
-// - Extract <score> tag from response
-// - Return clean JSON to frontend
+// FIXES:
+// Fix #2 — score field renamed: technical_depth → domain_expertise
+// Fix #5 — Content-Type: application/json; charset=utf-8 (Arabic truncation fix)
 
 import { NextRequest, NextResponse } from 'next/server'
 import {
@@ -26,9 +23,6 @@ import type {
 } from '@/lib/barbaros'
 
 // ─── In-Memory Session Store ──────────────────────────────────────────────────
-// Keyed by sessionId. Cleared when session ends.
-// Note: resets on Vercel cold start — acceptable for MVP.
-// Post-launch: replace with Redis or Vercel KV.
 
 interface SessionStore {
   state:            SessionState
@@ -41,12 +35,21 @@ interface SessionStore {
 const sessions = new Map<string, SessionStore>()
 
 // ─── Score Extraction ─────────────────────────────────────────────────────────
+// Fix #2: normalize technical_depth → domain_expertise in any legacy scores
 
 function extractScore(content: string): Record<string, unknown> | null {
   const match = content.match(/<score>([\s\S]*?)<\/score>/)
   if (!match) return null
   try {
-    return JSON.parse(match[1].trim())
+    const raw = JSON.parse(match[1].trim()) as Record<string, unknown>
+
+    // Normalize legacy field name if model still outputs technical_depth
+    if ('technical_depth' in raw && !('domain_expertise' in raw)) {
+      raw.domain_expertise = raw.technical_depth
+      delete raw.technical_depth
+    }
+
+    return raw
   } catch {
     return null
   }
@@ -62,13 +65,13 @@ function validateConfig(config: unknown): config is InterviewConfig {
   if (!config || typeof config !== 'object') return false
   const c = config as Record<string, unknown>
   return (
-    typeof c.candidateName  === 'string' &&
-    typeof c.jobTitle       === 'string' &&
-    typeof c.institution    === 'string' &&
-    typeof c.sector         === 'string' &&
+    typeof c.candidateName   === 'string' &&
+    typeof c.jobTitle        === 'string' &&
+    typeof c.institution     === 'string' &&
+    typeof c.sector          === 'string' &&
     typeof c.yearsExperience === 'string' &&
-    typeof c.language       === 'string' &&
-    typeof c.plan           === 'string'
+    typeof c.language        === 'string' &&
+    typeof c.plan            === 'string'
   )
 }
 
@@ -125,39 +128,46 @@ export async function POST(req: NextRequest) {
       now,
     })
 
-    // Merge state patches back into store
-    store.state         = { ...store.state,      ...output.statePatch  }
+    // Merge state patches
+    store.state         = { ...store.state, ...output.statePatch }
     store.weaknessState = output.weaknessPatch
     store.growthState   = output.growthPatch
 
-    // Save snapshot at session end
     if (output.isEndOfSession && output.snapshot) {
       store.previousSnapshot = output.snapshot
     }
 
-    // Extract score from raw content — frontend receives clean content
-    const score          = extractScore(output.content)
-    const cleanContent   = stripScoreTag(output.content)
+    // Extract and normalize score
+    const score        = extractScore(output.content)
+    const cleanContent = stripScoreTag(output.content)
 
-    // Clean up session from memory when done
+    // Clean up when done
     if (output.isEndOfSession) {
       sessions.delete(sessionId)
     }
 
-    return NextResponse.json({
-      success:        true,
-      content:        cleanContent,
-      audioBase64:    output.audioBase64,
-      score,
-      isEndOfSession: output.isEndOfSession,
-      phaseChanged:   output.phaseChanged,
-      // Dev diagnostics — strip in production if needed
-      _debug: process.env.NODE_ENV === 'development' ? {
-        promptCharCount: output.promptCharCount,
-        truncated:       output.truncated,
-        phase:           store.state.phase,
-      } : undefined,
-    })
+    // Fix #5: charset=utf-8 ensures Arabic characters serialize correctly
+    return new NextResponse(
+      JSON.stringify({
+        success:        true,
+        content:        cleanContent,
+        audioBase64:    output.audioBase64,
+        score,
+        isEndOfSession: output.isEndOfSession,
+        phaseChanged:   output.phaseChanged,
+        _debug: process.env.NODE_ENV === 'development' ? {
+          promptCharCount: output.promptCharCount,
+          truncated:       output.truncated,
+          phase:           store.state.phase,
+        } : undefined,
+      }),
+      {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json; charset=utf-8',
+        },
+      }
+    )
 
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error'

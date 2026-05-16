@@ -1,18 +1,9 @@
 // lib/barbaros/analysis/behavior/behavior-types.ts
-// CONTRACT: Behavioral ontology for Barbaros V4. Version 2.
-// Model-agnostic. No circular ownership. Explicit lifespans.
-//
-// TAXONOMY (immutable language):
-//   Signal          → observation    (instant, noisy, ephemeral)
-//   ValidatedSignal → confirmation   (short, curated, decoupled from Signal shape)
-//   Insight         → interpretation (accumulated, medium lifespan)
-//   Pattern         → persistence    (long, stabilityScore not binary)
-//   Risk            → intervention   (runtime ONLY, never stored)
-//   Escalation      → decision       (single cycle, not analysis)
-//
-// PERSISTENCE BOUNDARY:
-//   Session  → Signal, ValidatedSignal, Insight, SessionBehaviorPattern, Risk
-//   Longitud → LongitudinalBehaviorPattern (extension only, owned by longitudinal/)
+// CONTRACT: Behavioral ontology for Barbaros V4. Version 3.
+// Changes from v2:
+//   - Added PatternCategory enum (removes LLM text coupling)
+//   - Removed averageResponseLength (was computed from messageIndex — wrong)
+//   - SessionBehaviorPattern now has patternCategory field
 
 import type { InterviewPhase, Message } from '../../types';
 
@@ -20,7 +11,6 @@ import type { InterviewPhase, Message } from '../../types';
 
 export type SignalSeverity = 'low' | 'medium' | 'high';
 
-// Numeric score 0-1 for computation. Label derived via helper.
 export type SignalConfidenceScore = number; // 0.0 – 1.0
 
 export type SignalConfidenceLabel = 'weak' | 'moderate' | 'strong';
@@ -32,124 +22,103 @@ export function toConfidenceLabel(score: SignalConfidenceScore): SignalConfidenc
 }
 
 export type BehaviorSignalType =
-  // Engagement
   | 'response_shrinking'
   | 'response_expanding'
   | 'hedging_spike'
   | 'engagement_drop'
-  // Evasion
   | 'possible_deflection'
   | 'topic_avoidance'
   | 'vague_quantification'
-  // Confidence
   | 'confidence_drop'
   | 'overconfidence_spike'
   | 'confidence_instability'
-  // Credibility
   | 'possible_contradiction'
   | 'inconsistent_framing'
-  // Depth
   | 'example_usage'
   | 'self_correction'
   | 'keyword_repetition';
 
+/**
+ * PatternCategory — stable enum for pattern classification.
+ * Replaces LLM free-text matching in session-snapshot.ts.
+ * Tier3 assigns this when creating patterns.
+ */
+export type PatternCategory =
+  | 'engagement'    // response length, participation trends
+  | 'evasion'       // deflection, topic avoidance, vague answers
+  | 'confidence'    // instability, drops, overconfidence
+  | 'depth'         // example usage, elaboration patterns
+  | 'credibility';  // contradictions, inconsistent framing
+
 // ─── Primitives ───────────────────────────────────────────────────────────────
 
-/**
- * BehaviorSignal — instant observation from 1-2 messages.
- * Does NOT claim cause. Does NOT judge. Lifespan: current turn.
- */
 export interface BehaviorSignal {
-  id: string;                         // required for async reconciliation
+  id: string;
   type: BehaviorSignalType;
   severity: SignalSeverity;
-  confidenceScore: SignalConfidenceScore; // 0-1
+  confidenceScore: SignalConfidenceScore;
   messageIndex: number;
-  detectedAt: number;                 // now: number (ms)
+  detectedAt: number;
   phase: InterviewPhase;
-  rawEvidence: string;                // short excerpt, max ~100 chars
+  rawEvidence: string;
 }
 
-/**
- * ValidatedSignal — Tier2 confirmation of a signal.
- * DECOUPLED from BehaviorSignal shape (no embedded signal object).
- * Tier2 "destructures" the signal — changes to BehaviorSignal don't cascade.
- * Only validated signals reach scoring and longitudinal.
- * Lifespan: session (curated).
- */
 export interface ValidatedSignal {
   id: string;
-  signalId: string;                   // reference only, not embedded
+  signalId: string;
   signalType: BehaviorSignalType;
   originalConfidenceScore: SignalConfidenceScore;
-
   confirmed: boolean;
   severity: SignalSeverity;
-  confidenceScore: SignalConfidenceScore; // may differ from original after validation
-
+  confidenceScore: SignalConfidenceScore;
   messageIndex: number;
-  evidence: string[];                 // structured array, not single string
+  evidence: string[];
   validatedAt: number;
   validationPhase: InterviewPhase;
 }
 
-/**
- * BehaviorInsight — accumulated interpretation from Tier3.
- * NOT from a single message. Feeds longitudinal directly.
- * Lifespan: session + longitudinal snapshot.
- */
 export interface BehaviorInsight {
   id: string;
   topic: string;
   description: string;
   evidence: string[];
   sourceSignalTypes: BehaviorSignalType[];
-  sourceMessageIndices: number[];     // sparse indices, not a range
+  sourceMessageIndices: number[];
   confidenceScore: SignalConfidenceScore;
   phase: InterviewPhase;
   generatedAt: number;
 }
 
 /**
- * SessionBehaviorPattern — recurring insight within this session.
- * Reversible: stabilityScore, not binary resolved.
- * Lifespan: session only.
- * LongitudinalBehaviorPattern is a separate type owned by longitudinal/.
+ * SessionBehaviorPattern — v3 adds patternCategory.
+ * Removes LLM text dependency for classification.
  */
 export interface SessionBehaviorPattern {
   id: string;
   description: string;
+  patternCategory: PatternCategory;       // ← NEW in v3
   sourceInsightIds: string[];
   confidenceScore: SignalConfidenceScore;
-  stabilityScore: number;             // 0-1, can decay
-  decayCount: number;                 // increments when contradicted
+  stabilityScore: number;
+  decayCount: number;
   occurrenceCount: number;
-  crossPhaseConfirmed: boolean;       // true only if seen in 2+ phases
+  crossPhaseConfirmed: boolean;
   phasesObserved: InterviewPhase[];
   firstObservedAt: number;
   lastObservedAt: number;
   lastConfirmedAt: number;
-  persistence: 'session';             // discriminator — never 'longitudinal' here
+  persistence: 'session';
 }
 
-/**
- * LongitudinalBehaviorPattern — extension for cross-session patterns.
- * Owned by longitudinal/ layer. Defined here as contract boundary only.
- * Lifespan: across sessions.
- */
-export interface LongitudinalBehaviorPattern extends Omit<SessionBehaviorPattern, 'persistence'> {
+export interface LongitudinalBehaviorPattern
+  extends Omit<SessionBehaviorPattern, 'persistence'> {
   persistence: 'longitudinal';
-  sessionCount: number;               // how many sessions this appeared in
+  sessionCount: number;
   crossSessionOccurrences: number;
   firstSessionId: string;
   lastSessionId: string;
 }
 
-/**
- * RiskIndicator — runtime intervention signal.
- * EPHEMERAL: never stored in candidate profile, never crosses sessions.
- * Feeds pressure-selector in real-time only.
- */
 export type RiskType =
   | 'silence_risk'
   | 'credibility_risk'
@@ -164,18 +133,12 @@ export interface RiskIndicator {
   triggeredBy: Array<{
     type: BehaviorSignalType;
     severity: SignalSeverity;
-    validated: boolean;               // was it tier2-confirmed?
+    validated: boolean;
   }>;
   detectedAt: number;
   phase: InterviewPhase;
-  // NO: stored, NO: longitudinal, NO: candidate profile
 }
 
-/**
- * Escalation — decision only. Not analysis. Not memory.
- * Produced EXCLUSIVELY by escalation-policy.ts.
- * Lifespan: single decision cycle.
- */
 export type EscalationLevel =
   | 'stay_tier1'
   | 'run_tier2'
@@ -196,8 +159,8 @@ export type EscalationReason =
 export interface EscalationDecision {
   level: EscalationLevel;
   reasons: EscalationReason[];
-  triggerSignalIds: string[];         // which signals caused this decision
-  blocking: boolean;                  // true = wait for result; false = async/defer
+  triggerSignalIds: string[];
+  blocking: boolean;
   decidedAt: number;
 }
 
@@ -219,7 +182,7 @@ export interface EscalationContext {
 
 export interface Tier1ScanResult {
   signals: BehaviorSignal[];
-  risks: RiskIndicator[];             // ephemeral, immediate use only
+  risks: RiskIndicator[];
   scannedAt: number;
   messageIndex: number;
 }
@@ -228,30 +191,26 @@ export interface Tier2ValidationResult {
   validatedSignals: ValidatedSignal[];
   newRisks: RiskIndicator[];
   validatedAt: number;
-  messagesConsidered: number;         // max 3
+  messagesConsidered: number;
 }
 
 export interface Tier3InsightResult {
   insights: BehaviorInsight[];
-  patternCandidates: SessionBehaviorPattern[];  // crossPhaseConfirmed: false
-  confirmedPatterns: SessionBehaviorPattern[];  // crossPhaseConfirmed: true
+  patternCandidates: SessionBehaviorPattern[];
+  confirmedPatterns: SessionBehaviorPattern[];
   analyzedAt: number;
-  sourceMessageIndices: number[];     // sparse, not range
+  sourceMessageIndices: number[];
 }
 
-// ─── Async Tasks (discriminated union) ───────────────────────────────────────
+// ─── Async Tasks ──────────────────────────────────────────────────────────────
 
-/**
- * Discriminated union — TypeScript narrowing works cleanly.
- * No optional chaos in orchestrator.
- */
 export interface Tier2Task {
   id: string;
   type: 'tier2';
   priority: 'low' | 'medium' | 'high';
   createdAt: number;
   phase: InterviewPhase;
-  signalIds: string[];                // IDs only, resolved at execution time
+  signalIds: string[];
 }
 
 export interface Tier3Task {
@@ -260,18 +219,13 @@ export interface Tier3Task {
   priority: 'low' | 'medium' | 'high';
   createdAt: number;
   phase: InterviewPhase;
-  messageIndices: number[];           // sparse indices to analyze
+  messageIndices: number[];
 }
 
 export type PendingBehaviorTask = Tier2Task | Tier3Task;
 
 // ─── Orchestration ────────────────────────────────────────────────────────────
 
-/**
- * Soft modular boundary — one object, three internal namespaces.
- * Avoids god-object while keeping orchestrator simple.
- * Each sub-context can be extracted independently if the system grows.
- */
 export interface BehaviorRuntimeContext {
   messages: Message[];
   currentPhase: InterviewPhase;
@@ -289,7 +243,7 @@ export interface BehaviorHistoricalContext {
 
 export interface BehaviorPressureContext {
   silenceRisk: 'low' | 'medium' | 'high';
-  pressureLevel: number;              // 0-100
+  pressureLevel: number;
   pressureEscalationTriggered: boolean;
 }
 
@@ -299,23 +253,13 @@ export interface BehaviorContext {
   pressure: BehaviorPressureContext;
 }
 
-/**
- * BehaviorOrchestrationResult — final output of behavior-orchestrator.ts.
- * Consumed by: engine.ts, pressure-selector, session-snapshot.
- */
 export interface BehaviorOrchestrationResult {
-  // Immediate (this turn)
   tier1Result: Tier1ScanResult;
   escalationDecision: EscalationDecision;
-  activeRisks: RiskIndicator[];       // ephemeral — current turn only
-
-  // Accumulated (session)
+  activeRisks: RiskIndicator[];
   validatedSignals: ValidatedSignal[];
   insights: BehaviorInsight[];
   patterns: SessionBehaviorPattern[];
-
-  // Async queue (non-blocking)
   pendingTasks: PendingBehaviorTask[];
-
   orchestratedAt: number;
 }

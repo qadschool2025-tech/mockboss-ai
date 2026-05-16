@@ -368,3 +368,144 @@ export const LLM_CONFIG = {
  * in a breaking way; migration logic will key off this.
  */
 export const STATE_VERSION = 1 as const
+// ─────────────────────────────────────────────────────────────
+// SECTION 9 — LANGUAGE DATA (STOP WORDS)
+// ─────────────────────────────────────────────────────────────
+
+export const STOP_WORDS: ReadonlySet<string> = new Set([
+  // English — articles, conjunctions, prepositions
+  "the", "a", "an", "and", "or", "but", "is", "are", "was", "were",
+  "be", "been", "being", "have", "has", "had", "do", "does", "did",
+  "will", "would", "could", "should", "may", "might", "must", "shall",
+  "can", "of", "in", "to", "for", "with", "on", "at", "by", "from",
+  "about", "as", "into", "through", "during", "after", "before",
+  "between", "above", "below", "up", "down", "out", "off", "over",
+  "under", "again", "further", "then", "once", "here", "there",
+  // English — pronouns
+  "you", "your", "yours", "yourself", "yourselves",
+  "i", "me", "my", "mine", "myself",
+  "we", "us", "our", "ours", "ourselves",
+  "he", "him", "his", "himself",
+  "she", "her", "hers", "herself",
+  "it", "its", "itself",
+  "they", "them", "their", "theirs", "themselves",
+  // English — determiners & question words
+  "this", "that", "these", "those", "what", "which", "who", "whom",
+  "how", "when", "where", "why", "any", "some", "all", "each", "every",
+  "both", "few", "more", "most", "other", "such", "no", "nor", "not",
+  "only", "own", "same", "so", "than", "too", "very",
+  // English — interview-specific filler verbs
+  "tell", "describe", "explain", "share", "talk", "discuss", "say",
+  "said", "think", "thought", "know", "knew", "want", "wanted",
+  "like", "liked", "get", "got", "make", "made", "go", "went",
+  // Arabic — prepositions & particles
+  "في", "من", "إلى", "على", "عن", "مع", "حتى", "بعد", "قبل", "عند",
+  "لدى", "نحو", "بين", "تحت", "فوق", "أمام", "خلف",
+  // Arabic — question & demonstratives
+  "هل", "ما", "ماذا", "كيف", "متى", "أين", "لماذا", "أي", "أية",
+  "هذا", "هذه", "ذلك", "تلك", "هؤلاء", "أولئك", "هنا", "هناك",
+  // Arabic — pronouns
+  "أنا", "أنت", "أنتِ", "نحن", "هم", "هن", "هي", "هو", "أنتم", "أنتن",
+  // Arabic — verbs of being & common
+  "أن", "إن", "كان", "كانت", "كانوا", "يكون", "تكون", "صار", "أصبح",
+  "ليس", "ليست", "ولا", "ولم", "ولن", "قد", "لقد", "كل", "بعض",
+  // Arabic — interview filler verbs
+  "قل", "قال", "أخبر", "اشرح", "تكلم", "ناقش", "اعتقد", "أعتقد",
+  "أعرف", "أريد", "أحب",
+]);
+
+// ─────────────────────────────────────────────────────────────
+// SECTION 10 — TOPIC SYNONYM NORMALIZATION
+// ─────────────────────────────────────────────────────────────
+
+// Maps surface keywords → canonical topic labels.
+// Used by topic-memory to collapse "redis", "caching", "optimization"
+// into one canonical topic for accurate duplicate / coverage detection.
+// Keys MUST be lowercase, canonicalized form.
+export const TOPIC_SYNONYMS: Readonly<Record<string, string>> = {
+  // Performance & optimization
+  "caching": "performance_optimization",
+  "redis": "performance_optimization",
+  "memcache": "performance_optimization",
+  "memcached": "performance_optimization",
+  "optimization": "performance_optimization",
+  "optimize": "performance_optimization",
+  "optimized": "performance_optimization",
+  "performance": "performance_optimization",
+  "latency": "performance_optimization",
+  "throughput": "performance_optimization",
+
+  // Architecture & scalability
+  "microservices": "system_architecture",
+  "monolith": "system_architecture",
+  "architecture": "system_architecture",
+  "scalability": "system_architecture",
+  "scaling": "system_architecture",
+  "distributed": "system_architecture",
+  "infrastructure": "system_architecture",
+
+  // Leadership & people
+  "leadership": "leadership",
+  "leading": "leadership",
+  "led": "leadership",
+  "managed": "leadership",
+  "managing": "leadership",
+  "mentored": "leadership",
+  "mentoring": "leadership",
+  "mentorship": "leadership",
+  "coached": "leadership",
+  "coaching": "leadership",
+
+  // Conflict & collaboration
+  "conflict": "conflict_resolution",
+  "disagreement": "conflict_resolution",
+  "tension": "conflict_resolution",
+  "dispute": "conflict_resolution",
+  "collaboration": "collaboration",
+  "teamwork": "collaboration",
+  "team": "collaboration",
+  "partnered": "collaboration",
+
+  // Communication
+  "communication": "communication",
+  "presented": "communication",
+  "presentation": "communication",
+  "stakeholder": "communication",
+  "stakeholders": "communication",
+
+  // Problem solving
+  "debugging": "problem_solving",
+  "debug": "problem_solving",
+  "troubleshoot": "problem_solving",
+  "troubleshooting": "problem_solving",
+  "investigated": "problem_solving",
+  "diagnosed": "problem_solving",
+
+  // Teaching domain (sector-aware synonyms)
+  "classroom": "classroom_management",
+  "discipline": "classroom_management",
+  "lesson": "lesson_planning",
+  "curriculum": "curriculum_design",
+  "assessment": "student_assessment",
+  "grading": "student_assessment",
+  "differentiation": "differentiated_instruction",
+
+  // Arabic equivalents
+  "قيادة": "leadership",
+  "إدارة": "leadership",
+  "فريق": "collaboration",
+  "تعاون": "collaboration",
+  "تواصل": "communication",
+  "نزاع": "conflict_resolution",
+  "خلاف": "conflict_resolution",
+  "أداء": "performance_optimization",
+  "تحسين": "performance_optimization",
+  "تخطيط": "lesson_planning",
+  "منهج": "curriculum_design",
+  "تقييم": "student_assessment",
+  "صف": "classroom_management",
+  "فصل": "classroom_management",
+};
+
+// Helper-free normalization: pure data only.
+// The actual normalization function lives in utils/text.ts

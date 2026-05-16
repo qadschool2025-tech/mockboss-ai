@@ -1,149 +1,224 @@
-
 // lib/barbaros/longitudinal/session-delta.ts
 // Computes the delta between two SessionSnapshots.
-// Consumed by: candidate-profile.ts (merge), growth-tracker.ts, weakness-tracker.ts
-// Rule: accepts explicit parameters — never reads global state.
+// Consumed by: candidate-profile.ts, growth-tracker.ts, weakness-tracker.ts
+//
+// Architectural rules:
+// - Pure function — no global state reads
+// - `now` injected as parameter — no Date.now() inside
+// - polarity-aware behavior delta (positive patterns: more = better)
+// - canonicalKey treated as opaque string — no version assumption
+// - significantChange considers score + behavior + competency together
 
 import type { SessionSnapshot } from '../artifacts/session-snapshot'
 
-// ─── Delta Types ────────────────────────────────────────────────────────────
+// ─── Polarity Map ─────────────────────────────────────────────────────────────
+// Positive patterns: more occurrences = better performance.
+// All unlisted patterns default to 'negative' (safe fallback).
+// Note: matching is substring-based because canonicalKey is a truncated hash
+// (Architectural Debt #5) — exact match is not reliable across versions.
+
+const POSITIVE_PATTERN_MARKERS = new Set([
+  'example_usage',
+  'self_correction',
+  'engagement',
+  'depth',
+  'structured_response',
+  'proactive_clarification',
+])
+
+function patternPolarity(canonicalKey: string): 'positive' | 'negative' {
+  for (const marker of POSITIVE_PATTERN_MARKERS) {
+    if (canonicalKey.includes(marker)) return 'positive'
+  }
+  return 'negative'
+}
+
+// ─── Dimension Weights ────────────────────────────────────────────────────────
+// Used for weightedScoreDelta and weighted significantChange.
+// Must sum to 1.0 — enforced at module load time.
+
+const DIMENSION_WEIGHTS: Record<string, number> = {
+  technical_depth:  0.30,
+  communication:    0.20,
+  problem_solving:  0.20,
+  behavioral:       0.15,
+  culture_fit:      0.15,
+}
+
+const WEIGHT_SUM = Object.values(DIMENSION_WEIGHTS).reduce((a, b) => a + b, 0)
+if (Math.abs(WEIGHT_SUM - 1.0) > 0.001) {
+  throw new Error(`[session-delta] DIMENSION_WEIGHTS sum ${WEIGHT_SUM.toFixed(3)} !== 1.0`)
+}
+
+// ─── Thresholds ───────────────────────────────────────────────────────────────
+
+const SCORE_IMPROVED_MIN = 3
+const SCORE_DECLINED_MIN = -3
+
+const SIGNIFICANT_WEIGHTED_SCORE    = 6
+const SIGNIFICANT_BEHAVIOR_COUNT    = 3
+const SIGNIFICANT_COMPETENCY_COUNT  = 2
+
+// ─── Delta Types ──────────────────────────────────────────────────────────────
 
 export type DeltaDirection = 'improved' | 'declined' | 'stable' | 'new' | 'dropped'
 
 export interface ScoreDelta {
-  dimension: string
-  previous: number
-  current: number
-  change: number          // current - previous (positive = improved)
-  direction: DeltaDirection
+  dimension:  string
+  previous:   number
+  current:    number
+  change:     number
+  direction:  DeltaDirection
+  weight:     number
 }
 
 export interface BehaviorDelta {
-  patternKey: string
-  direction: DeltaDirection
+  patternKey:    string
+  polarity:      'positive' | 'negative'
+  direction:     DeltaDirection
   previousCount: number
-  currentCount: number
+  currentCount:  number
 }
 
 export interface SessionDelta {
-  sessionId: string
+  sessionId:         string
   previousSessionId: string | null
-  computedAt: number      // timestamp — injected, never Date.now() inside
+  computedAt:        number
 
-  // Score movement
-  overallScoreDelta: number
-  scoreDimensions: ScoreDelta[]
+  overallScoreDelta:  number
+  weightedScoreDelta: number
+  scoreDimensions:    ScoreDelta[]
 
-  // Behavior shifts
   behaviorsImproved: BehaviorDelta[]
   behaviorsDeclined: BehaviorDelta[]
-  behaviorsNew: BehaviorDelta[]
-  behaviorsDropped: BehaviorDelta[]
+  behaviorsNew:      BehaviorDelta[]
+  behaviorsDropped:  BehaviorDelta[]
 
-  // Competency coverage
-  newCompetenciesCovered: string[]
+  newCompetenciesCovered:   string[]
   competenciesStillMissing: string[]
 
-  // Contradiction trend
   contradictionsThisSession: number
-  contradictionsDelta: number   // vs previous session (negative = fewer = better)
+  contradictionsDelta:       number
 
-  // Phase completion
   phasesCompleted: string[]
-  phasesSkipped: string[]
+  phasesSkipped:   string[]
 
-  // Summary flags
-  overallTrend: DeltaDirection
-  significantChange: boolean    // true if |overallScoreDelta| >= SIGNIFICANT_THRESHOLD
+  overallTrend:      DeltaDirection
+  significantChange: boolean
 }
 
-// ─── Constants ───────────────────────────────────────────────────────────────
-
-const SIGNIFICANT_THRESHOLD = 8   // points
-const IMPROVED_MIN_CHANGE   = 3   // minimum change to count as 'improved'
-const DECLINED_MIN_CHANGE   = -3  // maximum change to count as 'declined'
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function scoreDirection(change: number): DeltaDirection {
-  if (change >= IMPROVED_MIN_CHANGE)  return 'improved'
-  if (change <= DECLINED_MIN_CHANGE)  return 'declined'
+  if (change >= SCORE_IMPROVED_MIN) return 'improved'
+  if (change <= SCORE_DECLINED_MIN) return 'declined'
   return 'stable'
 }
 
-function behaviorDirection(prev: number, curr: number): DeltaDirection {
+function behaviorDirection(
+  prev:     number,
+  curr:     number,
+  polarity: 'positive' | 'negative'
+): DeltaDirection {
   if (prev === 0 && curr > 0) return 'new'
-  if (prev > 0 && curr === 0) return 'dropped'
-  if (curr < prev)            return 'improved'   // fewer negative signals = better
-  if (curr > prev)            return 'declined'
+  if (prev > 0  && curr === 0) return 'dropped'
+
+  if (polarity === 'positive') {
+    if (curr > prev) return 'improved'
+    if (curr < prev) return 'declined'
+  } else {
+    if (curr < prev) return 'improved'
+    if (curr > prev) return 'declined'
+  }
   return 'stable'
 }
 
-function overallTrend(scoreDelta: number, behaviorImprovedCount: number, behaviorDeclinedCount: number): DeltaDirection {
-  if (scoreDelta >= IMPROVED_MIN_CHANGE && behaviorImprovedCount >= behaviorDeclinedCount) return 'improved'
-  if (scoreDelta <= DECLINED_MIN_CHANGE && behaviorDeclinedCount > behaviorImprovedCount)  return 'declined'
+function computeWeightedDelta(scoreDimensions: ScoreDelta[]): number {
+  let weighted = 0
+  for (const d of scoreDimensions) {
+    weighted += d.change * d.weight
+  }
+  return Math.round(weighted * 10) / 10
+}
+
+function computeOverallTrend(
+  weightedDelta:  number,
+  improvedCount:  number,
+  declinedCount:  number,
+  isFirstSession: boolean
+): DeltaDirection {
+  if (isFirstSession) return 'new'
+
+  const scoreUp   = weightedDelta >= SCORE_IMPROVED_MIN
+  const scoreDown = weightedDelta <= SCORE_DECLINED_MIN
+  const behaviorNet = improvedCount - declinedCount
+
+  if (scoreUp   && behaviorNet >= 0) return 'improved'
+  if (scoreDown && behaviorNet <= 0) return 'declined'
   return 'stable'
 }
 
-// ─── Core Function ───────────────────────────────────────────────────────────
+function computeSignificantChange(
+  weightedDelta:     number,
+  behaviorsImproved: BehaviorDelta[],
+  behaviorsDeclined: BehaviorDelta[],
+  newCompetencies:   string[]
+): boolean {
+  const scoreSignificant      = Math.abs(weightedDelta) >= SIGNIFICANT_WEIGHTED_SCORE
+  const behaviorSignificant   = (behaviorsImproved.length + behaviorsDeclined.length) >= SIGNIFICANT_BEHAVIOR_COUNT
+  const competencySignificant = newCompetencies.length >= SIGNIFICANT_COMPETENCY_COUNT
 
-/**
- * computeSessionDelta
- *
- * @param current  - the just-completed session snapshot
- * @param previous - the last session snapshot (null if first session ever)
- * @param now      - injected timestamp (never Date.now() inside this fn)
- */
+  return [scoreSignificant, behaviorSignificant, competencySignificant].filter(Boolean).length >= 2
+}
+
+// ─── Core Function ────────────────────────────────────────────────────────────
+
 export function computeSessionDelta(
-  current: SessionSnapshot,
+  current:  SessionSnapshot,
   previous: SessionSnapshot | null,
-  now: number
+  now:      number
 ): SessionDelta {
 
-  const sessionId         = current.sessionId
-  const previousSessionId = previous?.sessionId ?? null
+  const isFirstSession = previous === null
 
-  // ── Score deltas ──────────────────────────────────────────────────────────
-
-  const currentOverall  = current.finalScore?.overall ?? 0
-  const previousOverall = previous?.finalScore?.overall ?? 0
+  // Score deltas
+  const currentOverall    = current.finalScore?.overall  ?? 0
+  const previousOverall   = previous?.finalScore?.overall ?? 0
   const overallScoreDelta = currentOverall - previousOverall
 
   const scoreDimensions: ScoreDelta[] = []
 
   if (current.finalScore) {
-    const dims = current.finalScore.dimensions
-    const prevDims = previous?.finalScore?.dimensions ?? {}
+    const currDims = current.finalScore.dimensions as Record<string, number>
+    const prevDims = (previous?.finalScore?.dimensions ?? {}) as Record<string, number>
 
-    for (const [dimension, currVal] of Object.entries(dims)) {
-      const prevVal = (prevDims as Record<string, number>)[dimension] ?? 0
+    for (const [dimension, currVal] of Object.entries(currDims)) {
+      const prevVal = prevDims[dimension] ?? 0
       const change  = currVal - prevVal
       scoreDimensions.push({
         dimension,
-        previous: prevVal,
-        current:  currVal,
+        previous:  prevVal,
+        current:   currVal,
         change,
-        direction: previous ? scoreDirection(change) : 'new'
+        direction: isFirstSession ? 'new' : scoreDirection(change),
+        weight:    DIMENSION_WEIGHTS[dimension] ?? 0,
       })
     }
   }
 
-  // ── Behavior deltas ───────────────────────────────────────────────────────
+  const weightedScoreDelta = isFirstSession ? 0 : computeWeightedDelta(scoreDimensions)
 
+  // Behavior deltas
   const currentPatterns  = current.behaviorArtifact?.patterns  ?? []
   const previousPatterns = previous?.behaviorArtifact?.patterns ?? []
 
-  const prevPatternMap = new Map<string, number>()
-  for (const p of previousPatterns) {
-    prevPatternMap.set(p.canonicalKey, p.occurrences)
-  }
+  const prevMap = new Map<string, number>()
+  for (const p of previousPatterns) prevMap.set(p.canonicalKey, p.occurrences)
 
-  const currPatternMap = new Map<string, number>()
-  for (const p of currentPatterns) {
-    currPatternMap.set(p.canonicalKey, p.occurrences)
-  }
+  const currMap = new Map<string, number>()
+  for (const p of currentPatterns) currMap.set(p.canonicalKey, p.occurrences)
 
-  const allKeys = new Set([...prevPatternMap.keys(), ...currPatternMap.keys()])
+  const allKeys = new Set([...prevMap.keys(), ...currMap.keys()])
 
   const behaviorsImproved: BehaviorDelta[] = []
   const behaviorsDeclined: BehaviorDelta[] = []
@@ -151,30 +226,25 @@ export function computeSessionDelta(
   const behaviorsDropped:  BehaviorDelta[] = []
 
   for (const key of allKeys) {
-    const prev = prevPatternMap.get(key) ?? 0
-    const curr = currPatternMap.get(key) ?? 0
-    const dir  = behaviorDirection(prev, curr)
+    const prev     = prevMap.get(key) ?? 0
+    const curr     = currMap.get(key) ?? 0
+    const polarity = patternPolarity(key)
+    const dir      = isFirstSession ? 'new' : behaviorDirection(prev, curr, polarity)
 
-    const entry: BehaviorDelta = {
-      patternKey:    key,
-      direction:     dir,
-      previousCount: prev,
-      currentCount:  curr
-    }
+    const entry: BehaviorDelta = { patternKey: key, polarity, direction: dir, previousCount: prev, currentCount: curr }
 
-    if (dir === 'improved') behaviorsImproved.push(entry)
-    if (dir === 'declined') behaviorsDeclined.push(entry)
-    if (dir === 'new')      behaviorsNew.push(entry)
-    if (dir === 'dropped')  behaviorsDropped.push(entry)
+    if      (dir === 'improved') behaviorsImproved.push(entry)
+    else if (dir === 'declined') behaviorsDeclined.push(entry)
+    else if (dir === 'new')      behaviorsNew.push(entry)
+    else if (dir === 'dropped')  behaviorsDropped.push(entry)
   }
 
-  // ── Competency coverage ───────────────────────────────────────────────────
-
+  // Competency coverage
   const currentCovered  = new Set(current.competencyCoverage?.covered  ?? [])
   const previousCovered = new Set(previous?.competencyCoverage?.covered ?? [])
   const allRequired     = new Set([
     ...(current.competencyCoverage?.required  ?? []),
-    ...(previous?.competencyCoverage?.required ?? [])
+    ...(previous?.competencyCoverage?.required ?? []),
   ])
 
   const newCompetenciesCovered: string[] = []
@@ -187,31 +257,37 @@ export function computeSessionDelta(
     if (!currentCovered.has(c)) competenciesStillMissing.push(c)
   }
 
-  // ── Contradictions ────────────────────────────────────────────────────────
-
-  const contradictionsThisSession = current.contradictions?.length ?? 0
+  // Contradictions
+  const contradictionsThisSession = current.contradictions?.length  ?? 0
   const contradictionsPrevious    = previous?.contradictions?.length ?? 0
   const contradictionsDelta       = contradictionsThisSession - contradictionsPrevious
 
-  // ── Phase completion ──────────────────────────────────────────────────────
-
+  // Phase completion
   const phasesCompleted = current.phaseSummary?.completed ?? []
   const phasesSkipped   = current.phaseSummary?.skipped   ?? []
 
-  // ── Summary ───────────────────────────────────────────────────────────────
+  // Summary
+  const overallTrend = computeOverallTrend(
+    weightedScoreDelta,
+    behaviorsImproved.length,
+    behaviorsDeclined.length,
+    isFirstSession
+  )
 
-  const trend = previous
-    ? overallTrend(overallScoreDelta, behaviorsImproved.length, behaviorsDeclined.length)
-    : 'new'
-
-  const significantChange = Math.abs(overallScoreDelta) >= SIGNIFICANT_THRESHOLD
+  const significantChange = computeSignificantChange(
+    weightedScoreDelta,
+    behaviorsImproved,
+    behaviorsDeclined,
+    newCompetenciesCovered
+  )
 
   return {
-    sessionId,
-    previousSessionId,
-    computedAt: now,
+    sessionId:         current.sessionId,
+    previousSessionId: previous?.sessionId ?? null,
+    computedAt:        now,
 
     overallScoreDelta,
+    weightedScoreDelta,
     scoreDimensions,
 
     behaviorsImproved,
@@ -228,7 +304,7 @@ export function computeSessionDelta(
     phasesCompleted,
     phasesSkipped,
 
-    overallTrend: trend,
-    significantChange
+    overallTrend,
+    significantChange,
   }
 }

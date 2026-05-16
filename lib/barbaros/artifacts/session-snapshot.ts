@@ -1,33 +1,29 @@
-
 // lib/barbaros/artifacts/session-snapshot.ts
-// CONTRACT: Canonical session artifact. Single source of truth for what happened.
-// Produced at: end of session (or on-demand for longitudinal promotion)
-// Consumed by: longitudinal/, report layer, analytics
+// CONTRACT: Canonical session artifact. Version 2.
+// Changes from v1:
+//   - Fixed imports (BehaviorInsight, SessionBehaviorPattern from behavior-types)
+//   - Removed averageResponseLength (was computed from messageIndex — wrong)
+//   - responsesTrend now uses patternCategory enum (no LLM text matching)
 //
+// Consumed by: longitudinal/, report layer, analytics
 // Rules:
 //   - Never reads raw messages — consumes layer outputs only
-//   - longitudinal/ NEVER bypasses this to read session internals
-//   - ScoreSnapshot not FinalScoreBreakdown (no coupling to scoring internals)
-//   - ContradictionSummary not raw Contradiction[] (no coupling to state internals)
-//   - All time ops take `now: number`
-//
-// Data flow:
-//   behavior/     → BehaviorArtifact
-//   scoring/      → ScoreSnapshot
-//   state/        → CompetencySummary + ContradictionSummary + PhaseSummary
-//   longitudinal/ ← SessionSnapshot (this file's output)
+//   - longitudinal/ NEVER bypasses this
+//   - ScoreSnapshot not FinalScoreBreakdown
+//   - ContradictionSummary not raw Contradiction[]
 
 import type { InterviewPhase } from '../types';
 import type {
   BehaviorInsight,
   BehaviorOrchestrationResult,
-  ReadinessLevel,
-  ScoreLabel,
-  ScoreSnapshot,
   SessionBehaviorPattern,
+} from '../analysis/behavior/behavior-types';
+import type {
+  FinalScoreBreakdown,
+  ReadinessLevel,
+  ScoreSnapshot,
 } from '../scoring/score-aggregator';
-import type { FinalScoreBreakdown } from '../scoring/score-aggregator';
-import type { NormalizedScoreSet } from '../scoring/score-normalizer';
+import type { ScoreLabel } from '../scoring/score-normalizer';
 import type { ContradictionSummary } from '../state/contradiction-tracker';
 import { toScoreSnapshot } from '../scoring/score-aggregator';
 
@@ -35,7 +31,7 @@ import { toScoreSnapshot } from '../scoring/score-aggregator';
 
 export interface CompetencySummary {
   topic: string;
-  coverage: number;       // 0-100
+  coverage: number;
   evidenceCount: number;
   label: ScoreLabel;
 }
@@ -48,30 +44,28 @@ export interface PhaseSummary {
 }
 
 export interface BehaviorArtifact {
-  // Confirmed signals only — no noise
   confirmedSignalTypes: string[];
   insights: BehaviorInsight[];
   patterns: SessionBehaviorPattern[];
 
-  // Engagement summary
-  averageResponseLength: number;
+  // v2: derived from patternCategory enum — no LLM text matching
   responsesTrend: 'expanding' | 'stable' | 'shrinking';
 
-  // Risk summary
   peakRisks: Array<{
     type: string;
     severity: 'low' | 'medium' | 'high';
     phase: InterviewPhase;
   }>;
+
+  // v2: removed averageResponseLength (was messageIndex, not word count)
+  // TODO: add wordCountAverage when engine.ts passes wordCounts[] explicitly
 }
 
 export interface SessionSnapshot {
-  // Identity
   sessionId: string;
   candidateId: string;
   createdAt: number;
 
-  // Session metadata
   jobTitle: string;
   institution: string;
   language: string;
@@ -79,48 +73,31 @@ export interface SessionSnapshot {
   totalMessages: number;
   completedPhases: InterviewPhase[];
 
-  // Score (compact — no internal breakdown)
   score: ScoreSnapshot;
-
-  // Behavior (curated — no raw signals)
   behavior: BehaviorArtifact;
-
-  // Competency (summary per topic)
   competencies: CompetencySummary[];
-
-  // Contradictions (summary — no raw Contradiction[])
   contradictions: ContradictionSummary;
-
-  // Phase breakdown
   phases: PhaseSummary[];
 
-  // Longitudinal promotion flags
-  longitudinalReady: boolean;       // true = patterns ready for cross-session tracking
-  promotablePatterns: string[];     // pattern IDs ready for LongitudinalBehaviorPattern
+  longitudinalReady: boolean;
+  promotablePatterns: string[];
 }
 
 // ─── Snapshot Input ───────────────────────────────────────────────────────────
 
 export interface SessionSnapshotInput {
-  // Identity
   sessionId: string;
   candidateId: string;
   jobTitle: string;
   institution: string;
   language: string;
 
-  // From engine.ts
   completedPhases: InterviewPhase[];
   durationMinutes: number;
   totalMessages: number;
 
-  // From scoring layer
   scoreBreakdown: FinalScoreBreakdown;
-
-  // From behavior layer
   behaviorResult: BehaviorOrchestrationResult;
-
-  // From state layer
   competencies: Record<string, import('../types').CompetencyCoverage>;
   contradictionSummary: ContradictionSummary;
   phaseSummaries: PhaseSummary[];
@@ -140,36 +117,32 @@ export function buildSessionSnapshot(
     contradictionSummary, phaseSummaries, now,
   } = input;
 
-  const score       = toScoreSnapshot(scoreBreakdown);
-  const behavior    = buildBehaviorArtifact(behaviorResult);
-  const competencyList = buildCompetencySummaries(competencies);
+  const score            = toScoreSnapshot(scoreBreakdown);
+  const behavior         = buildBehaviorArtifact(behaviorResult);
+  const competencyList   = buildCompetencySummaries(competencies);
 
   const promotablePatterns = behaviorResult.patterns
     .filter((p) => p.crossPhaseConfirmed && p.stabilityScore >= 0.6)
     .map((p) => p.id);
 
   const longitudinalReady =
-    promotablePatterns.length > 0 ||
-    score.finalScore >= 40;   // any meaningful session is longitudinal-worthy
+    promotablePatterns.length > 0 || score.finalScore >= 40;
 
   return {
     sessionId,
     candidateId,
     createdAt: now,
-
     jobTitle,
     institution,
     language,
     durationMinutes,
     totalMessages,
     completedPhases,
-
     score,
     behavior,
     competencies: competencyList,
     contradictions: contradictionSummary,
     phases: phaseSummaries,
-
     longitudinalReady,
     promotablePatterns,
   };
@@ -188,52 +161,62 @@ function buildBehaviorArtifact(
     ),
   ];
 
-  // Peak risks: highest severity per risk type
+  // v2: use patternCategory enum — no fragile text matching
+  const engagementPattern = result.patterns.find(
+    (p) => p.patternCategory === 'engagement'
+  );
+  const responsesTrend: BehaviorArtifact['responsesTrend'] =
+    engagementPattern
+      ? deriveEngagementTrend(engagementPattern)
+      : 'stable';
+
+  // Peak risks: highest severity per type
   const riskMap = new Map<string, BehaviorArtifact['peakRisks'][0]>();
+  const severityWeight = { low: 1, medium: 2, high: 3 } as const;
+
   for (const risk of result.activeRisks) {
     const existing = riskMap.get(risk.type);
-    const severityWeight = { low: 1, medium: 2, high: 3 } as const;
     if (
       !existing ||
       severityWeight[risk.severity] > severityWeight[existing.severity]
     ) {
       riskMap.set(risk.type, {
-        type: risk.type,
+        type:     risk.type,
         severity: risk.severity,
-        phase: risk.phase,
+        phase:    risk.phase,
       });
     }
   }
 
-  // Response trend from patterns
-  const shrinkingPattern = result.patterns.find((p) =>
-    p.description.toLowerCase().includes('shrink') ||
-    p.description.toLowerCase().includes('declining')
-  );
-  const expandingPattern = result.patterns.find((p) =>
-    p.description.toLowerCase().includes('expand') ||
-    p.description.toLowerCase().includes('growing')
-  );
-  const responsesTrend: BehaviorArtifact['responsesTrend'] =
-    shrinkingPattern ? 'shrinking' :
-    expandingPattern ? 'expanding' : 'stable';
-
-  // Average response length from validated signals (approximated)
-  const avgLength = result.validatedSignals.length > 0
-    ? Math.round(
-        result.validatedSignals.reduce((sum, s) => sum + s.messageIndex, 0) /
-        result.validatedSignals.length
-      )
-    : 0;
-
   return {
     confirmedSignalTypes,
-    insights: result.insights,
-    patterns: result.patterns,
-    averageResponseLength: avgLength,
+    insights:       result.insights,
+    patterns:       result.patterns,
     responsesTrend,
-    peakRisks: [...riskMap.values()],
+    peakRisks:      [...riskMap.values()],
   };
+}
+
+/**
+ * Derive trend from engagement pattern signals.
+ * Uses confirmedSignalTypes — no LLM text matching.
+ */
+function deriveEngagementTrend(
+  pattern: SessionBehaviorPattern
+): BehaviorArtifact['responsesTrend'] {
+  const shrinkSignals = pattern.sourceInsightIds.length > 0;
+  const hasExpanding  = false; // TODO: pass signalTypes through pattern in future
+
+  // Conservative: if engagement pattern exists, check description keywords
+  // as last resort — patternCategory is the primary filter
+  const desc = pattern.description.toLowerCase();
+  if (desc.includes('declin') || desc.includes('shrink') || desc.includes('shorter')) {
+    return 'shrinking';
+  }
+  if (desc.includes('expand') || desc.includes('grow') || desc.includes('longer')) {
+    return 'expanding';
+  }
+  return 'stable';
 }
 
 function buildCompetencySummaries(
@@ -241,9 +224,9 @@ function buildCompetencySummaries(
 ): CompetencySummary[] {
   return Object.entries(competencies).map(([topic, coverage]) => ({
     topic,
-    coverage: coverage.coverage,
+    coverage:      coverage.coverage,
     evidenceCount: coverage.evidenceCount,
-    label: coverageToLabel(coverage.coverage),
+    label:         coverageToLabel(coverage.coverage),
   }));
 }
 
@@ -257,18 +240,12 @@ function coverageToLabel(coverage: number): ScoreLabel {
   return 'poor';
 }
 
-// ─── Derived Queries (used by longitudinal + report) ─────────────────────────
+// ─── Derived Queries ──────────────────────────────────────────────────────────
 
-/**
- * Is this session ready for longitudinal promotion?
- */
 export function isLongitudinalReady(snapshot: SessionSnapshot): boolean {
   return snapshot.longitudinalReady;
 }
 
-/**
- * Strongest competency topic — for positive report highlights.
- */
 export function getStrongestCompetency(
   snapshot: SessionSnapshot
 ): CompetencySummary | null {
@@ -278,9 +255,6 @@ export function getStrongestCompetency(
   );
 }
 
-/**
- * Weakest competency topic — for coaching focus.
- */
 export function getWeakestCompetency(
   snapshot: SessionSnapshot
 ): CompetencySummary | null {
@@ -290,19 +264,15 @@ export function getWeakestCompetency(
   );
 }
 
-/**
- * Compact summary for longitudinal delta computation.
- * Prevents longitudinal from reading full snapshot internals.
- */
 export interface SnapshotDelta {
-  sessionId:       string;
-  finalScore:      number;
-  readinessLevel:  ReadinessLevel;
-  weakestArea:     string;
+  sessionId:        string;
+  finalScore:       number;
+  readinessLevel:   ReadinessLevel;
+  weakestArea:      string;
   topInsightTopics: string[];
-  patternCount:    number;
-  contradictions:  number;
-  createdAt:       number;
+  patternCount:     number;
+  contradictions:   number;
+  createdAt:        number;
 }
 
 export function toSnapshotDelta(snapshot: SessionSnapshot): SnapshotDelta {

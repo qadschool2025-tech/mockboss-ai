@@ -118,9 +118,12 @@ function InterviewRoom() {
   }, [audioReady, pendingAudio])
 
   // Auto-scroll
-  useEffect(() => {
+ useEffect(() => {
+  const frame = requestAnimationFrame(() => {
     chatRef.current?.scrollTo({ top: chatRef.current.scrollHeight, behavior: 'smooth' })
-  }, [messages, isLoading])
+  })
+  return () => cancelAnimationFrame(frame)
+}, [messages, isLoading])
 
   const playAudioDirect = (audioBase64: string) => {
     if (isMutedRef.current) return

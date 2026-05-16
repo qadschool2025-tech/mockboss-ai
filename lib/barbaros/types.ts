@@ -117,12 +117,13 @@ export interface CompetencyCoverage {
  * A topic discussed in the interview, with metadata for repetition control.
  */
 export interface TopicMemory {
-  topic: string
-  phase: InterviewPhase
-  timestamp: number
-  revisitAllowed: boolean
+  topic: string;
+  phase: InterviewPhase | null;
+  timesVisited: number;
+  lastVisitedAt: number;
+  firstVisitedAt: number;
+  revisitAllowed: boolean;
 }
-
 /**
  * A detected contradiction between two candidate statements.
  * The contradiction-tracker stores these and revisits them later.

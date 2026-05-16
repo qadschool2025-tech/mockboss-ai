@@ -1,6 +1,29 @@
-
 // lib/barbaros/state/session-state.ts
-// The heart of Barbaros: session state creation, updates, and persistence
+// The heart of Barbaros: session state creation, updates, and persistence.
+//
+// CONTRACT CHECK (against types.ts v3):
+//   InterviewState fields used:
+//     version, config, messages, phase, phaseQuestionCount, phaseStartedAt,
+//     pressureMode, competencyCoverage, recentTopics, askedQuestionFingerprints,
+//     contradictions, candidateProfile, metrics, scores, interviewProgress,
+//     isComplete
+//   Message fields used:
+//     role, content, timestamp (required), isQuestion (optional)
+//   SessionMetrics fields used:
+//     startedAt, lastActivityAt, totalQuestions, totalAnswers,
+//     averageResponseLength, silenceEvents, contradictionCount,
+//     pressureEscalations, averageScore, hesitationCount, vaguenessCount,
+//     specificityScore
+//   CandidateProfile fields used:
+//     strengths, weaknesses, confidenceLevel, ownershipScore,
+//     clarity, depth, consistency, engagement, lastUpdatedAt
+//
+// ARCHITECTURAL RULES:
+//   - All operations are immutable (return new state, never mutate).
+//   - All time-sensitive operations accept `now` as a parameter
+//     for deterministic testing and replay.
+//   - This module owns state creation, message appending, phase moves,
+//     and serialization. Higher-level analytics live in dedicated modules.
 
 import type {
   InterviewState,
@@ -13,11 +36,9 @@ import type {
   TopicMemory,
   Contradiction,
   PressureMode,
-  BehaviorSignals,
   NormalizedScore,
 } from "../types";
 import {
-  STATE_VERSION,
   PHASE_ORDER,
   DEFAULT_PRESSURE_MODE,
   UNIVERSAL_COMPETENCIES,
@@ -27,52 +48,59 @@ import {
 import { fingerprintQuestion } from "../utils/text";
 import { sanitizeConfig, normalizeSector } from "../utils/sanitization";
 
+// Local constant — kept here because it's structurally tied to state shape,
+// not a tunable knob.
+const STATE_VERSION = 1 as const;
+
 // ─────────────────────────────────────────────────────────────
 // SECTION 1 — INITIAL STATE FACTORIES
 // ─────────────────────────────────────────────────────────────
 
-function createInitialMetrics(): SessionMetrics {
+function createInitialMetrics(now: number): SessionMetrics {
   return {
-    totalQuestions: 0,
-    totalUserTurns: 0,
+    averageScore: 0,
     averageResponseLength: 0,
+    hesitationCount: 0,
+    vaguenessCount: 0,
     silenceEvents: 0,
     contradictionCount: 0,
+    specificityScore: 0,
+    totalQuestions: 0,
+    totalAnswers: 0,
     pressureEscalations: 0,
-    startedAt: Date.now(),
-    lastActivityAt: Date.now(),
+    startedAt: now,
+    lastActivityAt: now,
   };
 }
 
-function createInitialProfile(): CandidateProfile {
+function createInitialProfile(now: number): CandidateProfile {
   return {
-    confidence: 0.5,
-    clarity: 0.5,
-    depth: 0.5,
-    ownershipScore: 0.5,
-    consistency: 1.0,
-    engagement: 0.5,
-    lastUpdatedAt: Date.now(),
+    strengths: [],
+    weaknesses: [],
+    confidenceLevel: 50,
+    ownershipScore: 50,
+    clarity: 50,
+    depth: 50,
+    consistency: 100,
+    engagement: 50,
+    lastUpdatedAt: now,
   };
 }
 
 function buildCompetencyCoverage(
-  sector: string
+  sector: string,
+  now: number
 ): Record<string, CompetencyCoverage> {
   const coverage: Record<string, CompetencyCoverage> = {};
   const normalizedSector = normalizeSector(sector);
   const sectorComps = SECTOR_COMPETENCIES[normalizedSector] ?? [];
-  const allCompetencies = [
-    ...UNIVERSAL_COMPETENCIES,
-    ...sectorComps,
-  ];
+  const allCompetencies = [...UNIVERSAL_COMPETENCIES, ...sectorComps];
 
   for (const comp of allCompetencies) {
     coverage[comp] = {
-      competency: comp,
-      timesProbed: 0,
-      evidenceStrength: 0,
-      lastProbedAt: null,
+      coverage: 0,
+      evidenceCount: 0,
+      lastUpdated: now,
     };
   }
   return coverage;
@@ -83,26 +111,27 @@ function buildCompetencyCoverage(
 // ─────────────────────────────────────────────────────────────
 
 export function createInitialState(
-  rawConfig: InterviewConfig
+  rawConfig: InterviewConfig,
+  now: number
 ): InterviewState {
   const config = sanitizeConfig(rawConfig);
-  const now = Date.now();
 
   return {
     version: STATE_VERSION,
     config,
     messages: [],
-    currentPhase: "opening",
-    phaseStartedAt: now,
+    phase: "opening",
     phaseQuestionCount: 0,
+    phaseStartedAt: now,
     pressureMode: DEFAULT_PRESSURE_MODE,
-    askedQuestionFingerprints: [],
+    competencyCoverage: buildCompetencyCoverage(config.sector, now),
     recentTopics: [],
-    competencyCoverage: buildCompetencyCoverage(config.sector),
+    askedQuestionFingerprints: [],
     contradictions: [],
-    candidateProfile: createInitialProfile(),
-    metrics: createInitialMetrics(),
+    candidateProfile: createInitialProfile(now),
+    metrics: createInitialMetrics(now),
     scores: [],
+    interviewProgress: 0,
     isComplete: false,
   };
 }
@@ -111,6 +140,15 @@ export function createInitialState(
 // SECTION 3 — MESSAGE OPERATIONS (immutable patches)
 // ─────────────────────────────────────────────────────────────
 
+/**
+ * Append a message to state.
+ *
+ * For assistant messages, `phaseQuestionCount` is incremented ONLY when
+ * the message is flagged as a question (`isQuestion: true`) OR when
+ * the content contains a question mark as a fallback heuristic.
+ * This prevents acknowledgments and closing remarks from inflating
+ * the phase question counter.
+ */
 export function appendMessage(
   state: InterviewState,
   message: Message
@@ -122,14 +160,18 @@ export function appendMessage(
   let phaseQuestionCount = state.phaseQuestionCount;
 
   if (message.role === "assistant") {
-    const fp = fingerprintQuestion(message.content);
-    if (fp && !askedQuestionFingerprints.includes(fp)) {
-      askedQuestionFingerprints = [
-        ...askedQuestionFingerprints,
-        fp,
-      ].slice(-LIMITS.MAX_ASKED_QUESTIONS);
+    const isQuestion = detectIsQuestion(message);
+
+    if (isQuestion) {
+      const fp = fingerprintQuestion(message.content);
+      if (fp && !askedQuestionFingerprints.includes(fp)) {
+        askedQuestionFingerprints = [
+          ...askedQuestionFingerprints,
+          fp,
+        ].slice(-LIMITS.MAX_ASKED_QUESTIONS);
+      }
+      phaseQuestionCount = phaseQuestionCount + 1;
     }
-    phaseQuestionCount = phaseQuestionCount + 1;
   }
 
   return {
@@ -141,32 +183,44 @@ export function appendMessage(
   };
 }
 
+function detectIsQuestion(message: Message): boolean {
+  // Prefer explicit flag from the engine
+  if (typeof message.isQuestion === "boolean") return message.isQuestion;
+  // Fallback heuristic: contains a question mark (Latin or Arabic)
+  return /[?؟]/.test(message.content);
+}
+
 function updateMetricsForMessage(
   metrics: SessionMetrics,
   message: Message
 ): SessionMetrics {
-  const now = Date.now();
   const next: SessionMetrics = {
     ...metrics,
-    lastActivityAt: now,
+    lastActivityAt: message.timestamp,
   };
 
-  if (message.role === "assistant") {
+  if (message.role === "assistant" && detectIsQuestion(message)) {
     next.totalQuestions = metrics.totalQuestions + 1;
   }
 
   if (message.role === "user") {
-    next.totalUserTurns = metrics.totalUserTurns + 1;
-    const wordCount = message.content.trim().split(/\s+/).length;
+    next.totalAnswers = metrics.totalAnswers + 1;
+    const wordCount = countWords(message.content);
     const prevAvg = metrics.averageResponseLength;
-    const prevTurns = metrics.totalUserTurns;
+    const prevAnswers = metrics.totalAnswers;
     next.averageResponseLength =
-      prevTurns === 0
+      prevAnswers === 0
         ? wordCount
-        : (prevAvg * prevTurns + wordCount) / (prevTurns + 1);
+        : (prevAvg * prevAnswers + wordCount) / (prevAnswers + 1);
   }
 
   return next;
+}
+
+function countWords(text: string): number {
+  const trimmed = text.trim();
+  if (trimmed.length === 0) return 0;
+  return trimmed.split(/\s+/).length;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -175,14 +229,15 @@ function updateMetricsForMessage(
 
 export function transitionPhase(
   state: InterviewState,
-  nextPhase: InterviewPhase
+  nextPhase: InterviewPhase,
+  now: number
 ): InterviewState {
-  if (nextPhase === state.currentPhase) return state;
+  if (nextPhase === state.phase) return state;
 
   return {
     ...state,
-    currentPhase: nextPhase,
-    phaseStartedAt: Date.now(),
+    phase: nextPhase,
+    phaseStartedAt: now,
     phaseQuestionCount: 0,
   };
 }
@@ -196,7 +251,7 @@ export function getNextPhase(
 }
 
 // ─────────────────────────────────────────────────────────────
-// SECTION 5 — TOPIC MEMORY
+// SECTION 5 — TOPIC MEMORY (basic add — richer operations in topic-memory.ts)
 // ─────────────────────────────────────────────────────────────
 
 export function recordTopic(
@@ -208,21 +263,21 @@ export function recordTopic(
   const normalized = topic.trim().toLowerCase();
   if (!normalized) return state;
 
-  const existing = state.recentTopics.find(
+  const existingIdx = state.recentTopics.findIndex(
     (t) => t.topic.toLowerCase() === normalized
   );
 
   let recentTopics: TopicMemory[];
-  if (existing) {
-    recentTopics = state.recentTopics.map((t) =>
-      t.topic.toLowerCase() === normalized
+  if (existingIdx >= 0) {
+    recentTopics = state.recentTopics.map((t, i) =>
+      i === existingIdx
         ? { ...t, timesVisited: t.timesVisited + 1, lastVisitedAt: now }
         : t
     );
   } else {
     const newEntry: TopicMemory = {
       topic,
-      phase: state.currentPhase,
+      phase: state.phase,
       timesVisited: 1,
       firstVisitedAt: now,
       lastVisitedAt: now,
@@ -235,26 +290,28 @@ export function recordTopic(
 
   return { ...state, recentTopics };
 }
+
 // ─────────────────────────────────────────────────────────────
 // SECTION 6 — COMPETENCY OPERATIONS
 // ─────────────────────────────────────────────────────────────
 
+/**
+ * Mark a competency as probed and adjust its coverage score.
+ * `coverageDelta` is added to the existing coverage (clamped 0-100).
+ */
 export function probeCompetency(
   state: InterviewState,
   competency: string,
-  evidenceDelta: number = 0
+  now: number,
+  coverageDelta: number = 0
 ): InterviewState {
   const existing = state.competencyCoverage[competency];
   if (!existing) return state;
 
   const updated: CompetencyCoverage = {
-    ...existing,
-    timesProbed: existing.timesProbed + 1,
-    evidenceStrength: Math.max(
-      0,
-      Math.min(1, existing.evidenceStrength + evidenceDelta)
-    ),
-    lastProbedAt: Date.now(),
+    coverage: Math.max(0, Math.min(100, existing.coverage + coverageDelta)),
+    evidenceCount: existing.evidenceCount + 1,
+    lastUpdated: now,
   };
 
   return {
@@ -293,14 +350,15 @@ export function recordContradiction(
 
 export function updateProfile(
   state: InterviewState,
-  patch: Partial<CandidateProfile>
+  patch: Partial<CandidateProfile>,
+  now: number
 ): InterviewState {
   return {
     ...state,
     candidateProfile: {
       ...state.candidateProfile,
       ...patch,
-      lastUpdatedAt: Date.now(),
+      lastUpdatedAt: now,
     },
   };
 }
@@ -321,7 +379,7 @@ export function setPressureMode(
 }
 
 // ─────────────────────────────────────────────────────────────
-// SECTION 9 — SILENCE & SCORES
+// SECTION 9 — SILENCE, SCORES & PROGRESS
 // ─────────────────────────────────────────────────────────────
 
 export function recordSilenceEvent(
@@ -336,11 +394,41 @@ export function recordSilenceEvent(
   };
 }
 
+/**
+ * Append a normalized score to the score history and update the
+ * running average. The average is maintained incrementally.
+ *
+ * TODO(V5): Move scores[] out of state into a separate analytics
+ * pipeline. See note in types.ts InterviewState.scores.
+ */
 export function appendScore(
   state: InterviewState,
   score: NormalizedScore
 ): InterviewState {
-  return { ...state, scores: [...state.scores, score] };
+  const scores = [...state.scores, score];
+  const prevAvg = state.metrics.averageScore;
+  const prevCount = state.scores.length;
+  const newAverage =
+    prevCount === 0
+      ? score.overall
+      : (prevAvg * prevCount + score.overall) / (prevCount + 1);
+
+  return {
+    ...state,
+    scores,
+    metrics: {
+      ...state.metrics,
+      averageScore: newAverage,
+    },
+  };
+}
+
+export function setInterviewProgress(
+  state: InterviewState,
+  progress: number
+): InterviewState {
+  const clamped = Math.max(0, Math.min(100, progress));
+  return { ...state, interviewProgress: clamped };
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -355,10 +443,19 @@ export function serializeState(state: InterviewState): string {
   return JSON.stringify(state);
 }
 
+/**
+ * Deserialize a persisted state.
+ *
+ * TODO(V5): Replace `as InterviewState` cast with a proper schema
+ * validator (zod or hand-written) to catch malformed payloads,
+ * tampered cookies, and version drift defensively.
+ *
+ * Current safety: only validates `version` field and JSON parsability.
+ */
 export function deserializeState(json: string): InterviewState | null {
   try {
     const parsed = JSON.parse(json) as InterviewState;
-    if (parsed.version !== STATE_VERSION) return null;
+    if (parsed?.version !== STATE_VERSION) return null;
     return parsed;
   } catch {
     return null;

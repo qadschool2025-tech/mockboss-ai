@@ -1,15 +1,19 @@
 // lib/barbaros/analysis/behavior/tier3-insights.ts
-// CONTRACT: Tier3 deep analysis. Version 2.
-// Changes from v1:
-//   - buildPatterns now assigns patternCategory from signal types
-//   - buildPatterns now assigns trendDirection from signal types
-//   - Zero text matching for classification
+// CONTRACT: Tier3 deep analysis. Version 3.
+// Changes from v2:
+//   - buildPatterns now fills canonicalKey, canonicalType, polarity, occurrences
+//   - polarity derived from SIGNAL_TO_POLARITY map — tier3 is single source of truth
+//   - canonicalType derived from patternCategory + dominant signal type
+//   - canonicalKey = deterministic slug (canonicalType + firstObservedAt)
+//   - occurrences kept in sync with occurrenceCount on every write
+//   - Math.random removed from pattern IDs — fully deterministic
 
 import type { InterviewPhase } from '../../types';
 import type {
   BehaviorInsight,
   BehaviorSignalType,
   PatternCategory,
+  PatternPolarity,
   SessionBehaviorPattern,
   SignalConfidenceScore,
   Tier3InsightResult,
@@ -19,13 +23,14 @@ import type {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const MAX_SIGNALS_TO_SEND   = 8;
-const MAX_EXISTING_INSIGHTS = 4;
-const TIER3_MAX_TOKENS      = 900;
-const PATTERN_MIN_OCCURRENCE      = 2;
-const PATTERN_CROSS_PHASE_MIN     = 2;
+const MAX_SIGNALS_TO_SEND     = 8;
+const MAX_EXISTING_INSIGHTS   = 4;
+const TIER3_MAX_TOKENS        = 900;
+const PATTERN_MIN_OCCURRENCE  = 2;
+const PATTERN_CROSS_PHASE_MIN = 2;
 
-// Signal → PatternCategory mapping (single source of truth)
+// ─── Signal Maps (single source of truth) ────────────────────────────────────
+
 const SIGNAL_TO_CATEGORY: Record<BehaviorSignalType, PatternCategory> = {
   response_shrinking:     'engagement',
   response_expanding:     'engagement',
@@ -44,47 +49,65 @@ const SIGNAL_TO_CATEGORY: Record<BehaviorSignalType, PatternCategory> = {
   keyword_repetition:     'depth',
 };
 
-// Signal → TrendDirection mapping
-// null = signal has no directional meaning
 const SIGNAL_TO_TREND: Partial<Record<BehaviorSignalType, TrendDirection>> = {
   response_shrinking: 'shrinking',
   response_expanding: 'expanding',
   engagement_drop:    'shrinking',
 };
 
+// Polarity: tier3 is the ONLY place this is decided.
+// Downstream (longitudinal) reads pattern.polarity — never guesses.
+const SIGNAL_TO_POLARITY: Record<BehaviorSignalType, PatternPolarity> = {
+  response_shrinking:     'negative',
+  response_expanding:     'positive',
+  hedging_spike:          'negative',
+  engagement_drop:        'negative',
+  possible_deflection:    'negative',
+  topic_avoidance:        'negative',
+  vague_quantification:   'negative',
+  confidence_drop:        'negative',
+  overconfidence_spike:   'negative',
+  confidence_instability: 'negative',
+  possible_contradiction: 'negative',
+  inconsistent_framing:   'negative',
+  example_usage:          'positive',
+  self_correction:        'positive',
+  keyword_repetition:     'negative',
+};
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface Tier3AnalysisInput {
-  validatedSignals: ValidatedSignal[];
-  existingInsights: BehaviorInsight[];
-  existingPatterns: SessionBehaviorPattern[];
-  phase: InterviewPhase;
-  now: number;
+  validatedSignals:  ValidatedSignal[];
+  existingInsights:  BehaviorInsight[];
+  existingPatterns:  SessionBehaviorPattern[];
+  phase:             InterviewPhase;
+  now:               number;
 }
 
 interface LLMInsightResponse {
   insights: Array<{
-    topic: string;
-    description: string;
-    evidence: string[];
-    sourceSignalTypes: string[];
+    topic:                string;
+    description:          string;
+    evidence:             string[];
+    sourceSignalTypes:    string[];
     sourceMessageIndices: number[];
-    confidenceScore: number;
+    confidenceScore:      number;
   }>;
   patternCandidates: Array<{
-    description: string;
+    description:         string;
     sourceInsightTopics: string[];
-    confidenceScore: number;
-    phasesObserved: string[];
+    confidenceScore:     number;
+    phasesObserved:      string[];
   }>;
 }
 
 // ─── LLM Adapter ─────────────────────────────────────────────────────────────
-// TODO: extract to lib/barbaros/llm/behavior-llm-adapter.ts
+// Debt: extract to lib/barbaros/llm/behavior-llm-adapter.ts
 
 async function runLLMCheck(
-  system: string,
-  prompt: string,
+  system:    string,
+  prompt:    string,
   maxTokens: number
 ): Promise<string> {
   const { callClaude } = await import('../../llm/claude-client');
@@ -99,7 +122,7 @@ export async function analyzeDeep(
   const { validatedSignals, existingInsights, existingPatterns, phase, now } = input;
 
   const confirmedSignals = validatedSignals
-    .filter((s) => s.confirmed)
+    .filter(s => s.confirmed)
     .slice(-MAX_SIGNALS_TO_SEND);
 
   const recentInsights = existingInsights.slice(-MAX_EXISTING_INSIGHTS);
@@ -111,7 +134,7 @@ export async function analyzeDeep(
 
   let llmResponse: LLMInsightResponse;
   try {
-    const raw  = await runLLMCheck(system, prompt, TIER3_MAX_TOKENS);
+    const raw   = await runLLMCheck(system, prompt, TIER3_MAX_TOKENS);
     llmResponse = parseInsightResponse(raw);
   } catch {
     return emptyTier3Result(now);
@@ -129,13 +152,13 @@ export async function analyzeDeep(
     now
   );
 
-  const allIndices = confirmedSignals.map((s) => s.messageIndex);
+  const allIndices = confirmedSignals.map(s => s.messageIndex);
 
   return {
-    insights:           newInsights,
-    patternCandidates:  candidates,
-    confirmedPatterns:  confirmed,
-    analyzedAt:         now,
+    insights:             newInsights,
+    patternCandidates:    candidates,
+    confirmedPatterns:    confirmed,
+    analyzedAt:           now,
     sourceMessageIndices: [...new Set(allIndices)].sort((a, b) => a - b),
   };
 }
@@ -159,19 +182,19 @@ Rules:
 }
 
 function buildAnalysisPrompt(
-  signals: ValidatedSignal[],
+  signals:         ValidatedSignal[],
   existingInsights: BehaviorInsight[],
-  phase: InterviewPhase
+  phase:           InterviewPhase
 ): string {
   const signalBlock = signals
-    .map((s) =>
+    .map(s =>
       `- Type: ${s.signalType} | Severity: ${s.severity} | Score: ${s.confidenceScore} | Msg#: ${s.messageIndex} | Evidence: ${s.evidence.join('; ')}`
     )
     .join('\n');
 
   const insightBlock = existingInsights.length > 0
     ? existingInsights
-        .map((i) => `- [${i.topic}] ${i.description} (confidence: ${i.confidenceScore})`)
+        .map(i => `- [${i.topic}] ${i.description} (confidence: ${i.confidenceScore})`)
         .join('\n')
     : 'None yet.';
 
@@ -223,14 +246,14 @@ function parseInsightResponse(raw: string): LLMInsightResponse {
 // ─── Output Builders ──────────────────────────────────────────────────────────
 
 function buildInsights(
-  raw: LLMInsightResponse['insights'],
+  raw:   LLMInsightResponse['insights'],
   phase: InterviewPhase,
-  now: number
+  now:   number
 ): BehaviorInsight[] {
   return raw
     .filter(meetsInsightThreshold)
-    .map((i) => ({
-      id:                   `insight_${slugify(i.topic)}_${now}_${Math.random().toString(36).slice(2, 6)}`,
+    .map(i => ({
+      id:                   `insight_${slugify(i.topic)}_${now}`,
       topic:                i.topic,
       description:          i.description,
       evidence:             i.evidence.slice(0, 3),
@@ -243,65 +266,79 @@ function buildInsights(
 }
 
 function buildPatterns(
-  rawCandidates: LLMInsightResponse['patternCandidates'],
-  allInsights: BehaviorInsight[],
+  rawCandidates:    LLMInsightResponse['patternCandidates'],
+  allInsights:      BehaviorInsight[],
   existingPatterns: SessionBehaviorPattern[],
   confirmedSignals: ValidatedSignal[],
-  phase: InterviewPhase,
-  now: number
+  phase:            InterviewPhase,
+  now:              number
 ): { candidates: SessionBehaviorPattern[]; confirmed: SessionBehaviorPattern[] } {
   const candidates: SessionBehaviorPattern[] = [];
   const confirmed:  SessionBehaviorPattern[] = [];
 
   for (const raw of rawCandidates) {
-    const matchedInsights = allInsights.filter((i) =>
+    const matchedInsights = allInsights.filter(i =>
       raw.sourceInsightTopics.includes(i.topic)
     );
     if (matchedInsights.length < PATTERN_MIN_OCCURRENCE) continue;
 
-    const allPhases = [
-      ...matchedInsights.map((i) => i.phase),
-      ...(raw.phasesObserved as InterviewPhase[]),
-    ];
-    const uniquePhases       = [...new Set(allPhases)] as InterviewPhase[];
+    const allPhases       = [...matchedInsights.map(i => i.phase), ...(raw.phasesObserved as InterviewPhase[])];
+    const uniquePhases    = [...new Set(allPhases)] as InterviewPhase[];
     const crossPhaseConfirmed = uniquePhases.length >= PATTERN_CROSS_PHASE_MIN;
 
-    // Derive category and trend from signal types — zero text matching
-    const relatedSignalTypes = matchedInsights.flatMap(
-      (i) => i.sourceSignalTypes
-    );
-    const patternCategory  = inferPatternCategory(relatedSignalTypes);
-    const trendDirection   = inferTrendDirection(relatedSignalTypes);
+    const relatedSignalTypes = matchedInsights.flatMap(i => i.sourceSignalTypes);
+    const patternCategory    = inferPatternCategory(relatedSignalTypes);
+    const trendDirection     = inferTrendDirection(relatedSignalTypes);
+    const polarity           = inferPolarity(relatedSignalTypes);
 
-    const existing = existingPatterns.find(
-      (p) => p.description.toLowerCase() === raw.description.toLowerCase()
-    );
+    // canonicalType: semantic identifier — stable, human-readable
+    // format: {category}_{dominant_signal_type}
+    const dominantSignal = inferDominantSignal(relatedSignalTypes);
+    const canonicalType  = dominantSignal
+      ? `${patternCategory}_${dominantSignal}`
+      : patternCategory;
+
+    // Match existing by canonicalType (semantic) — not description string
+    const existing = existingPatterns.find(p => p.canonicalType === canonicalType);
 
     if (existing) {
+      const occurrenceCount = existing.occurrenceCount + 1;
       const updated: SessionBehaviorPattern = {
         ...existing,
-        occurrenceCount:      existing.occurrenceCount + 1,
-        stabilityScore:       Math.min(1, existing.stabilityScore + 0.1),
-        lastObservedAt:       now,
-        lastConfirmedAt:      now,
-        crossPhaseConfirmed:  existing.crossPhaseConfirmed || crossPhaseConfirmed,
-        phasesObserved:       [...new Set([...existing.phasesObserved, phase])],
-        sourceInsightIds:     [...new Set([...existing.sourceInsightIds, ...matchedInsights.map((i) => i.id)])],
+        occurrenceCount,
+        occurrences:         occurrenceCount,   // keep alias in sync
+        stabilityScore:      Math.min(1, existing.stabilityScore + 0.1),
+        lastObservedAt:      now,
+        lastConfirmedAt:     now,
+        crossPhaseConfirmed: existing.crossPhaseConfirmed || crossPhaseConfirmed,
+        phasesObserved:      [...new Set([...existing.phasesObserved, phase])],
+        sourceInsightIds:    [...new Set([...existing.sourceInsightIds, ...matchedInsights.map(i => i.id)])],
         patternCategory,
         trendDirection,
+        polarity,
+        // canonicalKey and canonicalType never change on update — preserve original
       };
       crossPhaseConfirmed ? confirmed.push(updated) : candidates.push(updated);
     } else {
+      // canonicalKey: deterministic — canonicalType + firstObservedAt (no Math.random)
+      // Debt #5: replace with crypto hash when persistence is added
+      const canonicalKey = `${canonicalType}_${now}`;
+
+      const occurrenceCount = matchedInsights.length;
       const pattern: SessionBehaviorPattern = {
-        id:                  `pattern_${slugify(raw.description)}_${now}_${Math.random().toString(36).slice(2, 6)}`,
+        id:                  `pattern_${canonicalType}_${now}`,
         description:         raw.description,
         patternCategory,
         trendDirection,
-        sourceInsightIds:    matchedInsights.map((i) => i.id),
+        canonicalKey,        // opaque — do not decompose downstream
+        canonicalType,       // semantic — used for cross-session matching
+        polarity,            // set here — longitudinal layer reads, never guesses
+        sourceInsightIds:    matchedInsights.map(i => i.id),
         confidenceScore:     clampScore(raw.confidenceScore),
         stabilityScore:      0.3,
         decayCount:          0,
-        occurrenceCount:     matchedInsights.length,
+        occurrenceCount,
+        occurrences:         occurrenceCount,   // alias — always equal to occurrenceCount
         crossPhaseConfirmed,
         phasesObserved:      uniquePhases,
         firstObservedAt:     now,
@@ -316,15 +353,9 @@ function buildPatterns(
   return { candidates, confirmed };
 }
 
-// ─── Category + Trend Inference (zero text matching) ─────────────────────────
+// ─── Inference Helpers ────────────────────────────────────────────────────────
 
-/**
- * Infer PatternCategory from the most frequent signal category.
- * Falls back to 'engagement' if no signals found.
- */
-function inferPatternCategory(
-  signalTypes: BehaviorSignalType[]
-): PatternCategory {
+function inferPatternCategory(signalTypes: BehaviorSignalType[]): PatternCategory {
   if (signalTypes.length === 0) return 'engagement';
 
   const counts = new Map<PatternCategory, number>();
@@ -339,39 +370,61 @@ function inferPatternCategory(
   )[0];
 }
 
-/**
- * Infer TrendDirection from signal types.
- * Returns null if no directional signals found.
- */
-function inferTrendDirection(
-  signalTypes: BehaviorSignalType[]
-): TrendDirection | null {
-  const counts: Record<TrendDirection, number> = {
-    shrinking: 0,
-    expanding: 0,
-    stable:    0,
-  };
+function inferTrendDirection(signalTypes: BehaviorSignalType[]): TrendDirection | null {
+  const counts: Record<TrendDirection, number> = { shrinking: 0, expanding: 0, stable: 0 };
 
   for (const type of signalTypes) {
     const trend = SIGNAL_TO_TREND[type];
     if (trend) counts[trend]++;
   }
 
-  // Dominant direction wins
   if (counts.shrinking > counts.expanding) return 'shrinking';
   if (counts.expanding > counts.shrinking) return 'expanding';
   if (counts.shrinking > 0 || counts.expanding > 0) return 'stable';
   return null;
 }
 
-// ─── Insight Threshold (contract) ────────────────────────────────────────────
+/**
+ * inferPolarity — majority vote across related signals.
+ * Ties go to 'negative' (conservative — safer for hiring context).
+ */
+function inferPolarity(signalTypes: BehaviorSignalType[]): PatternPolarity {
+  if (signalTypes.length === 0) return 'negative';
 
-function meetsInsightThreshold(
-  i: LLMInsightResponse['insights'][0]
-): boolean {
-  const hasMultipleIndices  = i.sourceMessageIndices.length >= 2;
-  const hasMultipleSignals  = i.sourceSignalTypes.length >= 2;
-  const hasEvidence         = i.evidence.length >= 1;
+  let positive = 0;
+  let negative = 0;
+
+  for (const type of signalTypes) {
+    SIGNAL_TO_POLARITY[type] === 'positive' ? positive++ : negative++;
+  }
+
+  return positive > negative ? 'positive' : 'negative';
+}
+
+/**
+ * inferDominantSignal — most frequent signal type in the pattern.
+ * Used to build a stable canonicalType string.
+ */
+function inferDominantSignal(signalTypes: BehaviorSignalType[]): BehaviorSignalType | null {
+  if (signalTypes.length === 0) return null;
+
+  const counts = new Map<BehaviorSignalType, number>();
+  for (const type of signalTypes) {
+    counts.set(type, (counts.get(type) ?? 0) + 1);
+  }
+
+  return [...counts.entries()].reduce(
+    (best, [type, count]) => (count > best[1] ? [type, count] : best),
+    [null, 0] as [BehaviorSignalType | null, number]
+  )[0];
+}
+
+// ─── Insight Threshold ────────────────────────────────────────────────────────
+
+function meetsInsightThreshold(i: LLMInsightResponse['insights'][0]): boolean {
+  const hasMultipleIndices = i.sourceMessageIndices.length >= 2;
+  const hasMultipleSignals = i.sourceSignalTypes.length >= 2;
+  const hasEvidence        = i.evidence.length >= 1;
   return (hasMultipleIndices || hasMultipleSignals) && hasEvidence;
 }
 
@@ -401,20 +454,20 @@ function slugify(text: string): string {
 // ─── Derived Queries ──────────────────────────────────────────────────────────
 
 export function getStrongInsights(
-  result: Tier3InsightResult,
+  result:    Tier3InsightResult,
   threshold = 0.65
 ): BehaviorInsight[] {
-  return result.insights.filter((i) => i.confidenceScore >= threshold);
+  return result.insights.filter(i => i.confidenceScore >= threshold);
 }
 
 export function getLongitudinalReadyPatterns(
   result: Tier3InsightResult
 ): SessionBehaviorPattern[] {
-  return result.confirmedPatterns.filter((p) => p.crossPhaseConfirmed);
+  return result.confirmedPatterns.filter(p => p.crossPhaseConfirmed);
 }
 
 export function getActiveInsightTopics(result: Tier3InsightResult): string[] {
-  return [...new Set(result.insights.map((i) => i.topic))];
+  return [...new Set(result.insights.map(i => i.topic))];
 }
 
 export function computeTier3Confidence(result: Tier3InsightResult): number {

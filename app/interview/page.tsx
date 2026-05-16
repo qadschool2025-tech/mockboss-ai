@@ -212,7 +212,12 @@ function InterviewRoom() {
       const res = await fetch('/api/interview', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ config: CONFIG, messages: msgs, sessionStartTime })
+       body: JSON.stringify({
+  sessionId: CONFIG.sessionId,
+  config: CONFIG,
+  messages: msgs,
+  sessionStartTime
+})
       })
       const data = await res.json()
       if (!data.success) throw new Error(data.error)

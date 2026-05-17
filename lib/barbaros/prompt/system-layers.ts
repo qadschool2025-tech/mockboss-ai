@@ -1,23 +1,26 @@
 // lib/barbaros/prompt/system-layers.ts
 // Dynamic system prompt layers — what changes per session/candidate.
-// Consumed by: prompt-builder.ts (assembles layers into final system prompt)
+// Consumed by: prompt-builder.ts
 //
 // FIXES APPLIED:
-// Fix #1 — Time is the ONLY authority for ending sessions (never end early)
-// Fix #2 — "technical_depth" renamed to "domain_expertise" everywhere
-// Fix #5 — Arabic: never truncate, always wait for full response before TTS
-// Fix #6 — Mixed language: Arabic structure, English terminology only
+// Fix #1 — Time is the ONLY authority. AI forbidden from ending early.
+// Fix #2 — domain_expertise everywhere (replaces technical_depth)
+// Fix #5 — Arabic: complete response required, never truncate
+// Fix #6 — Mixed: Arabic structure, English terminology only
+// Fix #scoring — Human-realistic scoring philosophy with anchors
 
-import type { InterviewConfig }        from '../types'
-import type { SessionState }           from '../state/session-state'
-import type { TrackedWeakness }        from '../longitudinal/weakness-tracker'
-import type { TrackedGrowth }          from '../longitudinal/growth-tracker'
+import type { InterviewConfig } from '../types'
+import type { SessionState }    from '../state/session-state'
+import type { TrackedWeakness } from '../longitudinal/weakness-tracker'
+import type { TrackedGrowth }   from '../longitudinal/growth-tracker'
 import {
   BARBAROS_IDENTITY_RULES,
   BARBAROS_RESPONSE_RULES,
   BARBAROS_PRESSURE_PHRASES,
   BARBAROS_POSITIVE_PHRASES,
   BARBAROS_INTERVIEW_PHASES,
+  BARBAROS_SCORING_PHILOSOPHY,
+  BARBAROS_SCORING_ANCHORS,
   SECTOR_FOCUS_HINTS,
   BARBAROS_LANGUAGE_RULES,
   DEFAULT_LANGUAGE_RULE,
@@ -26,9 +29,9 @@ import {
 // ─── Layer Output Type ────────────────────────────────────────────────────────
 
 export interface SystemLayer {
-  label:   string    // for debugging — not injected into prompt
-  content: string    // injected into system prompt
-  weight:  number    // ordering priority (lower = earlier in prompt)
+  label:   string
+  content: string
+  weight:  number
 }
 
 // ─── Layer 1: Identity ────────────────────────────────────────────────────────
@@ -63,7 +66,7 @@ export function buildSessionContextLayer(config: InterviewConfig): SystemLayer {
   ]
 
   if (config.isCareerSwitch) {
-    lines.push('NOTE: This candidate is making a career switch. Probe how prior experience transfers.')
+    lines.push('NOTE: Career switch candidate. Probe how prior experience transfers.')
   }
 
   if (config.jobRequirements) {
@@ -87,32 +90,31 @@ export function buildSessionContextLayer(config: InterviewConfig): SystemLayer {
 }
 
 // ─── Layer 4: Language ────────────────────────────────────────────────────────
-// Fix #5 + #6: Explicit rules for Arabic completion and Mixed language structure
+// Fix #5 + #6
 
 export function buildLanguageLayer(language: string): SystemLayer {
   let rule: string
 
   if (language === 'ar') {
-    // Fix #5: ensure full Arabic response before any truncation or TTS
     rule = [
-      'LANGUAGE: Conduct the ENTIRE interview in Modern Standard Arabic (فصحى).',
+      'Conduct the ENTIRE interview in Modern Standard Arabic (فصحى).',
       'CRITICAL: Always write your COMPLETE response in Arabic before finishing.',
       'Never truncate or cut short an Arabic response mid-sentence.',
       'Never switch to English under any circumstances.',
-      'Ensure every response is fully formed and grammatically complete in Arabic.',
+      'Every response must be fully formed and grammatically complete in Arabic.',
     ].join('\n')
+
   } else if (language === 'mixed') {
-    // Fix #6: Arabic structure, English terminology only
     rule = [
-      'LANGUAGE: Use Mixed mode — Arabic sentence structure with English professional terms.',
-      'RULE: Keep the sentence structure, grammar, and flow primarily in Arabic.',
-      'RULE: Use English ONLY for specific professional/technical terminology.',
+      'Use Mixed mode: Arabic sentence structure with English professional terms only.',
+      'RULE: Sentence grammar and flow must be primarily Arabic.',
+      'RULE: Use English ONLY for specific professional or technical terminology.',
       'CORRECT: "كيف تعاملت مع موقف stakeholder management صعب في مشروعك السابق؟"',
-      'WRONG: "كيف did you handle the stakeholders في your organization؟"',
-      'Never randomly switch mid-sentence. Arabic carries the sentence; English carries the term.',
+      'WRONG:   "كيف did you handle the stakeholders في your organization؟"',
+      'Arabic carries the sentence. English carries the term. Never random mid-sentence switching.',
     ].join('\n')
+
   } else {
-    // Default: English
     rule = BARBAROS_LANGUAGE_RULES[language] ?? DEFAULT_LANGUAGE_RULE
   }
 
@@ -144,7 +146,7 @@ export function buildStructureLayer(currentPhase: string): SystemLayer {
   }
 }
 
-// ─── Layer 6: Behavioral Pressure ────────────────────────────────────────────
+// ─── Layer 6: Behavioral Pressure ─────────────────────────────────────────────
 
 export function buildPressureLayer(state: SessionState): SystemLayer {
   const lines: string[] = []
@@ -175,7 +177,7 @@ export function buildPressureLayer(state: SessionState): SystemLayer {
   }
 }
 
-// ─── Layer 7: Weakness Awareness ─────────────────────────────────────────────
+// ─── Layer 7: Weakness Awareness ──────────────────────────────────────────────
 
 export function buildWeaknessLayer(
   weaknesses:     TrackedWeakness[],
@@ -207,7 +209,7 @@ export function buildWeaknessLayer(
   }
 }
 
-// ─── Layer 8: Growth Recognition ─────────────────────────────────────────────
+// ─── Layer 8: Growth Recognition ──────────────────────────────────────────────
 
 export function buildGrowthLayer(
   growthSignals:  TrackedGrowth[],
@@ -225,13 +227,9 @@ export function buildGrowthLayer(
   }
 
   const lines: string[] = ['CONFIRMED GROWTH AREAS (acknowledge briefly if demonstrated again):']
-
   sustained.forEach(g => lines.push(`  - ${g.label} (sustained across ${g.sessionCount} sessions)`))
   confirmed.forEach(g => lines.push(`  - ${g.label} (confirmed in ${g.sessionCount} sessions)`))
-
-  lines.push(
-    `If candidate demonstrates strength in these areas: "${BARBAROS_POSITIVE_PHRASES.strong_answer}"`
-  )
+  lines.push(`If candidate demonstrates strength here: "${BARBAROS_POSITIVE_PHRASES.strong_answer}"`)
 
   return {
     label:   'growth',
@@ -240,68 +238,72 @@ export function buildGrowthLayer(
   }
 }
 
-// ─── Layer 9: Scoring Instruction ────────────────────────────────────────────
-// Fix #2: "technical_depth" renamed to "domain_expertise"
+// ─── Layer 9: Scoring (philosophy + anchors + format) ─────────────────────────
+// Fix #2: domain_expertise (not technical_depth)
+// Fix #scoring: human-realistic philosophy with anchored examples
 
 export function buildScoringLayer(): SystemLayer {
   return {
     label:   'scoring',
     weight:  9,
     content: [
-      'SCORING: After every substantive answer, append exactly:',
+      BARBAROS_SCORING_PHILOSOPHY,
+      '',
+      BARBAROS_SCORING_ANCHORS,
+      '',
+      'OUTPUT FORMAT — after every substantive answer, append exactly:',
       '<score>{"score":0,"clarity":0,"confidence":0,"relevance":0,"domain_expertise":0,"notes":""}</score>',
-      'Fill all fields 0-100. notes: max 10 words. Never omit this tag.',
-      'Use "domain_expertise" — never "technical_depth". Applies to ALL sectors including Education, HR, Legal, Healthcare.',
+      'Fill all fields 0–100. notes: max 10 words. Never omit this tag.',
+      'Use "domain_expertise" — NEVER "technical_depth". Applies to ALL sectors.',
     ].join('\n'),
   }
 }
 
 // ─── Layer 10: Time Control ───────────────────────────────────────────────────
-// Fix #1: Time is the ONLY authority. AI must NEVER end session early.
-// "final question" / "last question" forbidden unless remainingTime <= 120s.
+// Fix #1: AI forbidden from ending early. Integer math — no decimals to LLM.
 
 export function buildTimeLayer(
   elapsedMinutes: number,
   totalMinutes:   number
 ): SystemLayer {
-  const remainingMinutes = totalMinutes - elapsedMinutes
-  const remainingSeconds = remainingMinutes * 60
+  const elapsedSeconds   = Math.max(0, Math.floor(elapsedMinutes * 60))
+  const totalSeconds     = totalMinutes * 60
+  const remainingSeconds = Math.max(0, totalSeconds - elapsedSeconds)
+  const remainingMins    = Math.ceil(remainingSeconds / 60)
+  const elapsedMins      = Math.floor(elapsedSeconds / 60)
 
   let content: string
 
   if (remainingSeconds <= 90) {
-    // Only now is closing allowed
     content = [
-      `TIME: ${remainingMinutes} minute(s) remaining.`,
+      `TIME: ${remainingMins} minute(s) remaining.`,
       'ACTION: Move to closing NOW. Ask your final question and begin wrap-up.',
-      'You MAY say "final question" or "last question" only at this point.',
+      'You MAY use "final question" or "last question" only at this stage.',
     ].join('\n')
 
   } else if (remainingSeconds <= 180) {
-    // 3 minutes left — wrap up technical, do not close yet
     content = [
-      `TIME: ${remainingMinutes} minute(s) remaining.`,
-      'ACTION: Begin transitioning to closing phase. Finish current topic, then move to wrap-up.',
+      `TIME: ${remainingMins} minute(s) remaining.`,
+      'ACTION: Finish current topic, then transition to closing phase.',
       'Do NOT say "final question" or "last question" yet.',
     ].join('\n')
 
   } else if (remainingSeconds <= 480) {
-    // 8 minutes left — deepen analysis
     content = [
-      `TIME: ${remainingMinutes} minute(s) remaining.`,
-      'ACTION: Move into deeper analysis — pressure handling and critical thinking questions.',
-      'FORBIDDEN: Do NOT close the session. Do NOT say "final question" or "last question".',
+      `TIME: ${remainingMins} minute(s) remaining.`,
+      'ACTION: Move to deeper analysis — pressure handling and critical thinking questions.',
+      'FORBIDDEN: Do NOT close. Do NOT say "final question" or "last question".',
     ].join('\n')
 
   } else {
-    // Normal session — core questions
     content = [
-      `TIME: ${elapsedMinutes}/${totalMinutes} minutes elapsed. ${remainingMinutes} minutes remaining.`,
+      `TIME: ${elapsedMins}/${totalMinutes} minutes elapsed. ${remainingMins} minutes remaining.`,
       'ACTION: Continue with core domain expertise and behavioral questions.',
-      'CRITICAL RULE: You are FORBIDDEN from ending or closing this session.',
-      'FORBIDDEN PHRASES: "final question", "last question", "session complete", "that concludes".',
-      'The session ends ONLY when the timer expires — NOT based on your judgment.',
-      'Even if you feel the interview is complete — KEEP ASKING QUESTIONS until time runs out.',
+      'ABSOLUTE RULE: You are FORBIDDEN from ending or closing this session.',
+      'FORBIDDEN PHRASES: "final question", "last question", "session complete", "that concludes", "before we wrap up".',
+      'The session ends ONLY when the timer expires — NEVER based on your judgment.',
+      'If you feel you have covered everything — ask deeper follow-ups, probe past examples, request elaboration.',
+      'Keep asking until the timer runs out.',
     ].join('\n')
   }
 

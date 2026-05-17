@@ -24,27 +24,33 @@ interface Message {
 
 function buildConfig(params: URLSearchParams) {
   return {
-    sessionId:       params.get('sessionId')       ?? `session_${Date.now()}`,
-    candidateName:   params.get('candidateName')   ?? 'Candidate',
-    jobTitle:        params.get('jobTitle')         ?? 'Professional',
-    institution:     params.get('institution')      ?? 'Organisation',
-    sector:          params.get('sector')           ?? 'General',
-    yearsExperience: params.get('yearsExperience')  ?? '3 years',
-    language:        params.get('language')         ?? 'en',
-    plan:            params.get('plan')             ?? 'go',
-    jobRequirements: params.get('jobRequirements')  ?? '',
-    isCareerSwitch:  params.get('isCareerSwitch')   === 'true',
-    cvSummary:       params.get('cvSummary')        ?? '',
+    sessionId:       params.get('sessionId')      ?? `session_${Date.now()}`,
+    candidateName:   params.get('candidateName')  ?? 'Candidate',
+    jobTitle:        params.get('jobTitle')        ?? 'Professional',
+    institution:     params.get('institution')     ?? 'Organisation',
+    sector:          params.get('sector')          ?? 'General',
+    yearsExperience: params.get('yearsExperience') ?? '3 years',
+    language:        params.get('language')        ?? 'en',
+    plan:            params.get('plan')            ?? 'go',
+    jobRequirements: params.get('jobRequirements') ?? '',
+    isCareerSwitch:  params.get('isCareerSwitch')  === 'true',
+    cvSummary:       params.get('cvSummary')       ?? '',
     difficulty:      'standard',
   }
+}
+
+// Score → label (hide raw numbers during interview — reduces candidate anxiety)
+function scoreLabel(s: number): { text: string; color: string } {
+  if (s >= 80) return { text: 'Strong',        color: '#22C55E' }
+  if (s >= 65) return { text: 'Good',          color: '#86EFAC' }
+  if (s >= 50) return { text: 'Fair',          color: '#F59E0B' }
+  return            { text: 'Needs clarity', color: '#F87171' }
 }
 
 // ─── Inner component ──────────────────────────────────────────────────────────
 
 function InterviewRoom() {
   const searchParams = useSearchParams()
-
-  // Fix #2: useMemo so CONFIG never rebuilds on rerender
   const CONFIG = useMemo(() => buildConfig(searchParams), [searchParams])
 
   const [messages, setMessages]             = useState<Message[]>([])
@@ -55,7 +61,6 @@ function InterviewRoom() {
     const limits: Record<string, number> = { go: 15*60, pro: 30*60, expert: 45*60 }
     return limits[CONFIG.plan] ?? 15*60
   })
-  const [overallScore, setOverallScore]     = useState<number | null>(null)
   const [questionCount, setQuestionCount]   = useState(1)
   const [isEnded, setIsEnded]               = useState(false)
   const [isMuted, setIsMuted]               = useState(false)
@@ -78,6 +83,9 @@ function InterviewRoom() {
   const audioReadyRef     = useRef(false)
   const mediaRecorderRef  = useRef<MediaRecorder | null>(null)
   const audioChunksRef    = useRef<Blob[]>([])
+  // Smart scroll: only auto-scroll if user is near bottom
+  const wasNearBottomRef  = useRef(true)
+  const lastMessageCountRef = useRef(0)
 
   useEffect(() => { messagesRef.current     = messages     }, [messages])
   useEffect(() => { isLoadingRef.current    = isLoading    }, [isLoading])
@@ -96,11 +104,8 @@ function InterviewRoom() {
     return () => clearInterval(id)
   }, [])
 
-  // Fix #6: end session when timer hits 0
   useEffect(() => {
-    if (timeLeft === 0 && !isEndedRef.current) {
-      setIsEnded(true)
-    }
+    if (timeLeft === 0 && !isEndedRef.current) setIsEnded(true)
   }, [timeLeft])
 
   const formatTime = (s: number) => {
@@ -117,13 +122,28 @@ function InterviewRoom() {
     }
   }, [audioReady, pendingAudio])
 
-  // Auto-scroll
- useEffect(() => {
-  const frame = requestAnimationFrame(() => {
-    chatRef.current?.scrollTo({ top: chatRef.current.scrollHeight, behavior: 'smooth' })
-  })
-  return () => cancelAnimationFrame(frame)
-}, [messages, isLoading])
+  // Track scroll position
+  const handleScroll = useCallback(() => {
+    const el = chatRef.current
+    if (!el) return
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+    wasNearBottomRef.current = distanceFromBottom < 100
+  }, [])
+
+  // Smart auto-scroll: only if new messages AND user was near bottom
+  useEffect(() => {
+    if (messages.length === lastMessageCountRef.current) return
+    lastMessageCountRef.current = messages.length
+
+    if (!wasNearBottomRef.current) return
+
+    const frame = requestAnimationFrame(() => {
+      if (chatRef.current) {
+        chatRef.current.scrollTop = chatRef.current.scrollHeight
+      }
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [messages, isLoading])
 
   const playAudioDirect = (audioBase64: string) => {
     if (isMutedRef.current) return
@@ -131,10 +151,7 @@ function InterviewRoom() {
       if (audioRef.current) { audioRef.current.pause(); audioRef.current.src = ''; audioRef.current = null }
       const audio = new Audio(`data:audio/mpeg;base64,${audioBase64}`)
       audioRef.current = audio
-      // Fix #4: clean up on ended
-      audio.onended = () => {
-        if (audioRef.current === audio) audioRef.current = null
-      }
+      audio.onended = () => { if (audioRef.current === audio) audioRef.current = null }
       audio.play().catch(err => console.warn('Audio play failed:', err))
     } catch (err) { console.warn('Audio error:', err) }
   }
@@ -160,7 +177,6 @@ function InterviewRoom() {
     if (silenceTimer.current) clearTimeout(silenceTimer.current)
     silenceTimer.current = setTimeout(() => {
       if (!isLoadingRef.current && !isEndedRef.current && !isRecordingRef.current && !isTranscribingRef.current) {
-        // Fix #3: use ref for latest messages
         const silenceMsg: Message = { role: 'user', content: '[Candidate is silent]' }
         const newMsgs = [...messagesRef.current, silenceMsg]
         setMessages(newMsgs)
@@ -169,7 +185,8 @@ function InterviewRoom() {
     }, 30000)
   }, [])
 
-  // Fix #8: Safari-safe MediaRecorder mimeType
+  // ─── Recording ─────────────────────────────────────────────────────────────
+
   const startRecording = async () => {
     if (isLoading || isTranscribing || isEnded) return
     try {
@@ -190,6 +207,7 @@ function InterviewRoom() {
     }
   }
 
+  // No setTimeout — direct message dispatch after transcription
   const stopRecording = async () => {
     if (!isRecordingRef.current || !mediaRecorderRef.current) return
     setIsRecording(false)
@@ -207,13 +225,13 @@ function InterviewRoom() {
       fd.append('audio', blob, 'recording.webm')
       const res = await fetch('/api/transcribe', { method: 'POST', body: fd })
       const data = await res.json()
-      if (data.text?.trim()) {
-        // Fix #3: use ref, not state
-        const userMsg: Message = { role: 'user', content: data.text.trim() }
+      const text = data.text?.trim()
+      if (text) {
+        const userMsg: Message = { role: 'user', content: text }
         const newMessages = [...messagesRef.current, userMsg]
         setMessages(newMessages)
         setInput('')
-        callAdam(newMessages)
+        await callAdam(newMessages)
       }
     } catch (err) { console.error('Transcription error:', err) }
     finally { setIsTranscribing(false) }
@@ -227,7 +245,7 @@ function InterviewRoom() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          sessionId: CONFIG.sessionId,   // Fix #2: pass sessionId
+          sessionId: CONFIG.sessionId,
           config: CONFIG,
           messages: msgs,
           sessionStartTime
@@ -239,22 +257,9 @@ function InterviewRoom() {
       const newMsg: Message = { role: 'assistant', content: data.content, score: data.score }
       setMessages(prev => [...prev, newMsg])
 
-      // Fix #1: correct field name
       if (data.audioBase64) playAudio(data.audioBase64)
 
-      // Fix #7: use ref for score calculation
-      if (data.score) {
-        setOverallScore(() => {
-          const allScores = [
-            ...messagesRef.current
-              .filter(m => m.score?.score !== undefined)
-              .map(m => m.score.score),
-            data.score.score
-          ]
-          return Math.round(allScores.reduce((a: number, b: number) => a + b, 0) / allScores.length)
-        })
-        setQuestionCount(prev => prev + 1)
-      }
+      if (data.score) setQuestionCount(prev => prev + 1)
 
       if (data.isEndOfSession) { setIsEnded(true); return }
       resetSilenceTimer()
@@ -271,7 +276,6 @@ function InterviewRoom() {
     handleFirstInteraction()
     if (silenceTimer.current) clearTimeout(silenceTimer.current)
     if (audioRef.current) { audioRef.current.pause(); audioRef.current = null }
-    // Fix #3: use ref
     const userMsg: Message = { role: 'user', content: input.trim() }
     const newMessages = [...messagesRef.current, userMsg]
     setMessages(newMessages)
@@ -283,12 +287,6 @@ function InterviewRoom() {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage() }
   }
 
-  const getConfidenceColor = (level: string) => {
-    if (level === 'high')   return '#22C55E'
-    if (level === 'medium') return '#F59E0B'
-    return '#EF4444'
-  }
-
   return (
     <div
       onClick={handleFirstInteraction}
@@ -297,7 +295,7 @@ function InterviewRoom() {
       {/* Nav */}
       <div style={{ background: '#0F1117', borderBottom: '0.5px solid rgba(255,255,255,0.07)', padding: '12px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div style={{ fontWeight: 800, fontSize: 16 }}>
-          <span>Mock</span><span style={{ color: '#E85D2F' }}>Boss</span> AI
+          <span style={{ color: '#F0EDE8' }}>Barbar</span><span style={{ color: '#CC785C' }}>os</span>
         </div>
         <div style={{ textAlign: 'center' }}>
           <div style={{ fontSize: 12, fontWeight: 600 }}>{CONFIG.jobTitle} · {CONFIG.institution}</div>
@@ -318,15 +316,10 @@ function InterviewRoom() {
         </div>
       </div>
 
-      {/* Score bar */}
+      {/* Minimal status bar — score number hidden, only question count */}
       <div style={{ background: '#0F1117', borderBottom: '0.5px solid rgba(255,255,255,0.04)', padding: '6px 20px', display: 'flex', gap: 20, fontSize: 11 }}>
         <span style={{ color: 'rgba(240,237,232,0.4)' }}>
-          Score: <strong style={{ color: overallScore !== null ? (overallScore >= 70 ? '#22C55E' : overallScore >= 50 ? '#F59E0B' : '#EF4444') : 'rgba(240,237,232,0.3)' }}>
-            {overallScore !== null ? `${overallScore}/100` : '—'}
-          </strong>
-        </span>
-        <span style={{ color: 'rgba(240,237,232,0.4)' }}>
-          Q: <strong style={{ color: '#8B96FF' }}>{questionCount}</strong>
+          Question: <strong style={{ color: '#8B96FF' }}>{questionCount}</strong>
         </span>
         <span style={{ color: 'rgba(240,237,232,0.4)', marginLeft: 'auto' }}>
           {CONFIG.candidateName} · {CONFIG.sector}
@@ -336,6 +329,7 @@ function InterviewRoom() {
       {/* Chat */}
       <div
         ref={chatRef}
+        onScroll={handleScroll}
         style={{ flex: 1, overflowY: 'auto', padding: '20px 16px', display: 'flex', flexDirection: 'column', gap: 12 }}
       >
         {messages.length === 0 && (
@@ -352,34 +346,30 @@ function InterviewRoom() {
           </div>
         )}
 
-        {messages.map((msg, i) => (
-          <div
-            key={i}
-            style={{ display: 'flex', flexDirection: 'column', alignItems: msg.role === 'assistant' ? 'flex-start' : 'flex-end', maxWidth: '85%', alignSelf: msg.role === 'assistant' ? 'flex-start' : 'flex-end' }}
-          >
-            <div style={{ background: msg.role === 'assistant' ? '#1a1f2e' : '#1E3A8A', border: msg.role === 'assistant' ? '0.5px solid rgba(42,92,255,0.18)' : 'none', borderRadius: 10, padding: '10px 13px', fontSize: 13, lineHeight: 1.7 }}>
-              <div style={{ fontSize: 9, fontWeight: 600, letterSpacing: 0.5, marginBottom: 4, textTransform: 'uppercase', color: msg.role === 'assistant' ? '#8B96FF' : 'rgba(255,255,255,0.5)' }}>
-                {msg.role === 'assistant'
-                  ? <><span style={{ color: '#F0EDE8' }}>Barbar</span><span style={{ color: '#CC785C' }}>os</span> Interviewer</>
-                  : CONFIG.candidateName
-                }
-              </div>
-              {msg.content}
-              {msg.score && (
-                <div style={{ marginTop: 6, padding: '3px 8px', background: 'rgba(42,92,255,0.1)', borderRadius: 5, fontSize: 10, color: '#8B96FF' }}>
-                  Score: {msg.score.score}/100
+        {messages.map((msg, i) => {
+          const label = msg.score?.score !== undefined ? scoreLabel(msg.score.score) : null
+          return (
+            <div
+              key={i}
+              style={{ display: 'flex', flexDirection: 'column', alignItems: msg.role === 'assistant' ? 'flex-start' : 'flex-end', maxWidth: '85%', alignSelf: msg.role === 'assistant' ? 'flex-start' : 'flex-end' }}
+            >
+              <div style={{ background: msg.role === 'assistant' ? '#1a1f2e' : '#1E3A8A', border: msg.role === 'assistant' ? '0.5px solid rgba(42,92,255,0.18)' : 'none', borderRadius: 10, padding: '10px 13px', fontSize: 13, lineHeight: 1.7 }}>
+                <div style={{ fontSize: 9, fontWeight: 600, letterSpacing: 0.5, marginBottom: 4, textTransform: 'uppercase', color: msg.role === 'assistant' ? '#8B96FF' : 'rgba(255,255,255,0.5)' }}>
+                  {msg.role === 'assistant'
+                    ? <><span style={{ color: '#F0EDE8' }}>Barbar</span><span style={{ color: '#CC785C' }}>os</span> Interviewer</>
+                    : CONFIG.candidateName
+                  }
                 </div>
-              )}
-            </div>
-            {msg.voiceAnalysis && (
-              <div style={{ marginTop: 4, fontSize: 10, color: 'rgba(240,237,232,0.3)', display: 'flex', gap: 8 }}>
-                <span style={{ color: getConfidenceColor(msg.voiceAnalysis.confidence) }}>● {msg.voiceAnalysis.confidence}</span>
-                <span>{msg.voiceAnalysis.wordCount} words</span>
-                <span>{msg.voiceAnalysis.wordsPerMinute} wpm</span>
+                {msg.content}
+                {label && (
+                  <div style={{ marginTop: 6, padding: '2px 8px', background: 'rgba(255,255,255,0.04)', borderRadius: 5, fontSize: 10, color: label.color, display: 'inline-block' }}>
+                    ● {label.text}
+                  </div>
+                )}
               </div>
-            )}
-          </div>
-        ))}
+            </div>
+          )
+        })}
 
         {isLoading && (
           <div style={{ alignSelf: 'flex-start', background: '#1a1f2e', border: '0.5px solid rgba(42,92,255,0.15)', borderRadius: 10, padding: '12px 16px', display: 'flex', gap: 4, alignItems: 'center' }}>
@@ -400,7 +390,6 @@ function InterviewRoom() {
             </div>
           )}
           <div style={{ display: 'flex', gap: 8 }}>
-            {/* Fix #5: pointer events for iOS */}
             <button
               type="button"
               onPointerDown={startRecording}
@@ -441,7 +430,7 @@ function InterviewRoom() {
       ) : (
         <div style={{ padding: 20, textAlign: 'center', borderTop: '0.5px solid rgba(255,255,255,0.05)' }}>
           <div style={{ fontSize: 14, color: '#8B96FF', marginBottom: 12 }}>
-            Session ended · Final score: <strong>{overallScore ?? '—'}/100</strong>
+            Session ended · Full report being prepared
           </div>
           <button
             type="button"

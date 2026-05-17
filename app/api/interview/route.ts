@@ -2,9 +2,9 @@
 // Barbaros V4 — Interview API Route.
 // Thin adapter: HTTP ↔ engine. Zero business logic here.
 //
-// FIXES:
-// Fix #2 — score field renamed: technical_depth → domain_expertise
-// Fix #5 — Content-Type: application/json; charset=utf-8 (Arabic truncation fix)
+// FIXES APPLIED:
+// Fix #2 — score field normalized: technical_depth → domain_expertise
+// Fix #5 — Content-Type: application/json; charset=utf-8 (Arabic correctness)
 
 import { NextRequest, NextResponse } from 'next/server'
 import {
@@ -34,8 +34,7 @@ interface SessionStore {
 
 const sessions = new Map<string, SessionStore>()
 
-// ─── Score Extraction ─────────────────────────────────────────────────────────
-// Fix #2: normalize technical_depth → domain_expertise in any legacy scores
+// ─── Score Extraction (with legacy field normalization) ───────────────────────
 
 function extractScore(content: string): Record<string, unknown> | null {
   const match = content.match(/<score>([\s\S]*?)<\/score>/)
@@ -43,7 +42,7 @@ function extractScore(content: string): Record<string, unknown> | null {
   try {
     const raw = JSON.parse(match[1].trim()) as Record<string, unknown>
 
-    // Normalize legacy field name if model still outputs technical_depth
+    // Fix #2: normalize legacy field name if model outputs technical_depth
     if ('technical_depth' in raw && !('domain_expertise' in raw)) {
       raw.domain_expertise = raw.technical_depth
       delete raw.technical_depth
@@ -86,7 +85,6 @@ export async function POST(req: NextRequest) {
       sessionId: string
     }
 
-    // Validate
     if (!validateConfig(config)) {
       return NextResponse.json(
         { success: false, error: 'Invalid interview config' },
@@ -103,7 +101,6 @@ export async function POST(req: NextRequest) {
 
     const now = Date.now()
 
-    // Get or create session store
     let store = sessions.get(sessionId)
     if (!store) {
       store = {
@@ -116,7 +113,6 @@ export async function POST(req: NextRequest) {
       sessions.set(sessionId, store)
     }
 
-    // Run engine
     const output = await runEngine({
       config,
       messages:         messages ?? [],
@@ -128,7 +124,6 @@ export async function POST(req: NextRequest) {
       now,
     })
 
-    // Merge state patches
     store.state         = { ...store.state, ...output.statePatch }
     store.weaknessState = output.weaknessPatch
     store.growthState   = output.growthPatch
@@ -137,16 +132,14 @@ export async function POST(req: NextRequest) {
       store.previousSnapshot = output.snapshot
     }
 
-    // Extract and normalize score
     const score        = extractScore(output.content)
     const cleanContent = stripScoreTag(output.content)
 
-    // Clean up when done
     if (output.isEndOfSession) {
       sessions.delete(sessionId)
     }
 
-    // Fix #5: charset=utf-8 ensures Arabic characters serialize correctly
+    // Fix #5: explicit charset=utf-8 ensures Arabic characters serialize correctly
     return new NextResponse(
       JSON.stringify({
         success:        true,

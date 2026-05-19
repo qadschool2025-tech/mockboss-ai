@@ -94,7 +94,6 @@ function getCompetencyCoverageRatio(state: InterviewState): number {
 function getStrongCompetencyRatio(state: InterviewState): number {
   const competencies = Object.values(state.competencyCoverage);
   if (competencies.length === 0) return 1;
-  // coverage is 0-100; 60+ is "strong evidence"
   const strong = competencies.filter((c) => c.coverage >= 60).length;
   return strong / competencies.length;
 }
@@ -180,8 +179,6 @@ function evaluatePhaseSpecificSignals(
 ): PhaseTransitionResult {
   switch (current) {
     case "opening":
-      // Move on after 1+ opening questions with decent engagement.
-      // engagement is 0-100 in the v3 contract.
       if (
         state.phaseQuestionCount >= 1 &&
         state.candidateProfile.engagement >= 40
@@ -196,7 +193,6 @@ function evaluatePhaseSpecificSignals(
       break;
 
     case "motivation":
-      // Brief phase: 2 questions usually enough to surface motivation.
       if (state.phaseQuestionCount >= 2) {
         return {
           previousPhase: current,
@@ -208,7 +204,6 @@ function evaluatePhaseSpecificSignals(
       break;
 
     case "cv_deep_dive":
-      // Move to technical when ≥40% of competencies have been touched.
       if (getCompetencyCoverageRatio(state) >= 0.4) {
         return {
           previousPhase: current,
@@ -220,7 +215,6 @@ function evaluatePhaseSpecificSignals(
       break;
 
     case "technical":
-      // Move to behavioral when ≥50% of competencies have strong evidence.
       if (getStrongCompetencyRatio(state) >= 0.5) {
         return {
           previousPhase: current,
@@ -232,8 +226,6 @@ function evaluatePhaseSpecificSignals(
       break;
 
     case "behavioral":
-      // Move to pressure when behavioral coverage is solid
-      // OR when contradictions have piled up (probe them under pressure).
       if (getStrongCompetencyRatio(state) >= 0.6) {
         return {
           previousPhase: current,
@@ -253,7 +245,6 @@ function evaluatePhaseSpecificSignals(
       break;
 
     case "pressure":
-      // Move to closing once pressure has been applied a couple of times.
       if (state.metrics.pressureEscalations >= 2) {
         return {
           previousPhase: current,
@@ -265,7 +256,6 @@ function evaluatePhaseSpecificSignals(
       break;
 
     case "closing":
-      // Terminal phase — never auto-transition further.
       break;
   }
 
@@ -287,7 +277,6 @@ export function shouldEndSession(state: InterviewState): boolean {
   const timeRemaining = getTimeRemainingMs(state);
   if (timeRemaining <= 0) return true;
 
-  // In closing phase + reached max closing questions
   if (
     state.phase === "closing" &&
     state.phaseQuestionCount >= (MAX_QUESTIONS_PER_PHASE.closing ?? 2)
@@ -299,7 +288,7 @@ export function shouldEndSession(state: InterviewState): boolean {
 }
 
 // ─────────────────────────────────────────────────────────────
-// SECTION 6 — TELEMETRY (debugging / prompt context)
+// SECTION 6 — TELEMETRY
 // ─────────────────────────────────────────────────────────────
 
 export interface PhaseProgressSnapshot {
@@ -309,8 +298,8 @@ export interface PhaseProgressSnapshot {
   phaseElapsedMs: number;
   phaseBudgetMs: number;
   sessionTimeRemainingMs: number;
-  competencyCoverage: number;     // 0-1 ratio
-  strongCompetencyRatio: number;  // 0-1 ratio
+  competencyCoverage: number;
+  strongCompetencyRatio: number;
 }
 
 export function getPhaseProgress(
@@ -328,15 +317,10 @@ export function getPhaseProgress(
   };
 }
 
-/**
- * Derive an overall progress percentage (0-100) for the UI.
- * Combines time elapsed and phase position.
- */
 export function calculateInterviewProgress(state: InterviewState): number {
   const phaseIdx = PHASE_ORDER.indexOf(state.phase);
   const totalPhases = PHASE_ORDER.length;
 
-  // Phase contribution: how many phases completed + progress in current
   const maxForPhase = MAX_QUESTIONS_PER_PHASE[state.phase] ?? 5;
   const phaseProgress = Math.min(
     1,
@@ -344,12 +328,56 @@ export function calculateInterviewProgress(state: InterviewState): number {
   );
   const phaseScore = (phaseIdx + phaseProgress) / totalPhases;
 
-  // Time contribution
   const totalTime = getSessionTimeLimitMs(state);
   const elapsed = getSessionDurationMs(state);
   const timeScore = Math.min(1, elapsed / Math.max(1, totalTime));
 
-  // Weighted blend: phase position matters more than raw time
   const combined = phaseScore * 0.65 + timeScore * 0.35;
   return Math.round(Math.max(0, Math.min(1, combined)) * 100);
+}
+
+// ─────────────────────────────────────────────────────────────
+// SECTION 7 — ALIASES (for engine.ts compatibility)
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * advancePhase — alias used by engine.ts
+ * Returns { phase, changed } compatible with engine.ts expectations.
+ */
+export function advancePhase(
+  currentPhase: InterviewPhase,
+  messageCount:  number,
+  elapsedMinutes: number
+): { phase: InterviewPhase; changed: boolean } {
+  // Build a minimal stub state for evaluatePhaseTransition
+  // Since engine.ts passes (phase, messageCount, elapsedMinutes),
+  // we use phaseQuestionCount from messageCount approximation.
+  const stubState = {
+    phase: currentPhase,
+    phaseQuestionCount: Math.floor(messageCount / 2),
+    phaseStartedAt: Date.now() - elapsedMinutes * 60 * 1000,
+    competencyCoverage: {},
+    contradictions: [],
+    isComplete: false,
+    metrics: {
+      startedAt: Date.now() - elapsedMinutes * 60 * 1000,
+      pressureEscalations: 0,
+    },
+    candidateProfile: { engagement: 50 },
+    config: { plan: 'go' },
+  } as unknown as InterviewState
+
+  const result = evaluatePhaseTransition(stubState)
+
+  return {
+    phase:   result.nextPhase,
+    changed: result.transitioned,
+  }
+}
+
+/**
+ * isSessionComplete — alias used by engine.ts
+ */
+export function isSessionComplete(state: InterviewState): boolean {
+  return shouldEndSession(state)
 }

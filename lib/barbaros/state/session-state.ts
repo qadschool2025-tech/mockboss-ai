@@ -47,6 +47,12 @@ import {
 import { fingerprintQuestion } from "../utils/text";
 import { sanitizeConfig, normalizeSector } from "../utils/sanitization";
 
+// ─── Type Alias ───────────────────────────────────────────────────────────────
+// Engine and route code refers to "SessionState"; internally it's "InterviewState".
+// Re-exported here so external modules can import { SessionState } from this file.
+
+export type SessionState = InterviewState;
+
 // Local constant — kept here because it's structurally tied to state shape,
 // not a tunable knob.
 const STATE_VERSION = 1 as const;
@@ -133,6 +139,38 @@ export function createInitialState(
     interviewProgress: 0,
     isComplete: false,
   };
+}
+
+// ─── Public alias used by index.ts and route.ts ──────────────────────────────
+// New name expected externally; internal code may still use createInitialState.
+// We accept (sessionId, now) signature for route.ts compatibility — but since
+// the route doesn't pass a full InterviewConfig, we build a stub.
+// The engine receives the real config and reconciles state on first turn.
+
+export function createInitialSessionState(
+  sessionIdOrConfig: string | InterviewConfig,
+  now: number
+): InterviewState {
+  // If called with (sessionId, now) — route.ts pattern — build minimal config
+  if (typeof sessionIdOrConfig === "string") {
+    const stubConfig: InterviewConfig = {
+      sessionId:       sessionIdOrConfig,
+      candidateName:   "",
+      jobTitle:        "",
+      institution:     "",
+      sector:          "General",
+      yearsExperience: "",
+      language:        "en",
+      plan:            "free",
+      jobRequirements: "",
+      isCareerSwitch:  false,
+      cvSummary:       "",
+      difficulty:      "standard",
+    } as InterviewConfig;
+    return createInitialState(stubConfig, now);
+  }
+  // Otherwise it's a real config
+  return createInitialState(sessionIdOrConfig, now);
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -363,9 +401,6 @@ export function recordSilenceEvent(
 /**
  * Append a normalized score to the score history and update the
  * running average. The average is maintained incrementally.
- *
- * TODO(V5): Move scores[] out of state into a separate analytics
- * pipeline. See note in types.ts InterviewState.scores.
  */
 export function appendScore(
   state: InterviewState,
@@ -411,11 +446,6 @@ export function serializeState(state: InterviewState): string {
 
 /**
  * Deserialize a persisted state.
- *
- * TODO(V5): Replace `as InterviewState` cast with a proper schema
- * validator (zod or hand-written) to catch malformed payloads,
- * tampered cookies, and version drift defensively.
- *
  * Current safety: only validates `version` field and JSON parsability.
  */
 export function deserializeState(json: string): InterviewState | null {

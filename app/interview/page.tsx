@@ -83,7 +83,6 @@ function InterviewRoom() {
   const audioReadyRef     = useRef(false)
   const mediaRecorderRef  = useRef<MediaRecorder | null>(null)
   const audioChunksRef    = useRef<Blob[]>([])
-  // Smart scroll: only auto-scroll if user is near bottom
   const wasNearBottomRef  = useRef(true)
   const lastMessageCountRef = useRef(0)
 
@@ -130,17 +129,13 @@ function InterviewRoom() {
     wasNearBottomRef.current = distanceFromBottom < 100
   }, [])
 
-  // Smart auto-scroll: only if new messages AND user was near bottom
+  // Smart auto-scroll
   useEffect(() => {
     if (messages.length === lastMessageCountRef.current) return
     lastMessageCountRef.current = messages.length
-
     if (!wasNearBottomRef.current) return
-
     const frame = requestAnimationFrame(() => {
-      if (chatRef.current) {
-        chatRef.current.scrollTop = chatRef.current.scrollHeight
-      }
+      if (chatRef.current) chatRef.current.scrollTop = chatRef.current.scrollHeight
     })
     return () => cancelAnimationFrame(frame)
   }, [messages, isLoading])
@@ -207,7 +202,6 @@ function InterviewRoom() {
     }
   }
 
-  // No setTimeout — direct message dispatch after transcription
   const stopRecording = async () => {
     if (!isRecordingRef.current || !mediaRecorderRef.current) return
     setIsRecording(false)
@@ -287,6 +281,30 @@ function InterviewRoom() {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage() }
   }
 
+  // ─── Save session and navigate to report ─────────────────────────────────
+
+  const goToReport = () => {
+    try {
+      const scored = messagesRef.current.filter(m => m.score?.score !== undefined)
+      const finalScore = scored.length
+        ? Math.round(scored.reduce((sum, m) => sum + (m.score.score ?? 0), 0) / scored.length)
+        : 0
+
+      sessionStorage.setItem('barbaros_report', JSON.stringify({
+        messages:       messagesRef.current,
+        finalScore,
+        candidateName:  CONFIG.candidateName,
+        jobTitle:       CONFIG.jobTitle,
+        institution:    CONFIG.institution,
+        sector:         CONFIG.sector,
+        yearsExperience: CONFIG.yearsExperience,
+        language:       CONFIG.language,
+        plan:           CONFIG.plan,
+      }))
+    } catch (_) {}
+    window.location.href = '/report'
+  }
+
   return (
     <div
       onClick={handleFirstInteraction}
@@ -316,7 +334,7 @@ function InterviewRoom() {
         </div>
       </div>
 
-      {/* Minimal status bar — score number hidden, only question count */}
+      {/* Status bar */}
       <div style={{ background: '#0F1117', borderBottom: '0.5px solid rgba(255,255,255,0.04)', padding: '6px 20px', display: 'flex', gap: 20, fontSize: 11 }}>
         <span style={{ color: 'rgba(240,237,232,0.4)' }}>
           Question: <strong style={{ color: '#8B96FF' }}>{questionCount}</strong>
@@ -381,7 +399,7 @@ function InterviewRoom() {
         )}
       </div>
 
-      {/* Input */}
+      {/* Input / End screen */}
       {!isEnded ? (
         <div style={{ padding: '10px 16px', borderTop: '0.5px solid rgba(255,255,255,0.05)' }}>
           {micError && (
@@ -428,17 +446,49 @@ function InterviewRoom() {
           </div>
         </div>
       ) : (
-        <div style={{ padding: 20, textAlign: 'center', borderTop: '0.5px solid rgba(255,255,255,0.05)' }}>
-          <div style={{ fontSize: 14, color: '#8B96FF', marginBottom: 12 }}>
-            Session ended · Full report being prepared
+        // ─── END SCREEN ──────────────────────────────────────────────────────
+        <div style={{ padding: '24px 20px', borderTop: '0.5px solid rgba(255,255,255,0.05)', background: '#0F1117' }}>
+          <div style={{ fontSize: 13, color: '#8B96FF', marginBottom: 20, textAlign: 'center', fontWeight: 600 }}>
+            Interview complete — your report is ready
           </div>
-          <button
-            type="button"
-            onClick={() => window.location.href = '/onboarding'}
-            style={{ padding: '10px 24px', background: '#2563EB', border: 'none', borderRadius: 8, color: '#fff', fontSize: 13, cursor: 'pointer' }}
-          >
-            New Interview
-          </button>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <button
+              type="button"
+              onClick={goToReport}
+              style={{
+                padding: '13px 24px',
+                background: '#CC785C',
+                border: 'none',
+                borderRadius: 10,
+                color: '#fff',
+                fontSize: 14,
+                fontWeight: 800,
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+                width: '100%',
+              }}
+            >
+              View Full Report →
+            </button>
+            <button
+              type="button"
+              onClick={() => { window.location.href = '/onboarding' }}
+              style={{
+                padding: '11px 24px',
+                background: 'transparent',
+                border: '0.5px solid rgba(255,255,255,0.15)',
+                borderRadius: 10,
+                color: 'rgba(240,237,232,0.5)',
+                fontSize: 13,
+                fontWeight: 600,
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+                width: '100%',
+              }}
+            >
+              Start New Interview
+            </button>
+          </div>
         </div>
       )}
 

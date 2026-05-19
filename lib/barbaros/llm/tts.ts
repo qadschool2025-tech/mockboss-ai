@@ -1,459 +1,138 @@
-// lib/barbaros/state/session-state.ts
-// The heart of Barbaros: session state creation, updates, and persistence.
+// lib/barbaros/llm/tts.ts
+// ElevenLabs TTS wrapper for Barbaros.
 //
-// CONTRACT CHECK (against types.ts v3):
-//   InterviewState fields used:
-//     version, config, messages, phase, phaseQuestionCount, phaseStartedAt,
-//     pressureMode, competencyCoverage, recentTopics, askedQuestionFingerprints,
-//     contradictions, candidateProfile, metrics, scores, interviewProgress,
-//     isComplete
-//   Message fields used:
-//     role, content, timestamp (required), isQuestion (optional)
-//   SessionMetrics fields used:
-//     startedAt, lastActivityAt, totalQuestions, totalAnswers,
-//     averageResponseLength, silenceEvents, contradictionCount,
-//     pressureEscalations, averageScore, hesitationCount, vaguenessCount,
-//     specificityScore
-//   CandidateProfile fields used:
-//     strengths, weaknesses, confidenceLevel, ownershipScore,
-//     clarity, depth, consistency, engagement, lastUpdatedAt
-//
-// ARCHITECTURAL RULES:
-//   - All operations are immutable (return new state, never mutate).
-//   - All time-sensitive operations accept `now` as a parameter
-//     for deterministic testing and replay.
-//   - This module owns state creation, message appending, phase moves,
-//     and serialization. Higher-level analytics live in dedicated modules.
+// Exports:
+//   - textToSpeech       — returns raw ArrayBuffer (low-level)
+//   - textToSpeechBase64 — returns { success, base64, error } (used by API routes)
+//   - synthesizeSpeech   — returns base64 string or null (used by engine.ts)
 
-import type {
-  InterviewState,
-  InterviewConfig,
-  Message,
-  InterviewPhase,
-  CandidateProfile,
-  SessionMetrics,
-  CompetencyCoverage,
-  Contradiction,
-  PressureMode,
-  NormalizedScore,
-} from "../types";
-import {
-  PHASE_ORDER,
-  DEFAULT_PRESSURE_MODE,
-  UNIVERSAL_COMPETENCIES,
-  SECTOR_COMPETENCIES,
-  LIMITS,
-} from "../constants";
-import { fingerprintQuestion } from "../utils/text";
-import { sanitizeConfig, normalizeSector } from "../utils/sanitization";
+const ELEVENLABS_BASE_URL = "https://api.elevenlabs.io/v1";
 
-// ─── Type Alias ───────────────────────────────────────────────────────────────
-// Engine and route code refers to "SessionState"; internally it's "InterviewState".
-// Re-exported here so external modules can import { SessionState } from this file.
+// ─── Types ────────────────────────────────────────────────────────────────────
 
-export type SessionState = InterviewState;
+export interface TTSOptions {
+  text: string;
+  voiceId?: string;
+  modelId?: string;
+  stability?: number;
+  similarityBoost?: number;
+  style?: number;
+  useSpeakerBoost?: boolean;
+}
 
-// Local constant — kept here because it's structurally tied to state shape,
-// not a tunable knob.
-const STATE_VERSION = 1 as const;
+export interface TTSResult {
+  success: boolean;
+  audioBuffer?: ArrayBuffer;
+  error?: string;
+}
 
-// ─────────────────────────────────────────────────────────────
-// SECTION 1 — INITIAL STATE FACTORIES
-// ─────────────────────────────────────────────────────────────
+interface VoiceSettings {
+  stability: number;
+  similarity_boost: number;
+  style: number;
+  use_speaker_boost: boolean;
+}
 
-function createInitialMetrics(now: number): SessionMetrics {
+interface ElevenLabsRequestBody {
+  text: string;
+  model_id: string;
+  voice_settings: VoiceSettings;
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function getApiKey(): string {
+  const key = process.env.ELEVENLABS_API_KEY;
+  if (!key) throw new Error("ELEVENLABS_API_KEY is not set");
+  return key;
+}
+
+function getVoiceId(override?: string): string {
+  const id = override ?? process.env.ELEVENLABS_VOICE_ID;
+  if (!id) throw new Error("ELEVENLABS_VOICE_ID is not set");
+  return id;
+}
+
+function buildRequestBody(opts: TTSOptions): ElevenLabsRequestBody {
   return {
-    averageScore: 0,
-    averageResponseLength: 0,
-    hesitationCount: 0,
-    vaguenessCount: 0,
-    silenceEvents: 0,
-    contradictionCount: 0,
-    specificityScore: 0,
-    totalQuestions: 0,
-    totalAnswers: 0,
-    pressureEscalations: 0,
-    startedAt: now,
-    lastActivityAt: now,
-  };
-}
-
-function createInitialProfile(now: number): CandidateProfile {
-  return {
-    strengths: [],
-    weaknesses: [],
-    confidenceLevel: 50,
-    ownershipScore: 50,
-    clarity: 50,
-    depth: 50,
-    consistency: 100,
-    engagement: 50,
-    lastUpdatedAt: now,
-  };
-}
-
-function buildCompetencyCoverage(
-  sector: string,
-  now: number
-): Record<string, CompetencyCoverage> {
-  const coverage: Record<string, CompetencyCoverage> = {};
-  const normalizedSector = normalizeSector(sector);
-  const sectorComps = SECTOR_COMPETENCIES[normalizedSector] ?? [];
-  const allCompetencies = [...UNIVERSAL_COMPETENCIES, ...sectorComps];
-
-  for (const comp of allCompetencies) {
-    coverage[comp] = {
-      coverage: 0,
-      evidenceCount: 0,
-      lastUpdated: now,
-    };
-  }
-  return coverage;
-}
-
-// ─────────────────────────────────────────────────────────────
-// SECTION 2 — STATE CREATION
-// ─────────────────────────────────────────────────────────────
-
-export function createInitialState(
-  rawConfig: InterviewConfig,
-  now: number
-): InterviewState {
-  const config = sanitizeConfig(rawConfig);
-
-  return {
-    version: STATE_VERSION,
-    config,
-    messages: [],
-    phase: "opening",
-    phaseQuestionCount: 0,
-    phaseStartedAt: now,
-    pressureMode: DEFAULT_PRESSURE_MODE,
-    competencyCoverage: buildCompetencyCoverage(config.sector, now),
-    recentTopics: [],
-    askedQuestionFingerprints: [],
-    contradictions: [],
-    candidateProfile: createInitialProfile(now),
-    metrics: createInitialMetrics(now),
-    scores: [],
-    interviewProgress: 0,
-    isComplete: false,
-  };
-}
-
-// ─── Public alias used by index.ts and route.ts ──────────────────────────────
-// New name expected externally; internal code may still use createInitialState.
-// We accept (sessionId, now) signature for route.ts compatibility — but since
-// the route doesn't pass a full InterviewConfig, we build a stub.
-// The engine receives the real config and reconciles state on first turn.
-
-export function createInitialSessionState(
-  sessionIdOrConfig: string | InterviewConfig,
-  now: number
-): InterviewState {
-  // If called with (sessionId, now) — route.ts pattern — build minimal config
-  if (typeof sessionIdOrConfig === "string") {
-    const stubConfig: InterviewConfig = {
-      sessionId:       sessionIdOrConfig,
-      candidateName:   "",
-      jobTitle:        "",
-      institution:     "",
-      sector:          "General",
-      yearsExperience: "",
-      language:        "en",
-      plan:            "free",
-      jobRequirements: "",
-      isCareerSwitch:  false,
-      cvSummary:       "",
-      difficulty:      "standard",
-    } as InterviewConfig;
-    return createInitialState(stubConfig, now);
-  }
-  // Otherwise it's a real config
-  return createInitialState(sessionIdOrConfig, now);
-}
-
-// ─────────────────────────────────────────────────────────────
-// SECTION 3 — MESSAGE OPERATIONS (immutable patches)
-// ─────────────────────────────────────────────────────────────
-
-/**
- * Append a message to state.
- *
- * For assistant messages, `phaseQuestionCount` is incremented ONLY when
- * the message is flagged as a question (`isQuestion: true`) OR when
- * the content contains a question mark as a fallback heuristic.
- * This prevents acknowledgments and closing remarks from inflating
- * the phase question counter.
- */
-export function appendMessage(
-  state: InterviewState,
-  message: Message
-): InterviewState {
-  const messages = [...state.messages, message];
-  const metrics = updateMetricsForMessage(state.metrics, message);
-
-  let askedQuestionFingerprints = state.askedQuestionFingerprints;
-  let phaseQuestionCount = state.phaseQuestionCount;
-
-  if (message.role === "assistant") {
-    const isQuestion = detectIsQuestion(message);
-
-    if (isQuestion) {
-      const fp = fingerprintQuestion(message.content);
-      if (fp && !askedQuestionFingerprints.includes(fp)) {
-        askedQuestionFingerprints = [
-          ...askedQuestionFingerprints,
-          fp,
-        ].slice(-LIMITS.MAX_ASKED_QUESTIONS);
-      }
-      phaseQuestionCount = phaseQuestionCount + 1;
-    }
-  }
-
-  return {
-    ...state,
-    messages,
-    metrics,
-    askedQuestionFingerprints,
-    phaseQuestionCount,
-  };
-}
-
-function detectIsQuestion(message: Message): boolean {
-  // Prefer explicit flag from the engine
-  if (typeof message.isQuestion === "boolean") return message.isQuestion;
-  // Fallback heuristic: contains a question mark (Latin or Arabic)
-  return /[?؟]/.test(message.content);
-}
-
-function updateMetricsForMessage(
-  metrics: SessionMetrics,
-  message: Message
-): SessionMetrics {
-  const next: SessionMetrics = {
-    ...metrics,
-    lastActivityAt: message.timestamp,
-  };
-
-  if (message.role === "assistant" && detectIsQuestion(message)) {
-    next.totalQuestions = metrics.totalQuestions + 1;
-  }
-
-  if (message.role === "user") {
-    next.totalAnswers = metrics.totalAnswers + 1;
-    const wordCount = countWords(message.content);
-    const prevAvg = metrics.averageResponseLength;
-    const prevAnswers = metrics.totalAnswers;
-    next.averageResponseLength =
-      prevAnswers === 0
-        ? wordCount
-        : (prevAvg * prevAnswers + wordCount) / (prevAnswers + 1);
-  }
-
-  return next;
-}
-
-function countWords(text: string): number {
-  const trimmed = text.trim();
-  if (trimmed.length === 0) return 0;
-  return trimmed.split(/\s+/).length;
-}
-
-// ─────────────────────────────────────────────────────────────
-// SECTION 4 — PHASE OPERATIONS
-// ─────────────────────────────────────────────────────────────
-
-export function transitionPhase(
-  state: InterviewState,
-  nextPhase: InterviewPhase,
-  now: number
-): InterviewState {
-  if (nextPhase === state.phase) return state;
-
-  return {
-    ...state,
-    phase: nextPhase,
-    phaseStartedAt: now,
-    phaseQuestionCount: 0,
-  };
-}
-
-export function getNextPhase(
-  current: InterviewPhase
-): InterviewPhase | null {
-  const idx = PHASE_ORDER.indexOf(current);
-  if (idx === -1 || idx === PHASE_ORDER.length - 1) return null;
-  return PHASE_ORDER[idx + 1];
-}
-
-
-// ─────────────────────────────────────────────────────────────
-// SECTION 5 — TOPIC MEMORY
-// ─────────────────────────────────────────────────────────────
-// Topic logic lives entirely in topic-memory.ts.
-// session-state.ts only owns state creation and primitive operations.
-// See: recordTopicsFromText() in state/topic-memory.ts
-
-// ─────────────────────────────────────────────────────────────
-// SECTION 6 — COMPETENCY OPERATIONS
-// ─────────────────────────────────────────────────────────────
-
-/**
- * Mark a competency as probed and adjust its coverage score.
- * `coverageDelta` is added to the existing coverage (clamped 0-100).
- */
-export function probeCompetency(
-  state: InterviewState,
-  competency: string,
-  now: number,
-  coverageDelta: number = 0
-): InterviewState {
-  const existing = state.competencyCoverage[competency];
-  if (!existing) return state;
-
-  const updated: CompetencyCoverage = {
-    coverage: Math.max(0, Math.min(100, existing.coverage + coverageDelta)),
-    evidenceCount: existing.evidenceCount + 1,
-    lastUpdated: now,
-  };
-
-  return {
-    ...state,
-    competencyCoverage: {
-      ...state.competencyCoverage,
-      [competency]: updated,
+    text: opts.text,
+    model_id: opts.modelId ?? "eleven_multilingual_v2",
+    voice_settings: {
+      stability: opts.stability ?? 0.5,
+      similarity_boost: opts.similarityBoost ?? 0.75,
+      style: opts.style ?? 0.0,
+      use_speaker_boost: opts.useSpeakerBoost ?? true,
     },
   };
 }
 
-// ─────────────────────────────────────────────────────────────
-// SECTION 7 — CONTRADICTIONS
-// ─────────────────────────────────────────────────────────────
+// ─── Low-level: ArrayBuffer ───────────────────────────────────────────────────
 
-export function recordContradiction(
-  state: InterviewState,
-  contradiction: Contradiction
-): InterviewState {
-  const contradictions = [...state.contradictions, contradiction].slice(
-    -LIMITS.MAX_CONTRADICTIONS
-  );
-  return {
-    ...state,
-    contradictions,
-    metrics: {
-      ...state.metrics,
-      contradictionCount: state.metrics.contradictionCount + 1,
-    },
-  };
-}
-
-// ─────────────────────────────────────────────────────────────
-// SECTION 8 — PROFILE & PRESSURE
-// ─────────────────────────────────────────────────────────────
-
-export function updateProfile(
-  state: InterviewState,
-  patch: Partial<CandidateProfile>,
-  now: number
-): InterviewState {
-  return {
-    ...state,
-    candidateProfile: {
-      ...state.candidateProfile,
-      ...patch,
-      lastUpdatedAt: now,
-    },
-  };
-}
-
-export function setPressureMode(
-  state: InterviewState,
-  mode: PressureMode
-): InterviewState {
-  if (mode === state.pressureMode) return state;
-  return {
-    ...state,
-    pressureMode: mode,
-    metrics: {
-      ...state.metrics,
-      pressureEscalations: state.metrics.pressureEscalations + 1,
-    },
-  };
-}
-
-// ─────────────────────────────────────────────────────────────
-// SECTION 9 — SILENCE, SCORES & PROGRESS
-// ─────────────────────────────────────────────────────────────
-
-export function recordSilenceEvent(
-  state: InterviewState
-): InterviewState {
-  return {
-    ...state,
-    metrics: {
-      ...state.metrics,
-      silenceEvents: state.metrics.silenceEvents + 1,
-    },
-  };
-}
-
-/**
- * Append a normalized score to the score history and update the
- * running average. The average is maintained incrementally.
- */
-export function appendScore(
-  state: InterviewState,
-  score: NormalizedScore
-): InterviewState {
-  const scores = [...state.scores, score];
-  const prevAvg = state.metrics.averageScore;
-  const prevCount = state.scores.length;
-  const newAverage =
-    prevCount === 0
-      ? score.overall
-      : (prevAvg * prevCount + score.overall) / (prevCount + 1);
-
-  return {
-    ...state,
-    scores,
-    metrics: {
-      ...state.metrics,
-      averageScore: newAverage,
-    },
-  };
-}
-
-export function setInterviewProgress(
-  state: InterviewState,
-  progress: number
-): InterviewState {
-  const clamped = Math.max(0, Math.min(100, progress));
-  return { ...state, interviewProgress: clamped };
-}
-
-// ─────────────────────────────────────────────────────────────
-// SECTION 10 — COMPLETION & SERIALIZATION
-// ─────────────────────────────────────────────────────────────
-
-export function markComplete(state: InterviewState): InterviewState {
-  return { ...state, isComplete: true };
-}
-
-export function serializeState(state: InterviewState): string {
-  return JSON.stringify(state);
-}
-
-/**
- * Deserialize a persisted state.
- * Current safety: only validates `version` field and JSON parsability.
- */
-export function deserializeState(json: string): InterviewState | null {
+export async function textToSpeech(opts: TTSOptions): Promise<TTSResult> {
   try {
-    const parsed = JSON.parse(json) as InterviewState;
-    if (parsed?.version !== STATE_VERSION) return null;
-    return parsed;
-  } catch {
+    const apiKey = getApiKey();
+    const voiceId = getVoiceId(opts.voiceId);
+    const body = buildRequestBody(opts);
+
+    const response = await fetch(
+      `${ELEVENLABS_BASE_URL}/text-to-speech/${voiceId}`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "xi-api-key": apiKey,
+          Accept: "audio/mpeg",
+        },
+        body: JSON.stringify(body),
+      }
+    );
+
+    if (!response.ok) {
+      const errText = await response.text().catch(() => "unknown error");
+      return {
+        success: false,
+        error: `ElevenLabs API error ${response.status}: ${errText}`,
+      };
+    }
+
+    const audioBuffer = await response.arrayBuffer();
+    return { success: true, audioBuffer };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { success: false, error: message };
+  }
+}
+
+// ─── Mid-level: { success, base64, error } ────────────────────────────────────
+
+export async function textToSpeechBase64(opts: TTSOptions): Promise<{
+  success: boolean;
+  base64?: string;
+  error?: string;
+}> {
+  const result = await textToSpeech(opts);
+  if (!result.success || !result.audioBuffer) {
+    return { success: false, error: result.error };
+  }
+  const bytes = new Uint8Array(result.audioBuffer);
+  let binary = "";
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  const base64 = btoa(binary);
+  return { success: true, base64 };
+}
+
+// ─── High-level: simple string-or-null (used by engine.ts) ────────────────────
+// engine.ts expects: `await synthesizeSpeech(text)` → string | null
+
+export async function synthesizeSpeech(text: string): Promise<string | null> {
+  if (!text || text.trim().length === 0) return null;
+
+  const result = await textToSpeechBase64({ text });
+  if (!result.success || !result.base64) {
+    console.warn("[tts] synthesizeSpeech failed:", result.error);
     return null;
   }
+  return result.base64;
 }

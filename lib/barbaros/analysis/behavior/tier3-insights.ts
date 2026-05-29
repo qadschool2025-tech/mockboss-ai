@@ -21,7 +21,6 @@ import type {
   ValidatedSignal,
 } from './behavior-types';
 
-
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const MAX_SIGNALS_TO_SEND     = 8;
@@ -372,7 +371,7 @@ function inferPatternCategory(signalTypes: BehaviorSignalType[]): PatternCategor
   return [...counts.entries()].reduce(
     (best, [cat, count]) => (count > best[1] ? [cat, count] : best),
     ['engagement', 0] as [PatternCategory, number]
-  )[0];
+  )[0] as PatternCategory;
 }
 
 function inferTrendDirection(signalTypes: BehaviorSignalType[]): TrendDirection | null {
@@ -418,10 +417,16 @@ function inferDominantSignal(signalTypes: BehaviorSignalType[]): BehaviorSignalT
     counts.set(type, (counts.get(type) ?? 0) + 1);
   }
 
-  return [...counts.entries()].reduce(
-    (best, [type, count]) => (count > best[1] ? [type, count] : best),
-    [null, 0] as [BehaviorSignalType | null, number]
-  )[0];
+  let dominant: BehaviorSignalType | null = null;
+  let highest = 0;
+  for (const [type, count] of counts.entries()) {
+    if (count > highest) {
+      highest = count;
+      dominant = type;
+    }
+  }
+
+  return dominant;
 }
 
 // ─── Insight Threshold ────────────────────────────────────────────────────────

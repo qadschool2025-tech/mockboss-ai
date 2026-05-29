@@ -1,4 +1,3 @@
-
 // lib/barbaros/analysis/behavior/tier2-validator.ts
 // CONTRACT: Tier2 LLM spot-check validator.
 // Receives: targeted signals + max 3 recent messages
@@ -70,7 +69,7 @@ export async function validateSignals(
   try {
     const raw = await callClaude({
       systemPrompt: buildSystemPrompt(),
-      userMessage: prompt,
+      messages: [{ role: 'user', content: prompt }],
       maxTokens: VALIDATION_MAX_TOKENS,
     });
 

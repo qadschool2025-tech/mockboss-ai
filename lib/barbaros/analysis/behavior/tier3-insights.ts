@@ -21,6 +21,7 @@ import type {
   ValidatedSignal,
 } from './behavior-types';
 
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const MAX_SIGNALS_TO_SEND     = 8;

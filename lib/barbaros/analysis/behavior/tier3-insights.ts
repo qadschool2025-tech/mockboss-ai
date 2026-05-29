@@ -485,3 +485,4 @@ export function computeTier3Confidence(result: Tier3InsightResult): number {
   const total = result.insights.reduce((sum, i) => sum + i.confidenceScore, 0);
   return Math.round((total / result.insights.length) * 100) / 100;
 }
+

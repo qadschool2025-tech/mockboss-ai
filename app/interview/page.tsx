@@ -3,8 +3,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-
 interface VoiceAnalysis {
   wordsPerMinute: number
   duration: number
@@ -19,8 +17,6 @@ interface Message {
   score?: any
   voiceAnalysis?: VoiceAnalysis
 }
-
-// ─── Config builder ───────────────────────────────────────────────────────────
 
 function buildConfig(params: URLSearchParams) {
   return {
@@ -39,15 +35,12 @@ function buildConfig(params: URLSearchParams) {
   }
 }
 
-// Score → label (hide raw numbers during interview — reduces candidate anxiety)
 function scoreLabel(s: number): { text: string; color: string } {
   if (s >= 80) return { text: 'Strong',        color: '#22C55E' }
   if (s >= 65) return { text: 'Good',          color: '#86EFAC' }
   if (s >= 50) return { text: 'Fair',          color: '#F59E0B' }
   return            { text: 'Needs clarity', color: '#F87171' }
 }
-
-// ─── Inner component ──────────────────────────────────────────────────────────
 
 function InterviewRoom() {
   const searchParams = useSearchParams()
@@ -69,6 +62,9 @@ function InterviewRoom() {
   const [audioReady, setAudioReady]         = useState(false)
   const [pendingAudio, setPendingAudio]     = useState<string | null>(null)
   const [micError, setMicError]             = useState<string | null>(null)
+  const [isGenerating, setIsGenerating]     = useState(false)
+  const [genStep, setGenStep]               = useState(0)
+  const [genError, setGenError]             = useState<string | null>(null)
 
   const chatRef           = useRef<HTMLDivElement>(null)
   const inputRef          = useRef<HTMLTextAreaElement>(null)
@@ -92,7 +88,6 @@ function InterviewRoom() {
   useEffect(() => { isRecordingRef.current  = isRecording  }, [isRecording])
   useEffect(() => { isTranscribingRef.current = isTranscribing }, [isTranscribing])
 
-  // Timer
   useEffect(() => {
     const id = setInterval(() => {
       setTimeLeft(prev => {
@@ -113,7 +108,6 @@ function InterviewRoom() {
     return `${m}:${sec.toString().padStart(2, '0')}`
   }
 
-  // Pending audio gate
   useEffect(() => {
     if (audioReady && pendingAudio) {
       playAudioDirect(pendingAudio)
@@ -121,7 +115,6 @@ function InterviewRoom() {
     }
   }, [audioReady, pendingAudio])
 
-  // Track scroll position
   const handleScroll = useCallback(() => {
     const el = chatRef.current
     if (!el) return
@@ -129,7 +122,6 @@ function InterviewRoom() {
     wasNearBottomRef.current = distanceFromBottom < 100
   }, [])
 
-  // Smart auto-scroll
   useEffect(() => {
     if (messages.length === lastMessageCountRef.current) return
     lastMessageCountRef.current = messages.length
@@ -179,8 +171,6 @@ function InterviewRoom() {
       }
     }, 30000)
   }, [])
-
-  // ─── Recording ─────────────────────────────────────────────────────────────
 
   const startRecording = async () => {
     if (isLoading || isTranscribing || isEnded) return
@@ -281,28 +271,60 @@ function InterviewRoom() {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage() }
   }
 
-  // ─── Save session and navigate to report ─────────────────────────────────
+  const genSteps = CONFIG.language === 'ar'
+    ? ['تحليل اتساق إجاباتك...', 'مراجعة العمق التخصصي...', 'رصد الأنماط السلوكية...', 'إعداد تقييم التوظيف...']
+    : ['Analyzing answer consistency...', 'Reviewing domain depth...', 'Detecting behavioral patterns...', 'Generating hiring evaluation...']
 
-  const goToReport = () => {
+  const goToReport = async () => {
+    setGenError(null)
+    setIsGenerating(true)
+    setGenStep(0)
+    const stepTimer = setInterval(() => {
+      setGenStep(prev => (prev + 1) % genSteps.length)
+    }, 2200)
+
     try {
-      const scored = messagesRef.current.filter(m => m.score?.score !== undefined)
-      const finalScore = scored.length
-        ? Math.round(scored.reduce((sum, m) => sum + (m.score.score ?? 0), 0) / scored.length)
-        : 0
+      const res = await fetch('/api/generate-report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: messagesRef.current,
+          config: {
+            candidateName:   CONFIG.candidateName,
+            jobTitle:        CONFIG.jobTitle,
+            institution:     CONFIG.institution,
+            sector:          CONFIG.sector,
+            yearsExperience: CONFIG.yearsExperience,
+            language:        CONFIG.language,
+            plan:            CONFIG.plan,
+          },
+        }),
+      })
+      const data = await res.json()
+      if (!data.success) throw new Error(data.error || 'Report generation failed')
 
       sessionStorage.setItem('barbaros_report', JSON.stringify({
-        messages:       messagesRef.current,
-        finalScore,
-        candidateName:  CONFIG.candidateName,
-        jobTitle:       CONFIG.jobTitle,
-        institution:    CONFIG.institution,
-        sector:         CONFIG.sector,
+        report:          data.report,
+        candidateName:   CONFIG.candidateName,
+        jobTitle:        CONFIG.jobTitle,
+        institution:     CONFIG.institution,
+        sector:          CONFIG.sector,
         yearsExperience: CONFIG.yearsExperience,
-        language:       CONFIG.language,
-        plan:           CONFIG.plan,
+        language:        CONFIG.language,
+        plan:            CONFIG.plan,
       }))
-    } catch (_) {}
-    window.location.href = '/report'
+
+      clearInterval(stepTimer)
+      window.location.href = '/report'
+    } catch (err: any) {
+      clearInterval(stepTimer)
+      setIsGenerating(false)
+      setGenError(
+        CONFIG.language === 'ar'
+          ? 'تعذّر إنشاء التقرير. حاول مرة أخرى.'
+          : 'Could not generate the report. Please try again.'
+      )
+    }
   }
 
   return (
@@ -310,7 +332,6 @@ function InterviewRoom() {
       onClick={handleFirstInteraction}
       style={{ fontFamily: 'system-ui, sans-serif', background: '#0B0D11', color: '#F0EDE8', minHeight: '100vh', display: 'flex', flexDirection: 'column' }}
     >
-      {/* Nav */}
       <div style={{ background: '#0F1117', borderBottom: '0.5px solid rgba(255,255,255,0.07)', padding: '12px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div style={{ fontWeight: 800, fontSize: 16 }}>
           <span style={{ color: '#F0EDE8' }}>Barbar</span><span style={{ color: '#CC785C' }}>os</span>
@@ -334,7 +355,6 @@ function InterviewRoom() {
         </div>
       </div>
 
-      {/* Status bar */}
       <div style={{ background: '#0F1117', borderBottom: '0.5px solid rgba(255,255,255,0.04)', padding: '6px 20px', display: 'flex', gap: 20, fontSize: 11 }}>
         <span style={{ color: 'rgba(240,237,232,0.4)' }}>
           Question: <strong style={{ color: '#8B96FF' }}>{questionCount}</strong>
@@ -344,7 +364,6 @@ function InterviewRoom() {
         </span>
       </div>
 
-      {/* Chat */}
       <div
         ref={chatRef}
         onScroll={handleScroll}
@@ -399,7 +418,6 @@ function InterviewRoom() {
         )}
       </div>
 
-      {/* Input / End screen */}
       {!isEnded ? (
         <div style={{ padding: '10px 16px', borderTop: '0.5px solid rgba(255,255,255,0.05)' }}>
           {micError && (
@@ -446,49 +464,71 @@ function InterviewRoom() {
           </div>
         </div>
       ) : (
-        // ─── END SCREEN ──────────────────────────────────────────────────────
         <div style={{ padding: '24px 20px', borderTop: '0.5px solid rgba(255,255,255,0.05)', background: '#0F1117' }}>
-          <div style={{ fontSize: 13, color: '#8B96FF', marginBottom: 20, textAlign: 'center', fontWeight: 600 }}>
-            Interview complete — your report is ready
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <button
-              type="button"
-              onClick={goToReport}
-              style={{
-                padding: '13px 24px',
-                background: '#CC785C',
-                border: 'none',
-                borderRadius: 10,
-                color: '#fff',
-                fontSize: 14,
-                fontWeight: 800,
-                cursor: 'pointer',
-                fontFamily: 'inherit',
-                width: '100%',
-              }}
-            >
-              View Full Report →
-            </button>
-            <button
-              type="button"
-              onClick={() => { window.location.href = '/onboarding' }}
-              style={{
-                padding: '11px 24px',
-                background: 'transparent',
-                border: '0.5px solid rgba(255,255,255,0.15)',
-                borderRadius: 10,
-                color: 'rgba(240,237,232,0.5)',
-                fontSize: 13,
-                fontWeight: 600,
-                cursor: 'pointer',
-                fontFamily: 'inherit',
-                width: '100%',
-              }}
-            >
-              Start New Interview
-            </button>
-          </div>
+          {isGenerating ? (
+            <div style={{ textAlign: 'center', padding: '8px 0' }}>
+              <div style={{ display: 'flex', justifyContent: 'center', gap: 5, marginBottom: 16 }}>
+                {[0,1,2].map(i => (
+                  <div key={i} style={{ width: 8, height: 8, background: '#CC785C', borderRadius: '50%', animation: `pulse 1.2s infinite ${i * 0.2}s` }} />
+                ))}
+              </div>
+              <div style={{ fontSize: 14, color: '#F0EDE8', fontWeight: 600, minHeight: 20, transition: 'opacity 0.3s' }}>
+                {genSteps[genStep]}
+              </div>
+              <div style={{ fontSize: 11, color: 'rgba(240,237,232,0.4)', marginTop: 8 }}>
+                {CONFIG.language === 'ar' ? 'قد يستغرق هذا بضع ثوانٍ' : 'This may take a few seconds'}
+              </div>
+            </div>
+          ) : (
+            <>
+              <div style={{ fontSize: 13, color: '#8B96FF', marginBottom: 20, textAlign: 'center', fontWeight: 600 }}>
+                {CONFIG.language === 'ar' ? 'انتهت المقابلة — تقريرك جاهز' : 'Interview complete — your report is ready'}
+              </div>
+              {genError && (
+                <div style={{ fontSize: 12, color: '#F87171', marginBottom: 14, textAlign: 'center', padding: '6px 10px', background: 'rgba(239,68,68,0.08)', borderRadius: 8 }}>
+                  {genError}
+                </div>
+              )}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <button
+                  type="button"
+                  onClick={goToReport}
+                  style={{
+                    padding: '13px 24px',
+                    background: '#CC785C',
+                    border: 'none',
+                    borderRadius: 10,
+                    color: '#fff',
+                    fontSize: 14,
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                    fontFamily: 'inherit',
+                    width: '100%',
+                  }}
+                >
+                  {CONFIG.language === 'ar' ? 'عرض التقرير الكامل ←' : 'View Full Report →'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { window.location.href = '/onboarding' }}
+                  style={{
+                    padding: '11px 24px',
+                    background: 'transparent',
+                    border: '0.5px solid rgba(255,255,255,0.15)',
+                    borderRadius: 10,
+                    color: 'rgba(240,237,232,0.5)',
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    fontFamily: 'inherit',
+                    width: '100%',
+                  }}
+                >
+                  {CONFIG.language === 'ar' ? 'مقابلة جديدة' : 'Start New Interview'}
+                </button>
+              </div>
+            </>
+          )}
         </div>
       )}
 
@@ -501,8 +541,6 @@ function InterviewRoom() {
     </div>
   )
 }
-
-// ─── Page wrapper ─────────────────────────────────────────────────────────────
 
 export default function InterviewPage() {
   return (

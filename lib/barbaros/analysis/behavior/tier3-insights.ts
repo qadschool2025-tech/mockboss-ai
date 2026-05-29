@@ -111,7 +111,11 @@ async function runLLMCheck(
   maxTokens: number
 ): Promise<string> {
   const { callClaude } = await import('../../llm/claude-client');
-  return callClaude({ systemPrompt: system, userMessage: prompt, maxTokens });
+  return callClaude({
+    systemPrompt: system,
+    messages: [{ role: 'user', content: prompt, timestamp: Date.now() }],
+    maxTokens,
+  });
 }
 
 // ─── Main Analyzer ────────────────────────────────────────────────────────────

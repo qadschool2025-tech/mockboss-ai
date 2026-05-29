@@ -69,7 +69,7 @@ export async function validateSignals(
   try {
     const raw = await callClaude({
       systemPrompt: buildSystemPrompt(),
-      messages: [{ role: 'user', content: prompt }],
+      messages: [{ role: 'user', content: prompt, timestamp: now }],
       maxTokens: VALIDATION_MAX_TOKENS,
     });
 

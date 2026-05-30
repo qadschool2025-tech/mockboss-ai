@@ -39,6 +39,7 @@ import {
 }                                            from './state/contradiction-tracker'
 
 import { orchestrateBehavior }               from './analysis/behavior/behavior-orchestrator'
+import type { OrchestratorSessionState }     from './analysis/behavior/behavior-orchestrator'
 import type { BehaviorContext }              from './analysis/behavior/behavior-types'
 
 import { aggregateScores }                   from './scoring/score-aggregator'
@@ -174,7 +175,17 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
     },
   } as unknown as BehaviorContext
 
-  const behaviorResult = await orchestrateBehavior(behaviorContext, phaseChanged)
+  // orchestrateBehavior expects an OrchestratorSessionState as 2nd arg
+  // (NOT a boolean). Build it from prior engine-local values.
+  const orchestratorState: OrchestratorSessionState = {
+    validatedSignals: [],
+    insights:        (priorInsights as any[]) ?? [],
+    patterns:        (priorPatterns as any[]) ?? [],
+    pendingTasks:    [],
+    lastTier3RunAt:  null,
+  }
+
+  const behaviorResult = await orchestrateBehavior(behaviorContext, orchestratorState)
   const activeRisks: Array<{ type: string }> =
     Array.isArray((behaviorResult as any).activeRisks)
       ? (behaviorResult as any).activeRisks

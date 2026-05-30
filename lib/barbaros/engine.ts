@@ -185,7 +185,20 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
     lastTier3RunAt:  null,
   }
 
-  const behaviorResult = await orchestrateBehavior(behaviorContext, orchestratorState)
+  // GUARD: the behavior pipeline scans the LAST message. On the very first
+  // turn (no messages yet) there is nothing to scan — skip it to avoid
+  // "Cannot read properties of undefined (reading 'content')".
+  let behaviorResult: any = {
+    activeRisks: [],
+    validatedSignals: [],
+    insights: [],
+    patterns: [],
+    pendingTasks: [],
+  }
+  if (messages.length > 0) {
+    behaviorResult = await orchestrateBehavior(behaviorContext, orchestratorState)
+  }
+
   const activeRisks: Array<{ type: string }> =
     Array.isArray((behaviorResult as any).activeRisks)
       ? (behaviorResult as any).activeRisks

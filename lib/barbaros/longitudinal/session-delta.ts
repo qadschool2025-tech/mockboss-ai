@@ -9,6 +9,13 @@
 // - canonicalKey treated as opaque — matched as-is, never parsed
 // - canonicalType used for semantic grouping in downstream consumers
 // - significantChange requires 2-of-3 dimensions to cross threshold
+//
+// CONTRACT FIX (aligned to SessionSnapshot v3 — artifacts/session-snapshot.ts):
+//   - score:        snapshot.score.finalScore / snapshot.score.dimensionScores
+//   - behavior:     snapshot.behavior.patterns
+//   - competencies: snapshot.competencies (CompetencySummary[])
+//   - contradictions: snapshot.contradictions (ContradictionSummary → .total)
+//   - phases:       snapshot.completedPhases (InterviewPhase[])
 
 import type { SessionSnapshot } from '../artifacts/session-snapshot'
 import type { PatternPolarity } from '../analysis/behavior/behavior-types'
@@ -150,6 +157,30 @@ function computeSignificantChange(
   return flags.filter(Boolean).length >= 2
 }
 
+// Pattern field access is tolerant: SessionBehaviorPattern carries canonicalKey,
+// canonicalType, polarity, occurrences (tier3) but older records may use
+// occurrenceCount. We read via a narrow accessor to stay type-safe.
+interface PatternLike {
+  canonicalKey:  string
+  canonicalType?: string
+  polarity?:     PatternPolarity
+  occurrences?:  number
+  occurrenceCount?: number
+  patternCategory?: string
+}
+
+function patternCount(p: PatternLike): number {
+  return p.occurrences ?? p.occurrenceCount ?? 0
+}
+
+function patternType(p: PatternLike): string {
+  return p.canonicalType ?? p.patternCategory ?? 'unknown'
+}
+
+function patternPolarity(p: PatternLike): PatternPolarity {
+  return p.polarity ?? 'negative'
+}
+
 // ─── Core Function ────────────────────────────────────────────────────────────
 
 export function computeSessionDelta(
@@ -162,28 +193,26 @@ export function computeSessionDelta(
 
   // ── Score deltas ────────────────────────────────────────────────────────────
 
-  const currentOverall    = current.finalScore?.overall  ?? 0
-  const previousOverall   = previous?.finalScore?.overall ?? 0
+  const currentOverall    = current.score?.finalScore  ?? 0
+  const previousOverall   = previous?.score?.finalScore ?? 0
   const overallScoreDelta = currentOverall - previousOverall
 
   const scoreDimensions: ScoreDelta[] = []
 
-  if (current.finalScore) {
-    const currDims = current.finalScore.dimensions as Record<string, number>
-    const prevDims = (previous?.finalScore?.dimensions ?? {}) as Record<string, number>
+  const currDims = (current.score?.dimensionScores ?? {}) as Record<string, number>
+  const prevDims = (previous?.score?.dimensionScores ?? {}) as Record<string, number>
 
-    for (const [dimension, currVal] of Object.entries(currDims)) {
-      const prevVal = prevDims[dimension] ?? 0
-      const change  = currVal - prevVal
-      scoreDimensions.push({
-        dimension,
-        previous:  prevVal,
-        current:   currVal,
-        change,
-        direction: isFirstSession ? 'new' : scoreDirection(change),
-        weight:    DIMENSION_WEIGHTS[dimension] ?? 0,
-      })
-    }
+  for (const [dimension, currVal] of Object.entries(currDims)) {
+    const prevVal = prevDims[dimension] ?? 0
+    const change  = currVal - prevVal
+    scoreDimensions.push({
+      dimension,
+      previous:  prevVal,
+      current:   currVal,
+      change,
+      direction: isFirstSession ? 'new' : scoreDirection(change),
+      weight:    DIMENSION_WEIGHTS[dimension] ?? 0,
+    })
   }
 
   const weightedScoreDelta = isFirstSession ? 0 : computeWeightedDelta(scoreDimensions)
@@ -192,27 +221,26 @@ export function computeSessionDelta(
   // Pattern identity: canonicalKey (opaque match) + canonicalType (semantic label)
   // polarity: read directly from pattern — never inferred here
 
-  const currentPatterns  = current.behaviorArtifact?.patterns  ?? []
-  const previousPatterns = previous?.behaviorArtifact?.patterns ?? []
+  const currentPatterns  = (current.behavior?.patterns  ?? []) as unknown as PatternLike[]
+  const previousPatterns = (previous?.behavior?.patterns ?? []) as unknown as PatternLike[]
 
-  // Map: canonicalKey → { occurrences, canonicalType, polarity }
   interface PatternMeta { count: number; canonicalType: string; polarity: PatternPolarity }
 
   const prevMap = new Map<string, PatternMeta>()
   for (const p of previousPatterns) {
     prevMap.set(p.canonicalKey, {
-      count:         p.occurrences ?? p.occurrenceCount,
-      canonicalType: p.canonicalType,
-      polarity:      p.polarity,
+      count:         patternCount(p),
+      canonicalType: patternType(p),
+      polarity:      patternPolarity(p),
     })
   }
 
   const currMap = new Map<string, PatternMeta>()
   for (const p of currentPatterns) {
     currMap.set(p.canonicalKey, {
-      count:         p.occurrences ?? p.occurrenceCount,
-      canonicalType: p.canonicalType,
-      polarity:      p.polarity,
+      count:         patternCount(p),
+      canonicalType: patternType(p),
+      polarity:      patternPolarity(p),
     })
   }
 
@@ -224,15 +252,15 @@ export function computeSessionDelta(
   const behaviorsDropped:  BehaviorDelta[] = []
 
   for (const key of allKeys) {
-    const prev     = prevMap.get(key)
-    const curr     = currMap.get(key)
+    const prev = prevMap.get(key)
+    const curr = currMap.get(key)
 
     // Resolve meta: prefer current, fall back to previous (for dropped patterns)
-    const meta     = curr ?? prev!
+    const meta      = curr ?? prev!
     const prevCount = prev?.count ?? 0
     const currCount = curr?.count ?? 0
 
-    const dir = isFirstSession
+    const dir: DeltaDirection = isFirstSession
       ? 'new'
       : behaviorDirection(prevCount, currCount, meta.polarity)
 
@@ -252,12 +280,24 @@ export function computeSessionDelta(
   }
 
   // ── Competency coverage ─────────────────────────────────────────────────────
+  // SessionSnapshot.competencies is CompetencySummary[] ({ topic, coverage, ... }).
+  // "Covered" = coverage >= 55 (meaningful evidence). Required = all topics present.
 
-  const currentCovered  = new Set(current.competencyCoverage?.covered  ?? [])
-  const previousCovered = new Set(previous?.competencyCoverage?.covered ?? [])
-  const allRequired     = new Set([
-    ...(current.competencyCoverage?.required  ?? []),
-    ...(previous?.competencyCoverage?.required ?? []),
+  const COVERAGE_THRESHOLD = 55
+
+  const currentCovered = new Set(
+    (current.competencies ?? [])
+      .filter((c) => c.coverage >= COVERAGE_THRESHOLD)
+      .map((c) => c.topic)
+  )
+  const previousCovered = new Set(
+    (previous?.competencies ?? [])
+      .filter((c) => c.coverage >= COVERAGE_THRESHOLD)
+      .map((c) => c.topic)
+  )
+  const allRequired = new Set([
+    ...(current.competencies ?? []).map((c) => c.topic),
+    ...(previous?.competencies ?? []).map((c) => c.topic),
   ])
 
   const newCompetenciesCovered: string[] = []
@@ -271,15 +311,18 @@ export function computeSessionDelta(
   }
 
   // ── Contradictions ──────────────────────────────────────────────────────────
+  // SessionSnapshot.contradictions is a ContradictionSummary ({ total, ... }).
 
-  const contradictionsThisSession = current.contradictions?.length  ?? 0
-  const contradictionsPrevious    = previous?.contradictions?.length ?? 0
+  const contradictionsThisSession = current.contradictions?.total  ?? 0
+  const contradictionsPrevious    = previous?.contradictions?.total ?? 0
   const contradictionsDelta       = contradictionsThisSession - contradictionsPrevious
 
   // ── Phase completion ────────────────────────────────────────────────────────
+  // SessionSnapshot exposes completedPhases. "Skipped" is not tracked on the
+  // snapshot, so it is reported as empty until a phase-skip artifact exists.
 
-  const phasesCompleted = current.phaseSummary?.completed ?? []
-  const phasesSkipped   = current.phaseSummary?.skipped   ?? []
+  const phasesCompleted = (current.completedPhases ?? []).map((p) => String(p))
+  const phasesSkipped: string[] = []
 
   // ── Summary ─────────────────────────────────────────────────────────────────
 

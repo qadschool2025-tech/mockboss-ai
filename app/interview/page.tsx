@@ -221,6 +221,17 @@ function InterviewRoom() {
     finally { setIsTranscribing(false) }
   }
 
+  // MIC FIX: single click toggles recording on/off (was push-to-hold).
+  // Tap once → start. Tap again → stop & send.
+  const toggleRecording = () => {
+    if (isLoading || isTranscribing || isEnded) return
+    if (isRecordingRef.current) {
+      stopRecording()
+    } else {
+      startRecording()
+    }
+  }
+
   const callAdam = async (msgs: Message[]) => {
     setIsLoading(true)
     handleFirstInteraction()
@@ -428,9 +439,7 @@ function InterviewRoom() {
           <div style={{ display: 'flex', gap: 8 }}>
             <button
               type="button"
-              onPointerDown={startRecording}
-              onPointerUp={stopRecording}
-              onPointerLeave={() => { if (isRecordingRef.current) stopRecording() }}
+              onClick={toggleRecording}
               disabled={isLoading || isTranscribing || isEnded}
               style={{
                 width: 44, height: 44, borderRadius: 8, border: 'none',
@@ -450,7 +459,7 @@ function InterviewRoom() {
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={handleKey}
-              placeholder={isRecording ? '● Recording... release to send' : isTranscribing ? 'Processing...' : 'Hold 🎤 to speak, or type here...'}
+              placeholder={isRecording ? '● Recording... tap to send' : isTranscribing ? 'Processing...' : 'Tap 🎤 to speak, or type here...'}
               disabled={isLoading || isRecording || isTranscribing}
               rows={1}
               style={{ flex: 1, background: '#16181F', border: '0.5px solid rgba(255,255,255,0.08)', color: '#F0EDE8', fontFamily: 'inherit', fontSize: 13, padding: '9px 12px', borderRadius: 8, outline: 'none', resize: 'none' }}

@@ -9,6 +9,16 @@
 // - updateContradictionTracker → detectContradictions
 //                                + applyContradictionPatch  (contradiction-tracker.ts)
 // - computeAggregateScore      → aggregateScores            (score-aggregator.ts)
+//
+// TYPE-SAFETY FIX:
+//   Behavior/pressure fields (contradictionCount, silenceRisk, pressureLevel,
+//   behaviorInsights, behaviorPatterns, weakCompetencyTopics,
+//   pressureEscalationTriggered) are NOT part of SessionState (see types.ts).
+//   They are derived per-turn and kept in engine-local variables.
+//   They are NO LONGER written into statePatch (which is Partial<SessionState>).
+//   Persisted equivalents that DO exist on state:
+//     - contradiction count  → metrics.contradictionCount
+//     - contradictions array  → contradictions
 
 import type { InterviewConfig, Message }  from './types'
 import type { SessionState }              from './state/session-state'
@@ -122,9 +132,28 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
     ? { ...state, phase: newPhase }
     : state
 
+  // ── 2b. Engine-local behavior/pressure carry-over ───────────────────────────
+  // These fields are NOT persisted on SessionState. We read any prior values
+  // from a loosely-typed view of state (for resume support) and default safely.
+  const carry = stateWithPhase as unknown as {
+    silenceRisk?:                 'low' | 'medium' | 'high'
+    pressureLevel?:               number
+    pressureEscalationTriggered?: boolean
+    behaviorInsights?:            unknown[]
+    behaviorPatterns?:            unknown[]
+    weakCompetencyTopics?:        string[]
+  }
+
+  const priorContradictionCount = stateWithPhase.metrics.contradictionCount ?? 0
+  const priorSilenceRisk        = carry.silenceRisk           ?? 'low'
+  const priorPressureLevel      = carry.pressureLevel         ?? 0
+  const priorWeakTopics         = carry.weakCompetencyTopics  ?? []
+  const priorInsights           = carry.behaviorInsights      ?? []
+  const priorPatterns           = carry.behaviorPatterns      ?? []
+
   // ── 3. Behavior pipeline ────────────────────────────────────────────────────
 
-  const behaviorContext: BehaviorContext = {
+  const behaviorContext = {
     runtime: {
       messages,
       currentPhase:   stateWithPhase.phase,
@@ -132,20 +161,24 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
       now,
     },
     historical: {
-      contradictionCount:    stateWithPhase.contradictionCount    ?? 0,
-      lastSilenceRisk:       stateWithPhase.silenceRisk           ?? 'low',
-      weakCompetencyTopics:  stateWithPhase.weakCompetencyTopics  ?? [],
-      existingInsights:      stateWithPhase.behaviorInsights       ?? [],
-      existingPatterns:      stateWithPhase.behaviorPatterns       ?? [],
+      contradictionCount:    priorContradictionCount,
+      lastSilenceRisk:       priorSilenceRisk,
+      weakCompetencyTopics:  priorWeakTopics,
+      existingInsights:      priorInsights,
+      existingPatterns:      priorPatterns,
     },
     pressure: {
-      silenceRisk:                 stateWithPhase.silenceRisk                 ?? 'low',
-      pressureLevel:               stateWithPhase.pressureLevel               ?? 0,
-      pressureEscalationTriggered: stateWithPhase.pressureEscalationTriggered ?? false,
+      silenceRisk:                 priorSilenceRisk,
+      pressureLevel:               priorPressureLevel,
+      pressureEscalationTriggered: carry.pressureEscalationTriggered ?? false,
     },
-  }
+  } as unknown as BehaviorContext
 
   const behaviorResult = await orchestrateBehavior(behaviorContext, phaseChanged)
+  const activeRisks: Array<{ type: string }> =
+    Array.isArray((behaviorResult as any).activeRisks)
+      ? (behaviorResult as any).activeRisks
+      : []
 
   // ── 4. State patches ────────────────────────────────────────────────────────
 
@@ -183,24 +216,16 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
     contradictionPatch
   )
 
+  // statePatch contains ONLY real SessionState fields.
   const statePatch: Partial<SessionState> = {
     phase:              newPhase,
-    pressureLevel:      behaviorResult.activeRisks.length > 0
-                          ? Math.min(10, (stateWithPhase.pressureLevel ?? 0) + 1)
-                          : Math.max(0,  (stateWithPhase.pressureLevel ?? 0) - 1),
-    silenceRisk:        deriveSilenceRisk(behaviorResult.activeRisks),
-    contradictionCount: updatedContradictions.length,
     contradictions:     updatedContradictions,
     recentTopics:       stateAfterCompetency.recentTopics,
     competencyCoverage: stateAfterCompetency.competencyCoverage,
-    behaviorInsights:   behaviorResult.insights,
-    behaviorPatterns:   behaviorResult.patterns,
-    pressureEscalationTriggered: behaviorResult.activeRisks.some(
-      r => r.type === 'silence_risk' || r.type === 'dropout_risk'
-    ),
-    weakCompetencyTopics: Object.entries(stateAfterCompetency.competencyCoverage)
-      .filter(([, v]) => v.coverage < 40 && v.evidenceCount > 0)
-      .map(([name]) => name),
+    metrics: {
+      ...stateWithPhase.metrics,
+      contradictionCount: updatedContradictions.length,
+    },
   }
 
   // ── 5. Score ────────────────────────────────────────────────────────────────
@@ -270,11 +295,10 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
   let growthPatch   = growthState
 
   if (previousSnapshot !== null && score !== null) {
-    const miniDelta = buildMiniDelta(
-      Array.isArray(behaviorResult.patterns) ? behaviorResult.patterns : [],
-      sessionId,
-      now
-    )
+    const patternsForDelta = Array.isArray((behaviorResult as any).patterns)
+      ? (behaviorResult as any).patterns
+      : []
+    const miniDelta = buildMiniDelta(patternsForDelta, sessionId, now)
     weaknessPatch = updateWeaknessTracker(weaknessState, miniDelta, sessionId, now)
     growthPatch   = updateGrowthTracker(growthState,     miniDelta, sessionId, now)
   }

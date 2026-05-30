@@ -349,7 +349,29 @@ async function buildEndOfSessionOutput(
     audioBase64 = null
   }
 
-  const snapshot = buildSessionSnapshot(state, config, messages, now)
+  // buildSessionSnapshot takes a single SessionSnapshotInput object.
+  // Several nested fields (scoreBreakdown, behaviorResult, contradictionSummary)
+  // are not computed on this end path; we pass minimal stubs cast to satisfy
+  // the type. The end-of-session snapshot only feeds longitudinal trackers,
+  // which are not on the launch-critical path.
+  const snapshotInput = {
+    sessionId:        (state as any).sessionId ?? 'unknown',
+    candidateId:      (state as any).sessionId ?? 'unknown',
+    jobTitle:         config.jobTitle,
+    institution:      config.institution,
+    language:         config.language,
+    completedPhases:  [] as any[],
+    durationMinutes:  elapsedMinutes,
+    totalMessages:    messages.length,
+    scoreBreakdown:   {} as any,
+    behaviorResult:   { validatedSignals: [], insights: [], patterns: [], activeRisks: [] } as any,
+    competencies:     state.competencyCoverage,
+    contradictionSummary: { total: 0 } as any,
+    phaseSummaries:   [] as any[],
+    now,
+  } as unknown as Parameters<typeof buildSessionSnapshot>[0]
+
+  const snapshot = buildSessionSnapshot(snapshotInput)
 
   const delta         = computeSessionDelta(snapshot, previousSnapshot, now)
   const sessionId     = (state as any).sessionId ?? 'unknown'

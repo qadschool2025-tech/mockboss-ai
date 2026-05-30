@@ -10,6 +10,16 @@
 //                                + applyContradictionPatch  (contradiction-tracker.ts)
 // - computeAggregateScore      → aggregateScores            (score-aggregator.ts)
 //
+// FIRST-TURN FIX (root cause of black screen / no greeting):
+//   On the first message the opening greeting is a STATIC template
+//   (BARBAROS_OPENING_TEMPLATE). Previously it was injected as the first
+//   `assistant` message and passed to Claude. The Anthropic API REJECTS any
+//   conversation whose first message has role 'assistant' (400 error), which
+//   threw after 3 retries → route returned { success:false } → blank screen.
+//   FIX: on the first turn we return the opening template DIRECTLY as content
+//   (with its TTS audio) and DO NOT call Claude at all. Claude takes over from
+//   the second turn onward, when the first message is a real 'user' turn.
+//
 // TYPE-SAFETY FIX:
 //   Behavior/pressure fields (contradictionCount, silenceRisk, pressureLevel,
 //   behaviorInsights, behaviorPatterns, weakCompetencyTopics,
@@ -121,6 +131,53 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
     return buildEndOfSessionOutput(input, elapsedMinutes, totalMinutes, now)
   }
 
+  // ── 1b. FIRST-TURN SHORT-CIRCUIT (black-screen fix) ─────────────────────────
+  // On the very first message there is no candidate input yet. The greeting is
+  // a static template — we return it DIRECTLY (with audio) and skip Claude
+  // entirely. This avoids sending an `assistant`-first message array to the
+  // Anthropic API, which would 400 and throw. Claude takes over from turn 2.
+  const isFirstMessage = messages.length === 0
+
+  if (isFirstMessage) {
+    const built = buildPrompt(
+      {
+        config,
+        state,
+        weaknesses:     [],
+        growthSignals:  [],
+        elapsedMinutes,
+        totalMinutes,
+        isFirstSession: previousSnapshot === null,
+      },
+      true
+    )
+
+    const openingText = built.openingMessage ?? defaultOpening(config)
+
+    let openingAudio: string | null = null
+    try {
+      if (openingText.length > 0) {
+        openingAudio = await synthesizeSpeech(openingText)
+      }
+    } catch {
+      openingAudio = null
+    }
+
+    return {
+      content:         openingText,
+      audioBase64:     openingAudio,
+      score:           null,
+      statePatch:      {},          // no state changes on greeting turn
+      weaknessPatch:   weaknessState,
+      growthPatch:     growthState,
+      isEndOfSession:  false,
+      phaseChanged:    false,
+      snapshot:        null,
+      promptCharCount: built.charCount,
+      truncated:       built.truncated,
+    }
+  }
+
   // ── 2. Phase advancement ────────────────────────────────────────────────────
 
   const { phase: newPhase, changed: phaseChanged } = advancePhase(
@@ -185,9 +242,9 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
     lastTier3RunAt:  null,
   }
 
-  // GUARD: the behavior pipeline scans the LAST message. On the very first
-  // turn (no messages yet) there is nothing to scan — skip it to avoid
-  // "Cannot read properties of undefined (reading 'content')".
+  // GUARD: the behavior pipeline scans the LAST message. With the first-turn
+  // short-circuit above, messages is always non-empty here, but we keep the
+  // guard as defense-in-depth.
   let behaviorResult: any = {
     activeRisks: [],
     validatedSignals: [],
@@ -274,8 +331,6 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
     g => g.strength !== 'emerging' && g.status === 'active'
   )
 
-  const isFirstMessage = messages.length === 0
-
   const built = buildPrompt(
     {
       config,
@@ -286,18 +341,16 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
       totalMinutes,
       isFirstSession: previousSnapshot === null,
     },
-    isFirstMessage
+    false   // not first message — opening already delivered on turn 1
   )
 
   // ── 7. LLM call ─────────────────────────────────────────────────────────────
-
-  const messagesForLLM: Message[] = built.openingMessage
-    ? [{ role: 'assistant', content: built.openingMessage, timestamp: now }, ...messages]
-    : messages
+  // messages is non-empty and starts with a real 'user' turn, so the Anthropic
+  // API accepts it. No opening injection here — it was delivered on turn 1.
 
   const content = await callClaude({
     systemPrompt: built.systemPrompt,
-    messages:     messagesForLLM,
+    messages,
   })
 
   // ── 8. TTS ──────────────────────────────────────────────────────────────────
@@ -407,6 +460,11 @@ async function buildEndOfSessionOutput(
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+// Fallback opening if buildPrompt returns no openingMessage for any reason.
+function defaultOpening(config: InterviewConfig): string {
+  return `Hello ${config.candidateName}, I'm Barbaros. We're here today for the ${config.jobTitle} position at ${config.institution}. Are you ready to begin?`
+}
 
 function deriveSilenceRisk(
   activeRisks: Array<{ type: string }>

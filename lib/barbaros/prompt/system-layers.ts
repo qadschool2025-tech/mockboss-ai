@@ -8,6 +8,8 @@
 // Fix #5 — Arabic: complete response required, never truncate
 // Fix #6 — Mixed: Arabic structure, English terminology only
 // Fix #scoring — Human-realistic scoring philosophy with anchors
+// Fix #contract — buildPressureLayer uses real InterviewState fields
+//                 (pressureMode enum + metrics.contradictionCount)
 
 import type { InterviewConfig } from '../types'
 import type { SessionState }    from '../state/session-state'
@@ -147,25 +149,31 @@ export function buildStructureLayer(currentPhase: string): SystemLayer {
 }
 
 // ─── Layer 6: Behavioral Pressure ─────────────────────────────────────────────
+// CONTRACT FIX: InterviewState exposes `pressureMode` (enum) and
+// `metrics.contradictionCount` — NOT pressureLevel / silenceRisk.
+// Pressure intensity is derived from the pressureMode enum.
 
 export function buildPressureLayer(state: SessionState): SystemLayer {
   const lines: string[] = []
 
-  if (state.pressureLevel >= 7) {
+  const mode = state.pressureMode
+
+  if (mode === 'skeptical' || mode === 'silence_pressure') {
     lines.push('PRESSURE MODE: HIGH — be direct and unrelenting. Do not soften follow-ups.')
-  } else if (state.pressureLevel >= 4) {
+  } else if (mode === 'analytical' || mode === 'fast_paced') {
     lines.push('PRESSURE MODE: MEDIUM — push for specifics on weak answers.')
   } else {
     lines.push('PRESSURE MODE: STANDARD — professional pace, probe vague answers once.')
   }
 
-  if (state.silenceRisk === 'high') {
+  if (mode === 'silence_pressure') {
     lines.push(`ON SILENCE: ${BARBAROS_PRESSURE_PHRASES.silence}`)
   }
 
-  if (state.contradictionCount > 0) {
+  const contradictionCount = state.metrics.contradictionCount
+  if (contradictionCount > 0) {
     lines.push(
-      `CONTRADICTION DETECTED (${state.contradictionCount} so far): ` +
+      `CONTRADICTION DETECTED (${contradictionCount} so far): ` +
       'If candidate contradicts a previous statement, use the contradiction_caught phrase.'
     )
   }

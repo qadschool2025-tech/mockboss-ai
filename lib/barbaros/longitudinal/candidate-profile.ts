@@ -4,10 +4,13 @@
 //   - computeCoverTrend → computeCoverageTrend
 //   - toLongitudinalPromptContext: removed unused latestScore parameter
 //   - computeProfileDelta: receives previousProfile (before merge) — fixes empty newPatterns bug
+// TYPE FIX:
+//   - computeProfileDelta returns a ProfileDelta (its real shape), not SnapshotDelta.
+//     SnapshotDelta is a different artifact (defined in session-snapshot.ts).
 // DEBT:
 //   - category: 'depth' for competency weaknesses → needs real mapper per sector/jobTitle
 
-import type { SessionSnapshot, SnapshotDelta } from '../artifacts/session-snapshot';
+import type { SessionSnapshot } from '../artifacts/session-snapshot';
 import type { PatternCategory, TrendDirection } from '../analysis/behavior/behavior-types';
 import type {
   CandidateEvolutionProfile,
@@ -20,6 +23,23 @@ import type {
   ScoreHistoryEntry,
   WeaknessStatus,
 } from './longitudinal-types';
+
+// ─── Local Delta Type ─────────────────────────────────────────────────────────
+// The real shape returned by computeProfileDelta. Distinct from SnapshotDelta.
+
+export interface ProfileDelta {
+  fromSessionId:        string;
+  toSessionId:          string;
+  computedAt:           number;
+  scoreDelta:           number;
+  readinessChanged:     boolean;
+  newWeaknesses:        string[];
+  resolvedWeaknesses:   string[];
+  improvedCompetencies: string[];
+  declinedCompetencies: string[];
+  newPatterns:          string[];
+  decayedPatterns:      string[];
+}
 
 // ─── Create ───────────────────────────────────────────────────────────────────
 
@@ -99,7 +119,7 @@ export function mergeSessionIntoProfile(
 export function computeProfileDelta(
   previousProfile: CandidateEvolutionProfile,   // ← before merge
   latestSnapshot: SessionSnapshot
-): SnapshotDelta | null {
+): ProfileDelta | null {
   if (previousProfile.sessionCount < 1) return null;
 
   const prevScore   = previousProfile.scoreHistory[previousProfile.scoreHistory.length - 1];

@@ -1,4 +1,3 @@
-
 // lib/barbaros/longitudinal/longitudinal-types.ts
 // CONTRACT: Longitudinal intelligence types. Skeleton only.
 // Purpose: Fix data contracts NOW to prevent architecture drift later.
@@ -12,14 +11,18 @@
 //   - 'unknown' PatternCategory handled explicitly
 //   - Session memory ≠ Longitudinal memory (hard boundary)
 //
+// TYPE FIX:
+//   - ReadinessLevel imported from score-aggregator (its owner)
+//   - ScoreLabel imported from score-normalizer (its owner — NOT score-aggregator)
+//
 // FUTURE:
 //   - Populated by: candidate-profile.ts, session-delta.ts
 //   - Consumed by: prompt-builder.ts, report layer, AI Coach Mode
 //   - Storage: external DB (not in-memory) — outside V4 scope
 
-import type { InterviewPhase } from '../types';
 import type { PatternCategory, TrendDirection } from '../analysis/behavior/behavior-types';
-import type { ReadinessLevel, ScoreLabel } from '../scoring/score-aggregator';
+import type { ReadinessLevel } from '../scoring/score-aggregator';
+import type { ScoreLabel } from '../scoring/score-normalizer';
 
 // ─── Core Identity ────────────────────────────────────────────────────────────
 
@@ -122,7 +125,7 @@ export interface LongitudinalStrength {
   topic: string;
   description: string;
   category: PatternCategory;
- confirmedSessionId: string;        // sessionId when confirmed
+  confirmedSessionId: string;   // sessionId when confirmed
   consistencyScore: number;     // 0-1, how consistently demonstrated
 }
 
@@ -181,7 +184,7 @@ export interface PressureAdaptationProfile {
   adaptationTrend: TrendDirection;  // improving/stable/shrinking
   commonReactions: string[];        // recurring behaviors under pressure
   breakingPoints: string[];         // topics that consistently cause breakdown
- resilienceScore: number;          // 0-1
+  resilienceScore: number;          // 0-1
 }
 
 // ─── Session Delta ────────────────────────────────────────────────────────────

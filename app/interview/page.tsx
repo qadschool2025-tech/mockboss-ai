@@ -1,7 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback, useMemo, Suspense } from 'react'
-import { useSearchParams } from 'next/navigation'
+import { useState, useEffect, useRef, useCallback } from 'react'
 
 interface VoiceAnalysis {
   wordsPerMinute: number
@@ -18,19 +17,28 @@ interface Message {
   voiceAnalysis?: VoiceAnalysis
 }
 
-function buildConfig(params: URLSearchParams) {
+function buildConfig() {
+  let raw: any = {}
+  if (typeof window !== 'undefined') {
+    try {
+      const stored = sessionStorage.getItem('barbaros_config')
+      if (stored) raw = JSON.parse(stored)
+    } catch {}
+  }
   return {
-    sessionId:       params.get('sessionId')      ?? `session_${Date.now()}`,
-    candidateName:   params.get('candidateName')  ?? 'Candidate',
-    jobTitle:        params.get('jobTitle')        ?? 'Professional',
-    institution:     params.get('institution')     ?? 'Organisation',
-    sector:          params.get('sector')          ?? 'General',
-    yearsExperience: params.get('yearsExperience') ?? '3 years',
-    language:        params.get('language')        ?? 'en',
-    plan:            params.get('plan')            ?? 'go',
-    jobRequirements: params.get('jobRequirements') ?? '',
-    isCareerSwitch:  params.get('isCareerSwitch')  === 'true',
-    cvSummary:       params.get('cvSummary')       ?? '',
+    sessionId:       raw.sessionId       ?? `session_${Date.now()}`,
+    candidateName:   raw.candidateName   ?? 'Candidate',
+    jobTitle:        raw.jobTitle         ?? 'Professional',
+    institution:     raw.institution      ?? 'Organisation',
+    sector:          raw.sector           ?? 'General',
+    yearsExperience: raw.yearsExperience  ?? '3 years',
+    language:        raw.language          ?? 'en',
+    plan:            raw.plan              ?? 'go',
+    jobRequirements: raw.jobRequirements   ?? '',
+    hasCv:           Boolean(raw.hasCv),
+    cvFileName:      raw.cvFileName         ?? '',
+    cvMimeType:      raw.cvMimeType         ?? '',
+    cvBase64:        raw.cvBase64           ?? '',
     difficulty:      'standard',
   }
 }
@@ -43,8 +51,7 @@ function scoreLabel(s: number): { text: string; color: string } {
 }
 
 function InterviewRoom() {
-  const searchParams = useSearchParams()
-  const CONFIG = useMemo(() => buildConfig(searchParams), [searchParams])
+  const [CONFIG] = useState(() => buildConfig())
 
   const [messages, setMessages]             = useState<Message[]>([])
   const [input, setInput]                   = useState('')
@@ -552,13 +559,5 @@ function InterviewRoom() {
 }
 
 export default function InterviewPage() {
-  return (
-    <Suspense fallback={
-      <div style={{ background: '#0B0D11', color: '#F0EDE8', minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14 }}>
-        Loading session...
-      </div>
-    }>
-      <InterviewRoom />
-    </Suspense>
-  )
+  return <InterviewRoom />
 }

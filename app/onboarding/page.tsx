@@ -20,6 +20,14 @@ interface OnboardingData {
   cvSize: number
 }
 
+type RoleStatus = 'idle' | 'checking' | 'valid' | 'invalid'
+
+interface FieldErrors {
+  candidateName?: string
+  jobTitle?: string
+  institution?: string
+}
+
 const EXPERIENCE_LEVELS = [
   { value: 'fresh-graduate', label: 'Fresh Graduate' },
   { value: 'less than 1 year', label: '< 1 year' },
@@ -36,6 +44,22 @@ const LANGUAGES = [
 ]
 
 const MAX_CV_BYTES = 5 * 1024 * 1024 // 5 MB
+
+// ─── Validation helpers ─────────────────────────────────────────────────────
+
+const hasLetter = (s: string) => /\p{L}/u.test(s)
+
+// Light format guard for free-text fields (name, company)
+const isReasonableText = (s: string, min: number, max: number) => {
+  const t = s.trim()
+  return t.length >= min && t.length <= max && hasLetter(t)
+}
+
+// Format guard for job title BEFORE calling the semantic API
+const roleFormatOk = (s: string) => {
+  const t = s.trim()
+  return /^[\p{L}\p{N}\s\-\/.,()]{2,80}$/u.test(t) && hasLetter(t)
+}
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
@@ -147,13 +171,10 @@ const S = {
     fontFamily: "'Georgia', serif",
     transition: 'all 0.15s',
   }),
+  fieldError: { fontSize: 11.5, color: '#C0392B', marginTop: 6, fontFamily: "'Georgia', serif", lineHeight: 1.4 },
+  fieldChecking: { fontSize: 11.5, color: '#a59c8e', marginTop: 6, fontFamily: "'Georgia', serif" },
+  fieldOk: { fontSize: 11.5, color: '#CC785C', marginTop: 6, fontWeight: 700, fontFamily: "'Georgia', serif" },
   // Section header (Interview Intelligence)
-  sectionTitleRow: {
-    display: 'flex',
-    alignItems: 'baseline',
-    gap: 10,
-    marginBottom: 6,
-  },
   recommendBadge: {
     display: 'inline-flex',
     alignItems: 'center',
@@ -200,13 +221,7 @@ const S = {
     color: '#CC785C',
     fontSize: 22,
   },
-  dropTitle: {
-    fontSize: 16,
-    fontWeight: 700,
-    color: '#1A1A1A',
-    marginBottom: 4,
-    fontFamily: "'Georgia', serif",
-  },
+  dropTitle: { fontSize: 16, fontWeight: 700, color: '#1A1A1A', marginBottom: 4, fontFamily: "'Georgia', serif" },
   dropMeta: { fontSize: 12, color: '#9a9082', fontFamily: "'Georgia', serif" },
   fileCard: {
     display: 'flex',
@@ -253,29 +268,10 @@ const S = {
     fontFamily: "'Georgia', serif",
     flexShrink: 0,
   },
-  cvHook: {
-    fontSize: 12.5,
-    color: '#8a8278',
-    lineHeight: 1.55,
-    marginTop: 10,
-    fontStyle: 'italic' as const,
-  },
+  cvHook: { fontSize: 12.5, color: '#8a8278', lineHeight: 1.55, marginTop: 10, fontStyle: 'italic' as const },
   errorText: { fontSize: 12, color: '#C0392B', marginTop: 8, fontFamily: "'Georgia', serif" },
-  // Value box
-  valueBox: {
-    background: '#1A1A1A',
-    borderRadius: 14,
-    padding: '20px 22px',
-    marginTop: 26,
-  },
-  valueTitle: {
-    fontSize: 12.5,
-    fontWeight: 700,
-    color: '#F5F1EB',
-    marginBottom: 12,
-    fontFamily: "'Georgia', serif",
-    lineHeight: 1.5,
-  },
+  valueBox: { background: '#1A1A1A', borderRadius: 14, padding: '20px 22px', marginTop: 26 },
+  valueTitle: { fontSize: 12.5, fontWeight: 700, color: '#F5F1EB', marginBottom: 12, fontFamily: "'Georgia', serif", lineHeight: 1.5 },
   valueItem: {
     display: 'flex',
     alignItems: 'flex-start',
@@ -287,7 +283,6 @@ const S = {
     lineHeight: 1.5,
   },
   valueDot: { color: '#CC785C', fontWeight: 900, lineHeight: 1.4, flexShrink: 0 },
-  // Buttons
   btnRow: { display: 'flex', gap: 10, marginTop: 30 },
   btnBack: {
     flex: 1,
@@ -365,18 +360,26 @@ function formatSize(bytes: number) {
 // ─── Step 1: Candidate Profile ─────────────────────────────────────────────────
 
 function Step1({
-  data, onChange, onNext
+  data, onChange, onNext, onJobTitleBlur, errors, roleStatus, busy
 }: {
   data: OnboardingData
   onChange: (key: keyof OnboardingData, val: string) => void
   onNext: () => void
+  onJobTitleBlur: () => void
+  errors: FieldErrors
+  roleStatus: RoleStatus
+  busy: boolean
 }) {
-  const valid =
+  const filled =
     data.candidateName.trim() &&
     data.jobTitle.trim() &&
     data.institution.trim() &&
     data.yearsExperience &&
     data.language
+
+  const roleInputStyle = errors.jobTitle ? { ...S.input, borderColor: '#C0392B' } : S.input
+  const nameInputStyle = errors.candidateName ? { ...S.input, borderColor: '#C0392B' } : S.input
+  const instInputStyle = errors.institution ? { ...S.input, borderColor: '#C0392B' } : S.input
 
   return (
     <>
@@ -388,31 +391,41 @@ function Step1({
         <div>
           <label style={S.label}>Full Name</label>
           <input
-            style={S.input}
+            style={nameInputStyle}
             placeholder="e.g. Sarah Ahmed"
             value={data.candidateName}
             onChange={e => onChange('candidateName', e.target.value)}
           />
+          {errors.candidateName && <div style={S.fieldError}>{errors.candidateName}</div>}
         </div>
         <div>
           <label style={S.label}>Target Role</label>
           <input
-            style={S.input}
+            style={roleInputStyle}
             placeholder="e.g. Data Analyst"
             value={data.jobTitle}
             onChange={e => onChange('jobTitle', e.target.value)}
+            onBlur={onJobTitleBlur}
           />
+          {errors.jobTitle
+            ? <div style={S.fieldError}>{errors.jobTitle}</div>
+            : roleStatus === 'checking'
+              ? <div style={S.fieldChecking}>Checking…</div>
+              : roleStatus === 'valid'
+                ? <div style={S.fieldOk}>✓ Looks good</div>
+                : null}
         </div>
       </div>
 
       <div style={S.fieldGroup}>
         <label style={S.label}>Company / Institution</label>
         <input
-          style={S.input}
+          style={instInputStyle}
           placeholder="e.g. Ministry of Health"
           value={data.institution}
           onChange={e => onChange('institution', e.target.value)}
         />
+        {errors.institution && <div style={S.fieldError}>{errors.institution}</div>}
       </div>
 
       <div style={S.fieldGroup}>
@@ -446,8 +459,12 @@ function Step1({
       </div>
 
       <div style={S.btnRow}>
-        <button style={S.btnNext(!valid)} disabled={!valid} onClick={onNext}>
-          Continue →
+        <button
+          style={S.btnNext(busy || !filled)}
+          disabled={busy || !filled}
+          onClick={onNext}
+        >
+          {busy ? 'Checking…' : 'Continue →'}
         </button>
       </div>
     </>
@@ -571,6 +588,11 @@ export default function OnboardingPage() {
   const router = useRouter()
   const [step, setStep] = useState(0)
   const [cvError, setCvError] = useState('')
+  const [errors, setErrors] = useState<FieldErrors>({})
+  const [roleStatus, setRoleStatus] = useState<RoleStatus>('idle')
+  const [checking, setChecking] = useState(false)
+  const roleCache = useRef<Map<string, boolean>>(new Map())
+
   const [data, setData] = useState<OnboardingData>({
     candidateName:   '',
     jobTitle:        '',
@@ -586,6 +608,79 @@ export default function OnboardingPage() {
 
   const update = (key: keyof OnboardingData, val: any) => {
     setData(prev => ({ ...prev, [key]: val }))
+    if (key === 'jobTitle') {
+      setRoleStatus('idle')
+      setErrors(e => ({ ...e, jobTitle: undefined }))
+    }
+    if (key === 'candidateName') setErrors(e => ({ ...e, candidateName: undefined }))
+    if (key === 'institution')   setErrors(e => ({ ...e, institution: undefined }))
+  }
+
+  // Semantic job-title validation via /api/validate-role (cached, fail-open)
+  const validateRole = async (title: string): Promise<boolean> => {
+    const cacheKey = title.trim().toLowerCase()
+    if (roleCache.current.has(cacheKey)) {
+      const cached = roleCache.current.get(cacheKey)!
+      setRoleStatus(cached ? 'valid' : 'invalid')
+      return cached
+    }
+    setRoleStatus('checking')
+    try {
+      const res = await fetch('/api/validate-role', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobTitle: title.trim(), language: data.language }),
+      })
+      const json = await res.json()
+      const valid = Boolean(json?.valid)
+      roleCache.current.set(cacheKey, valid)
+      setRoleStatus(valid ? 'valid' : 'invalid')
+      return valid
+    } catch {
+      // Fail-open: never block a real user on a network/API error
+      setRoleStatus('valid')
+      return true
+    }
+  }
+
+  // Background validation when the user leaves the Target Role field
+  const handleJobTitleBlur = async () => {
+    const t = data.jobTitle.trim()
+    setErrors(e => ({ ...e, jobTitle: undefined }))
+    if (!t) { setRoleStatus('idle'); return }
+    if (!roleFormatOk(t)) {
+      setRoleStatus('invalid')
+      setErrors(e => ({ ...e, jobTitle: 'Please enter a valid job title.' }))
+      return
+    }
+    const ok = await validateRole(t)
+    if (!ok) setErrors(e => ({ ...e, jobTitle: 'Please enter a real job title.' }))
+  }
+
+  const handleStep1Next = async () => {
+    const next: FieldErrors = {}
+
+    if (!isReasonableText(data.candidateName, 2, 60)) next.candidateName = 'Please enter your name.'
+    if (!isReasonableText(data.institution, 2, 80)) next.institution = 'Please enter a valid company or institution.'
+
+    const role = data.jobTitle.trim()
+    if (!roleFormatOk(role)) next.jobTitle = 'Please enter a valid job title.'
+
+    if (Object.keys(next).length > 0) {
+      setErrors(prev => ({ ...prev, ...next }))
+      return
+    }
+
+    // Semantic role check (instant if already cached from onBlur)
+    setChecking(true)
+    const ok = await validateRole(role)
+    setChecking(false)
+    if (!ok) {
+      setErrors(prev => ({ ...prev, jobTitle: 'Please enter a real job title.' }))
+      return
+    }
+
+    setStep(1)
   }
 
   const handleCvSelect = (file: File) => {
@@ -677,7 +772,11 @@ export default function OnboardingPage() {
           <Step1
             data={data}
             onChange={update}
-            onNext={() => setStep(1)}
+            onNext={handleStep1Next}
+            onJobTitleBlur={handleJobTitleBlur}
+            errors={errors}
+            roleStatus={roleStatus}
+            busy={checking}
           />
         )}
         {step === 1 && (

@@ -6,13 +6,11 @@ import { useRouter } from 'next/navigation'
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface OnboardingData {
-  // Step 1 — Candidate Profile
   candidateName: string
   jobTitle: string
   institution: string
   yearsExperience: string
   language: string
-  // Step 2 — Interview Intelligence
   jobRequirements: string
   cvFileName: string
   cvMimeType: string
@@ -49,13 +47,11 @@ const MAX_CV_BYTES = 5 * 1024 * 1024 // 5 MB
 
 const hasLetter = (s: string) => /\p{L}/u.test(s)
 
-// Light format guard for free-text fields (name, company)
 const isReasonableText = (s: string, min: number, max: number) => {
   const t = s.trim()
   return t.length >= min && t.length <= max && hasLetter(t)
 }
 
-// Format guard for job title BEFORE calling the semantic API
 const roleFormatOk = (s: string) => {
   const t = s.trim()
   return /^[\p{L}\p{N}\s\-\/.,()]{2,80}$/u.test(t) && hasLetter(t)
@@ -82,7 +78,7 @@ const S = {
     padding: '22px 0 0',
     marginBottom: 32,
   },
-  logo: { fontWeight: 900, fontSize: 19, letterSpacing: '-0.5px', fontFamily: "'Georgia', serif" },
+  logo: { fontWeight: 900, fontSize: 26, letterSpacing: '-0.8px', fontFamily: "'Georgia', serif" },
   stepIndicator: { display: 'flex', gap: 6, alignItems: 'center' },
   dot: (active: boolean, done: boolean) => ({
     width: active ? 26 : 8,
@@ -174,7 +170,6 @@ const S = {
   fieldError: { fontSize: 11.5, color: '#C0392B', marginTop: 6, fontFamily: "'Georgia', serif", lineHeight: 1.4 },
   fieldChecking: { fontSize: 11.5, color: '#a59c8e', marginTop: 6, fontFamily: "'Georgia', serif" },
   fieldOk: { fontSize: 11.5, color: '#CC785C', marginTop: 6, fontWeight: 700, fontFamily: "'Georgia', serif" },
-  // Section header (Interview Intelligence)
   recommendBadge: {
     display: 'inline-flex',
     alignItems: 'center',
@@ -196,7 +191,6 @@ const S = {
     justifyContent: 'space-between',
     marginBottom: 9,
   },
-  // CV dropzone
   dropzone: (filled: boolean) => ({
     width: '100%',
     border: `2px dashed ${filled ? '#CC785C' : '#D8C9B6'}`,
@@ -351,6 +345,19 @@ function RecommendedBadge() {
   return <span style={S.recommendBadge}>★ Recommended</span>
 }
 
+// Step label: digits rendered in dark for clearer visual hierarchy
+function StepLabel({ text }: { text: string }) {
+  return (
+    <div style={S.stepLabel}>
+      {text.split('').map((ch, i) =>
+        /\d/.test(ch)
+          ? <span key={i} style={{ color: '#1A1A1A', fontWeight: 700 }}>{ch}</span>
+          : <span key={i}>{ch}</span>
+      )}
+    </div>
+  )
+}
+
 function formatSize(bytes: number) {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
@@ -383,7 +390,7 @@ function Step1({
 
   return (
     <>
-      <div style={S.stepLabel}>Step 1 of 2 · Candidate Profile</div>
+      <StepLabel text="Step 1 of 2 · Candidate Profile" />
       <div style={S.heading}>Tell us about yourself</div>
       <div style={S.subtext}>Barbaros uses this to align every question with your exact role.</div>
 
@@ -490,7 +497,7 @@ function Step2({
 
   return (
     <>
-      <div style={S.stepLabel}>Step 2 of 2 · Interview Intelligence</div>
+      <StepLabel text="Step 2 of 2 · Interview Intelligence" />
       <div style={S.heading}>Give Barbaros your context</div>
       <div style={S.subtext}>
         The more Barbaros knows, the closer the interview gets to a real hiring panel.
@@ -616,7 +623,6 @@ export default function OnboardingPage() {
     if (key === 'institution')   setErrors(e => ({ ...e, institution: undefined }))
   }
 
-  // Semantic job-title validation via /api/validate-role (cached, fail-open)
   const validateRole = async (title: string): Promise<boolean> => {
     const cacheKey = title.trim().toLowerCase()
     if (roleCache.current.has(cacheKey)) {
@@ -637,13 +643,11 @@ export default function OnboardingPage() {
       setRoleStatus(valid ? 'valid' : 'invalid')
       return valid
     } catch {
-      // Fail-open: never block a real user on a network/API error
       setRoleStatus('valid')
       return true
     }
   }
 
-  // Background validation when the user leaves the Target Role field
   const handleJobTitleBlur = async () => {
     const t = data.jobTitle.trim()
     setErrors(e => ({ ...e, jobTitle: undefined }))
@@ -671,7 +675,6 @@ export default function OnboardingPage() {
       return
     }
 
-    // Semantic role check (instant if already cached from onBlur)
     setChecking(true)
     const ok = await validateRole(role)
     setChecking(false)
@@ -720,7 +723,6 @@ export default function OnboardingPage() {
     `session_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`
 
   const handleStart = () => {
-    // Preserve the plan chosen on the pricing page (sessionStorage or ?plan=)
     let plan = 'go'
     try {
       const raw = sessionStorage.getItem('barbaros_config')

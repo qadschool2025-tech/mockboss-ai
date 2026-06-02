@@ -10,6 +10,13 @@
 //                                + applyContradictionPatch  (contradiction-tracker.ts)
 // - computeAggregateScore      → aggregateScores            (score-aggregator.ts)
 //
+// DIRECTOR INTEGRATION:
+//   After state patches and before prompt assembly, the Director decides the
+//   single tactical move for the next turn (decide-next-move.ts) and the prompt
+//   builder is instructed to EXECUTE it. The intervention budget is carried on
+//   state loosely (mirroring the existing pressure/behavior carry pattern) so it
+//   decrements across turns; a typed SessionState field can replace this later.
+//
 // FIRST-TURN FIX (root cause of black screen / no greeting):
 //   On the first message the opening greeting is a STATIC template
 //   (BARBAROS_OPENING_TEMPLATE). Previously it was injected as the first
@@ -46,6 +53,7 @@ import {
 import {
   detectContradictions,
   applyContradictionPatch,
+  getUnaddressedContradictions,
 }                                            from './state/contradiction-tracker'
 
 import { orchestrateBehavior }               from './analysis/behavior/behavior-orchestrator'
@@ -58,6 +66,9 @@ import { buildSessionSnapshot }              from './artifacts/session-snapshot'
 import { updateWeaknessTracker }             from './longitudinal/weakness-tracker'
 import { updateGrowthTracker }               from './longitudinal/growth-tracker'
 import { computeSessionDelta }               from './longitudinal/session-delta'
+
+import { decideNextMove, createInterventionBudget } from './director'
+import type { DirectorContext, InterventionBudget }  from './director'
 
 import { buildPrompt }                       from './prompt/prompt-builder'
 import { BARBAROS_CLOSING_TEMPLATE }         from './prompt/personality'
@@ -98,6 +109,19 @@ const TIME_LIMITS: Record<string, number> = {
   go:     15 * 60,
   pro:    30 * 60,
   expert: 45 * 60,
+}
+
+// Neutral fallback profile if state has no candidateProfile yet.
+const NEUTRAL_CANDIDATE_PROFILE = {
+  strengths:       [] as string[],
+  weaknesses:      [] as string[],
+  confidenceLevel: 50,
+  ownershipScore:  50,
+  clarity:         50,
+  depth:           50,
+  consistency:     50,
+  engagement:      50,
+  lastUpdatedAt:   0,
 }
 
 // ─── Score Tag Helper ─────────────────────────────────────────────────────────
@@ -208,6 +232,11 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
   const priorWeakTopics         = carry.weakCompetencyTopics  ?? []
   const priorInsights           = carry.behaviorInsights      ?? []
   const priorPatterns           = carry.behaviorPatterns      ?? []
+
+  // Director budget — carried loosely on state; initialized per plan on turn 1.
+  const priorBudget: InterventionBudget =
+    ((stateWithPhase as any).directorBudget as InterventionBudget | undefined)
+    ?? createInterventionBudget(config.plan)
 
   // ── 3. Behavior pipeline ────────────────────────────────────────────────────
 
@@ -322,6 +351,49 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
     score = null
   }
 
+  // ── 5b. Director — tactical decision (what should Barbaros DO next?) ─────────
+  // Reads the decision-relevant slice of the just-patched state and picks ONE
+  // move. Pure & budgeted. The decision is handed to the prompt builder, which
+  // instructs the LLM to EXECUTE it rather than choose its own direction.
+
+  const missingCompetencies = Object.entries(stateAfterCompetency.competencyCoverage)
+    .filter(([, cov]) => (cov as { coverage: number }).coverage < 50)
+    .map(([key]) => key)
+
+  const answerSignals = lastUserMsg
+    ? quickAnswerSignals(lastUserMsg.content)
+    : { vagueness: 'low' as const, hasExamples: true }
+
+  const directorContext: DirectorContext = {
+    phase:                     newPhase,
+    plan:                      config.plan,
+    unaddressedContradictions: getUnaddressedContradictions(updatedContradictions),
+    recentTopics:              stateAfterCompetency.recentTopics,
+    competencyCoverage:        stateAfterCompetency.competencyCoverage,
+    missingCompetencies,
+    candidateProfile:
+      (((stateWithPhase as any).candidateProfile ?? NEUTRAL_CANDIDATE_PROFILE) as DirectorContext['candidateProfile']),
+    lastAnswerVagueness:       answerSignals.vagueness,
+    lastAnswerHasExamples:     answerSignals.hasExamples,
+    elapsedMinutes,
+    totalMinutes,
+    budget:                    priorBudget,
+    now,
+  }
+
+  const directorDecision = decideNextMove(directorContext)
+
+  // Persist the updated budget so the next turn sees decremented counters.
+  ;(statePatch as Record<string, unknown>).directorBudget = directorDecision.budgetAfter
+
+  // If we're returning to a contradiction, pre-mark it addressed so the Director
+  // does not re-select the same one next turn.
+  if (directorDecision.intent === 'RETURN_TO_PREVIOUS' && directorDecision.targetRef) {
+    statePatch.contradictions = applyContradictionPatch(updatedContradictions, {
+      markAddressed: [directorDecision.targetRef],
+    })
+  }
+
   // ── 6. Prompt assembly ──────────────────────────────────────────────────────
 
   const activeWeaknesses = weaknessState.weaknesses.filter(
@@ -340,6 +412,7 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
       elapsedMinutes,
       totalMinutes,
       isFirstSession: previousSnapshot === null,
+      directorDecision,
     },
     false   // not first message — opening already delivered on turn 1
   )
@@ -464,6 +537,25 @@ async function buildEndOfSessionOutput(
 // Fallback opening if buildPrompt returns no openingMessage for any reason.
 function defaultOpening(config: InterviewConfig): string {
   return `Hello ${config.candidateName}, I'm Barbaros. We're here today for the ${config.jobTitle} position at ${config.institution}. Are you ready to begin?`
+}
+
+// Lightweight per-answer signals for the Director, derived from the candidate's
+// last message. STOPGAP: replace with real BehaviorSignals (vagueness,
+// hasExamples) from the behavior pipeline when those are surfaced per turn.
+function quickAnswerSignals(
+  text: string
+): { vagueness: 'low' | 'medium' | 'high'; hasExamples: boolean } {
+  const t = text.trim()
+  const words = t.split(/\s+/).filter(Boolean).length
+  const hasExamples =
+    /\b(for example|for instance|e\.g\.|such as|specifically|one time|once|when i|at my|last year|this year|in \d{4})\b/i.test(t) ||
+    /\d/.test(t)
+
+  let vagueness: 'low' | 'medium' | 'high' = 'low'
+  if (!hasExamples && words < 25) vagueness = 'high'
+  else if (!hasExamples && words < 60) vagueness = 'medium'
+
+  return { vagueness, hasExamples }
 }
 
 function deriveSilenceRisk(

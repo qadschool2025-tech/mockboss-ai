@@ -8,11 +8,19 @@
 // - Sorts by weight before assembly
 // - Token budget enforced: logs warning if over limit, truncates gracefully
 // - Opening message built separately — injected as first user turn, not system prompt
+//
+// DIRECTOR INTEGRATION:
+// - Accepts an OPTIONAL `directorDecision`. When present, a protected
+//   "director" directive layer is injected instructing the LLM to EXECUTE the
+//   chosen tactical move rather than pick its own. The intent→instruction
+//   mapping below is the Language Layer (presentation of an already-made
+//   decision — not decision-making). It can later move to system-layers.ts.
 
 import type { InterviewConfig }        from '../types'
 import type { SessionState }           from '../state/session-state'
 import type { TrackedWeakness }        from '../longitudinal/weakness-tracker'
 import type { TrackedGrowth }          from '../longitudinal/growth-tracker'
+import type { DirectorDecision, DirectorIntent } from '../director'
 import {
   buildIdentityLayer,
   buildResponseStyleLayer,
@@ -41,6 +49,7 @@ const PROTECTED_LAYER_LABELS = new Set([
   'response_style',
   'language',
   'scoring',
+  'director',
 ])
 
 // ─── Input Types ──────────────────────────────────────────────────────────────
@@ -53,6 +62,7 @@ export interface PromptBuilderInput {
   elapsedMinutes: number
   totalMinutes:   number
   isFirstSession: boolean
+  directorDecision?: DirectorDecision // optional — when present, the Director directs the next move
 }
 
 export interface BuiltPrompt {
@@ -87,6 +97,7 @@ export function buildPrompt(
     elapsedMinutes,
     totalMinutes,
     isFirstSession,
+    directorDecision,
   } = input
 
   // Build all layers
@@ -102,6 +113,11 @@ export function buildPrompt(
     buildScoringLayer(),
     buildTimeLayer(elapsedMinutes, totalMinutes),
   ]
+
+  // Director directive — only when a decision is supplied (never on first turn).
+  if (directorDecision) {
+    allLayers.push(buildDirectorLayer(directorDecision))
+  }
 
   // Sort by weight (ascending)
   const sorted = [...allLayers].sort((a, b) => a.weight - b.weight)
@@ -139,6 +155,47 @@ export function buildPrompt(
     charCount:     systemPrompt.length,
     truncated,
     skippedLayers,
+  }
+}
+
+// ─── Director Layer (Language Layer) ────────────────────────────────────────────
+
+/**
+ * buildDirectorLayer
+ * Translates an already-made DirectorDecision into a mandatory instruction for
+ * the LLM. This is presentation of a decision, not decision-making — the choice
+ * was made by decide-next-move.ts. High weight so it reads as the final, most
+ * salient instruction; protected so it is never truncated.
+ */
+function buildDirectorLayer(decision: DirectorDecision): SystemLayer {
+  const directives: Record<DirectorIntent, string> = {
+    OPEN_NEW_TOPIC:
+      'Move the interview to a new topic or competency that has not yet been explored. Do not linger on the previous topic.',
+    GO_DEEPER:
+      'Stay on the current topic and probe one level deeper. Ask a sharper follow-up that forces more specificity than the candidate has given so far.',
+    REQUEST_EXAMPLE:
+      'Ask for one concrete, specific example. Reject generalities — require an actual situation, the action taken, and the result.',
+    CHALLENGE:
+      "Push back on the candidate's last answer. Name the weakness, vagueness, or gap directly and require them to defend or sharpen it. Stay professional, never hostile.",
+    RAISE_DIFFICULTY:
+      'The candidate is comfortable. Raise the difficulty: pose a harder, more demanding question within the current topic that tests depth, trade-offs, or edge cases.',
+    RETURN_TO_PREVIOUS:
+      'Return to an earlier point the candidate left unresolved or contradicted. Quote back what they said earlier and ask them to reconcile it. Do not let them avoid it.',
+    CLOSE_TOPIC:
+      'Wrap up the current topic cleanly. Do not open a major new line of questioning.',
+  }
+
+  const directive = directives[decision.intent]
+  const target = decision.targetRef ? `\nFocus target: ${decision.targetRef}` : ''
+
+  return {
+    label:   'director',
+    weight:  95,
+    content:
+      'INTERVIEW DIRECTOR — NEXT MOVE (mandatory)\n' +
+      'Execute exactly this move on your next turn. Do not choose a different direction.\n' +
+      `Move: ${decision.intent}\n` +
+      `${directive}${target}`,
   }
 }
 

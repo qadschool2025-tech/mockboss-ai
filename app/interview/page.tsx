@@ -72,6 +72,7 @@ function InterviewRoom() {
   const [isGenerating, setIsGenerating]     = useState(false)
   const [genStep, setGenStep]               = useState(0)
   const [genError, setGenError]             = useState<string | null>(null)
+  const [mounted, setMounted]               = useState(false)
 
   const chatRef           = useRef<HTMLDivElement>(null)
   const inputRef          = useRef<HTMLTextAreaElement>(null)
@@ -94,6 +95,8 @@ function InterviewRoom() {
   useEffect(() => { isEndedRef.current      = isEnded      }, [isEnded])
   useEffect(() => { isRecordingRef.current  = isRecording  }, [isRecording])
   useEffect(() => { isTranscribingRef.current = isTranscribing }, [isTranscribing])
+
+  useEffect(() => { setMounted(true) }, [])
 
   useEffect(() => {
     const id = setInterval(() => {
@@ -344,6 +347,17 @@ function InterviewRoom() {
           : 'Could not generate the report. Please try again.'
       )
     }
+  }
+
+  if (!mounted) {
+    return (
+      <div style={{ fontFamily: 'system-ui, sans-serif', background: '#0B0D11', color: '#F0EDE8', minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
+        <div style={{ fontWeight: 800, fontSize: 22 }}>
+          <span style={{ color: '#F0EDE8' }}>Barbar</span><span style={{ color: '#CC785C' }}>os</span>
+        </div>
+        <div style={{ fontSize: 12, color: 'rgba(240,237,232,0.4)' }}>Preparing your interview…</div>
+      </div>
+    )
   }
 
   return (

@@ -17,17 +17,6 @@ interface Message {
   voiceAnalysis?: VoiceAnalysis
 }
 
-// Assessment focus rotation (fallback). When the backend starts returning
-// `focus` on the interview response, that value overrides this list.
-const FOCUS_AREAS = [
-  'Professional Background',
-  'Communication Clarity',
-  'Domain Knowledge',
-  'Problem Solving',
-  'Professional Judgment',
-  'Leadership & Ownership',
-]
-
 function buildConfig() {
   let raw: any = {}
   if (typeof window !== 'undefined') {
@@ -130,7 +119,7 @@ function InterviewRoom() {
   const [showTranscript, setShowTranscript] = useState(false)
   const [showTextInput, setShowTextInput]   = useState(false)
   const [showEndModal, setShowEndModal]     = useState(false)
-  const [currentFocus, setCurrentFocus]     = useState(FOCUS_AREAS[0])
+  const [currentFocus, setCurrentFocus]     = useState<string | null>(null)
 
   const chatRef           = useRef<HTMLDivElement>(null)
   const inputRef          = useRef<HTMLTextAreaElement>(null)
@@ -237,7 +226,7 @@ function InterviewRoom() {
         setIsPaused(true)
         isPausedRef.current = true
       }
-    }, 30000)
+    }, 45000)
   }, [])
 
   const startRecording = async () => {
@@ -328,9 +317,8 @@ function InterviewRoom() {
       const newMsg: Message = { role: 'assistant', content: data.content, score: data.score }
       setMessages(prev => [...prev, newMsg])
 
-      // Assessment focus: backend value if present, else rotate.
-      const assistantSoFar = msgs.filter(m => m.role === 'assistant').length
-      setCurrentFocus(data.focus || FOCUS_AREAS[assistantSoFar % FOCUS_AREAS.length])
+      // Assessment focus: shown ONLY when the backend actually provides it.
+      if (data.focus) setCurrentFocus(data.focus)
 
       if (data.audioBase64) playAudio(data.audioBase64)
 
@@ -428,6 +416,7 @@ function InterviewRoom() {
   }, [isEnded])
 
   const started = messages.length > 0 || isLoading
+  const lastQuestion = [...messages].reverse().find(m => m.role === 'assistant')?.content || ''
 
   // ── Presence state ──
   let stateLabel = L.ready
@@ -526,6 +515,15 @@ function InterviewRoom() {
         </div>
       </div>
 
+      {started && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '8px 18px 0' }}>
+          <button type="button" onClick={() => setShowTranscript(true)}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(240,237,232,0.4)', fontSize: 11, fontFamily: 'inherit', textDecoration: 'underline', textUnderlineOffset: 3 }}>
+            {L.transcript}
+          </button>
+        </div>
+      )}
+
       {/* ── Center: Barbaros presence ── */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 26, padding: '20px 24px' }}>
         {!started ? (
@@ -556,15 +554,23 @@ function InterviewRoom() {
               </div>
             </div>
 
-            <div style={{ textAlign: 'center', minHeight: 56 }}>
-              <div style={{ fontSize: 18, fontWeight: 800, color: glow === '#3A4252' ? '#F0EDE8' : glow, transition: 'color .3s' }}>{stateLabel}</div>
-              <div style={{ fontSize: 12.5, color: 'rgba(240,237,232,0.55)', marginTop: 5, maxWidth: 300 }}>{stateSub}</div>
+            <div style={{ textAlign: 'center' }}>
+              <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 0.6, textTransform: 'uppercase', color: glow === '#3A4252' ? 'rgba(240,237,232,0.65)' : glow, transition: 'color .3s' }}>{stateLabel}</div>
+              <div style={{ fontSize: 11, color: 'rgba(240,237,232,0.4)', marginTop: 4 }}>{stateSub}</div>
             </div>
 
-            <div style={{ textAlign: 'center', padding: '10px 18px', border: '0.5px solid rgba(255,255,255,0.08)', borderRadius: 12, background: 'rgba(255,255,255,0.02)' }}>
-              <div style={{ fontSize: 9, letterSpacing: 0.8, textTransform: 'uppercase', color: 'rgba(240,237,232,0.4)', marginBottom: 4 }}>{L.focusLabel}</div>
-              <div style={{ fontSize: 14, fontWeight: 700, color: '#8B96FF' }}>{currentFocus}</div>
-            </div>
+            {lastQuestion && (
+              <div style={{ textAlign: 'center', maxWidth: 470, maxHeight: 170, overflowY: 'auto', fontSize: 17, lineHeight: 1.6, fontWeight: 500, color: '#F0EDE8', padding: '0 8px' }}>
+                {lastQuestion}
+              </div>
+            )}
+
+            {currentFocus && (
+              <div style={{ textAlign: 'center', padding: '8px 16px', border: '0.5px solid rgba(255,255,255,0.08)', borderRadius: 12, background: 'rgba(255,255,255,0.02)' }}>
+                <div style={{ fontSize: 9, letterSpacing: 0.8, textTransform: 'uppercase', color: 'rgba(240,237,232,0.4)', marginBottom: 4 }}>{L.focusLabel}</div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: '#8B96FF' }}>{currentFocus}</div>
+              </div>
+            )}
           </>
         )}
       </div>
@@ -580,19 +586,13 @@ function InterviewRoom() {
               </button>
             </div>
           )}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 28 }}>
-            {/* Transcript */}
-            <button type="button" onClick={() => setShowTranscript(true)}
-              style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(240,237,232,0.55)', fontFamily: 'inherit' }}>
-              <div style={{ width: 46, height: 46, borderRadius: '50%', border: '0.5px solid rgba(255,255,255,0.14)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>📄</div>
-              <span style={{ fontSize: 10 }}>{L.transcript}</span>
-            </button>
-
-            {/* Microphone (primary) */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', alignItems: 'center' }}>
+            <div />
+            {/* Microphone (primary, centered) */}
             <button type="button" onClick={toggleRecording} disabled={isLoading || isTranscribing}
-              style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, background: 'none', border: 'none', cursor: (isLoading || isTranscribing) ? 'not-allowed' : 'pointer', fontFamily: 'inherit' }}>
+              style={{ justifySelf: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, background: 'none', border: 'none', cursor: (isLoading || isTranscribing) ? 'not-allowed' : 'pointer', fontFamily: 'inherit' }}>
               <div style={{
-                width: 72, height: 72, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28,
+                width: 76, height: 76, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 30,
                 background: isRecording ? '#DC2626' : '#CC785C',
                 boxShadow: isRecording ? '0 0 28px rgba(220,38,38,0.65)' : '0 6px 22px rgba(204,120,92,0.4)',
                 transition: 'all .15s', opacity: (isLoading || isTranscribing) ? 0.4 : 1,
@@ -604,12 +604,14 @@ function InterviewRoom() {
               </span>
             </button>
 
-            {/* End */}
-            <button type="button" onClick={() => setShowEndModal(true)}
-              style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(248,113,113,0.7)', fontFamily: 'inherit' }}>
-              <div style={{ width: 46, height: 46, borderRadius: '50%', border: '0.5px solid rgba(248,113,113,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>⛔</div>
-              <span style={{ fontSize: 10 }}>{L.end}</span>
-            </button>
+            {/* End (right) */}
+            <div style={{ justifySelf: 'end' }}>
+              <button type="button" onClick={() => setShowEndModal(true)}
+                style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(248,113,113,0.7)', fontFamily: 'inherit' }}>
+                <div style={{ width: 46, height: 46, borderRadius: '50%', border: '0.5px solid rgba(248,113,113,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>⛔</div>
+                <span style={{ fontSize: 10 }}>{L.end}</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -22,8 +22,9 @@
 //   6. Strong but shallow                        → RAISE_DIFFICULTY / soften
 //   7. Vague or evasive                          → CHALLENGE / soften
 //   8. No concrete example                       → REQUEST_EXAMPLE
-//   9. Topic saturated + gaps remain             → OPEN_NEW_TOPIC
-//  10. Default                                   → GO_DEEPER
+//   9. Topic sufficiently covered (plan-aware)   → OPEN_NEW_TOPIC / CLOSE_TOPIC  [TEMP]
+//  10. Topic saturated + gaps remain             → OPEN_NEW_TOPIC
+//  11. Default                                   → GO_DEEPER
 
 import type { Plan } from '../types';
 import type {
@@ -53,6 +54,23 @@ const BUDGET_BY_PLAN: Record<Plan, InterventionBudget> = {
   go:     { challenge: 2, interruption: 1, contradictionEscalation: 1 },
   pro:    { challenge: 3, interruption: 2, contradictionEscalation: 2 },
   expert: { challenge: 4, interruption: 2, contradictionEscalation: 2 },
+};
+
+// ─── Per-plan "sufficiently covered" visit threshold ────────────────────────────
+//
+// TEMPORARY
+// Replace visit-based coverage gating with longitudinal evidence progression
+// from CandidateEvolutionProfile (longitudinal engine). This is a local stopgap
+// to break the GO_DEEPER loop on good answers; it is NOT the final coverage
+// model. Plan-aware so Go favors breadth (move on sooner) while Pro/Expert allow
+// more depth. NOTE: the effective ceiling is bounded by THRESHOLDS.maxTopicVisits
+// (still plan-blind) until that is unified in the deferred audit.
+
+const COVERAGE_SUFFICIENT_VISITS_BY_PLAN: Record<Plan, number> = {
+  free:   2,
+  go:     2,
+  pro:    3,
+  expert: 3,
 };
 
 /**
@@ -173,7 +191,41 @@ export function decideNextMove(ctx: DirectorContext): DirectorDecision {
     return makeDecision('REQUEST_EXAMPLE', currentTopic(ctx), ['vague_answer'], budget, null, now);
   }
 
-  // 9. Current topic saturated and competency gaps remain — open a new topic.
+  // 9. TEMPORARY — current topic sufficiently covered for this plan.
+  //    Reached only for concrete answers (not closing/opening, no unresolved
+  //    contradiction, vagueness is not 'high', and an example WAS given — see
+  //    branches 1–8 above). Once the current topic has been engaged enough times
+  //    for the plan, move on instead of deepening further. This breaks the
+  //    GO_DEEPER loop on good answers, and the CLOSE_TOPIC branch breaks the
+  //    "no missing competencies → deepen forever" loop.
+  //
+  //    TEMPORARY: visit-based gating is a stopgap. Replace with longitudinal
+  //    evidence progression from CandidateEvolutionProfile (see TODO above).
+  const coverageVisitsThreshold =
+    COVERAGE_SUFFICIENT_VISITS_BY_PLAN[ctx.plan] ??
+    COVERAGE_SUFFICIENT_VISITS_BY_PLAN.free;
+  if (currentTopicVisits(ctx) >= coverageVisitsThreshold) {
+    if (ctx.missingCompetencies.length > 0) {
+      return makeDecision(
+        'OPEN_NEW_TOPIC',
+        pickMissingCompetency(ctx),
+        ['topic_coverage_complete'],
+        budget,
+        null,
+        now,
+      );
+    }
+    return makeDecision(
+      'CLOSE_TOPIC',
+      currentTopic(ctx),
+      ['topic_coverage_complete'],
+      budget,
+      null,
+      now,
+    );
+  }
+
+  // 10. Current topic saturated and competency gaps remain — open a new topic.
   if (isCurrentTopicSaturated(ctx) && ctx.missingCompetencies.length > 0) {
     return makeDecision(
       'OPEN_NEW_TOPIC',
@@ -185,7 +237,7 @@ export function decideNextMove(ctx: DirectorContext): DirectorDecision {
     );
   }
 
-  // 10. Default — probe deeper on the current thread.
+  // 11. Default — probe deeper on the current thread.
   return makeDecision('GO_DEEPER', currentTopic(ctx), ['default_deepen'], budget, null, now);
 }
 
@@ -240,6 +292,21 @@ function currentTopic(ctx: DirectorContext): string | null {
     if (t.lastVisitedAt > latest.lastVisitedAt) latest = t;
   }
   return latest.topic;
+}
+
+/**
+ * Visit count of the current topic, or 0 if none recorded yet.
+ *
+ * NOTE: `timesVisited` is incremented per candidate message that mentions the
+ * topic keyword (topic-memory.ts), so it is a candidate-vocabulary proxy for
+ * probing depth — not a precise interviewer follow-up count. Used here only as
+ * a stopgap gate; see the TEMPORARY TODO above.
+ */
+function currentTopicVisits(ctx: DirectorContext): number {
+  const topic = currentTopic(ctx);
+  if (!topic) return 0;
+  const record = ctx.recentTopics.find((t) => t.topic === topic);
+  return record ? record.timesVisited : 0;
 }
 
 /**

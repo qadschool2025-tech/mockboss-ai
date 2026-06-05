@@ -282,8 +282,14 @@ export function buildTimeLayer(
 
   let content: string
 
+  const INTERNAL_TIMING_GUARD =
+    '[INTERNAL TIMING — guides YOUR pacing only. NEVER tell the candidate the time, '   +
+    'minutes elapsed, minutes remaining, or mention any clock/timer. NEVER output a '    +
+    'line starting with TIME:, ACTION:, FORBIDDEN:, or ABSOLUTE RULE:. Speak naturally.]'
+
   if (remainingSeconds <= 90) {
     content = [
+      INTERNAL_TIMING_GUARD,
       `TIME: ${remainingMins} minute(s) remaining.`,
       'ACTION: Move to closing NOW. Ask your final question and begin wrap-up.',
       'You MAY use "final question" or "last question" only at this stage.',
@@ -291,6 +297,7 @@ export function buildTimeLayer(
 
   } else if (remainingSeconds <= 180) {
     content = [
+      INTERNAL_TIMING_GUARD,
       `TIME: ${remainingMins} minute(s) remaining.`,
       'ACTION: Finish current topic, then transition to closing phase.',
       'Do NOT say "final question" or "last question" yet.',
@@ -298,6 +305,7 @@ export function buildTimeLayer(
 
   } else if (remainingSeconds <= 480) {
     content = [
+      INTERNAL_TIMING_GUARD,
       `TIME: ${remainingMins} minute(s) remaining.`,
       'ACTION: Move to deeper analysis — pressure handling and critical thinking questions.',
       'FORBIDDEN: Do NOT close. Do NOT say "final question" or "last question".',
@@ -305,6 +313,7 @@ export function buildTimeLayer(
 
   } else {
     content = [
+      INTERNAL_TIMING_GUARD,
       `TIME: ${elapsedMins}/${totalMinutes} minutes elapsed. ${remainingMins} minutes remaining.`,
       'ACTION: Continue with core domain expertise and behavioral questions.',
       'ABSOLUTE RULE: You are FORBIDDEN from ending or closing this session.',

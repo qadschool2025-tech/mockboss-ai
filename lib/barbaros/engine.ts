@@ -37,7 +37,7 @@
 //     - contradiction count  → metrics.contradictionCount
 //     - contradictions array  → contradictions
 
-import type { InterviewConfig, Message }  from './types'
+import type { InterviewConfig, Message, CandidateProfile }  from './types'
 import type { SessionState }              from './state/session-state'
 import type { WeaknessTrackerState }      from './longitudinal/weakness-tracker'
 import type { GrowthTrackerState }        from './longitudinal/growth-tracker'
@@ -61,6 +61,8 @@ import type { OrchestratorSessionState }     from './analysis/behavior/behavior-
 import type { BehaviorContext }              from './analysis/behavior/behavior-types'
 
 import { aggregateScores }                   from './scoring/score-aggregator'
+import { normalizeScores }                   from './scoring/score-normalizer'
+import type { RawScoreInput }                from './scoring/score-normalizer'
 import { buildSessionSnapshot }              from './artifacts/session-snapshot'
 
 import { updateWeaknessTracker }             from './longitudinal/weakness-tracker'
@@ -338,17 +340,62 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
     },
   }
 
-  // ── 5. Score ────────────────────────────────────────────────────────────────
-
-  // aggregateScores requires a NormalizedScoreSet — build a minimal one
-  // from behavior signals if no full scoring pipeline is available
+  // ── 5. Score + candidate profile (REVIVED) ──────────────────────────────────
+  // Previously this waited for `behaviorResult.scoreSet`, which is NEVER
+  // produced — so `score` was always null and `candidateProfile` stayed frozen
+  // at its initial 50s. We now build a NormalizedScoreSet directly from the
+  // LIVE behavior signals + competency coverage + contradictions (this is what
+  // score-normalizer is designed to consume — no LLM RawScore needed), then
+  // aggregate it, then derive the candidate profile from the dimensions.
+  //
+  // EMPTY-SCORE GUARD: normalizeScores starts from baseline floors (e.g. depth
+  // 50) and would emit a "score" even with no real evidence. To avoid mistaking
+  // those floors for live data, we only compute/apply when at least one CONFIRMED
+  // behavior signal (or a confirmed insight) exists. On signal-less turns we
+  // leave `score` null and DO NOT touch candidateProfile.
   let score: ReturnType<typeof aggregateScores> | null = null
-  try {
-    if (lastUserMsg && (behaviorResult as any).scoreSet) {
-      score = aggregateScores((behaviorResult as any).scoreSet, now)
+
+  const confirmedSignals: any[] = Array.isArray((behaviorResult as any).validatedSignals)
+    ? (behaviorResult as any).validatedSignals.filter((s: any) => s?.confirmed)
+    : []
+  const insightCount: number = Array.isArray((behaviorResult as any).insights)
+    ? (behaviorResult as any).insights.length
+    : 0
+  const hasLiveSignal = confirmedSignals.length > 0 || insightCount > 0
+
+  if (lastUserMsg && hasLiveSignal) {
+    try {
+      const rawScoreInput = buildRawScoreInput(
+        behaviorResult,
+        stateAfterCompetency.competencyCoverage,
+        updatedContradictions,
+        messages,
+        elapsedMinutes,
+        now
+      )
+      const scoreSet = normalizeScores(rawScoreInput)
+      score = aggregateScores(scoreSet, now)
+
+      // Derive the LIVE candidate profile from the normalized dimensions.
+      // Direct matches: clarity, depth, engagement.
+      // TODO: confidenceLevel ← credibility is an approximation.
+      // credibility = source consistency; confidence = user self-certainty.
+      // Replace when a real signal is available.
+      // ownershipScore + consistency have NO source in the normalizer yet —
+      // left at their existing values (known gap, not guessed).
+      const baseProfile: CandidateProfile =
+        stateWithPhase.candidateProfile ?? NEUTRAL_CANDIDATE_PROFILE
+      statePatch.candidateProfile = {
+        ...baseProfile,
+        clarity:         scoreSet.dimensions.clarity.score,
+        depth:           scoreSet.dimensions.depth.score,
+        engagement:      scoreSet.dimensions.engagement.score,
+        confidenceLevel: scoreSet.dimensions.credibility.score,
+        lastUpdatedAt:   now,
+      }
+    } catch {
+      score = null
     }
-  } catch {
-    score = null
   }
 
   // ── 5b. Director — tactical decision (what should Barbaros DO next?) ─────────
@@ -537,6 +584,33 @@ async function buildEndOfSessionOutput(
 // Fallback opening if buildPrompt returns no openingMessage for any reason.
 function defaultOpening(config: InterviewConfig): string {
   return `Hello ${config.candidateName}, I'm Barbaros. We're here today for the ${config.jobTitle} position at ${config.institution}. Are you ready to begin?`
+}
+
+// Builds the RawScoreInput consumed by normalizeScores from live engine state.
+// Pure: same inputs → same output. Extracted from section 5 for readability and
+// isolated testability (keeps runEngine an orchestrator, not a calculator).
+function buildRawScoreInput(
+  behavior:       any,
+  competencies:   SessionState['competencyCoverage'],
+  contradictions: Array<{ severity: 'minor' | 'moderate' | 'major' }>,
+  messages:       Message[],
+  elapsedMinutes: number,
+  now:            number
+): RawScoreInput {
+  const majorContradictions    = contradictions.filter(c => c.severity === 'major').length
+  const moderateContradictions = contradictions.filter(c => c.severity === 'moderate').length
+  const totalUserMessages      = messages.filter(m => m.role === 'user').length
+
+  return {
+    behavior,
+    competencies,
+    contradictionCount: contradictions.length,
+    majorContradictions,
+    moderateContradictions,
+    totalUserMessages,
+    elapsedMinutes,
+    now,
+  }
 }
 
 // Lightweight per-answer signals for the Director, derived from the candidate's

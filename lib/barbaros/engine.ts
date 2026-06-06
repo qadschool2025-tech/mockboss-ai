@@ -393,9 +393,30 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
         confidenceLevel: scoreSet.dimensions.credibility.score,
         lastUpdatedAt:   now,
       }
+
+      // TEMP DIAGNOSTIC — remove after Phase 2 verification. Prints the live
+      // profile each turn to Vercel function logs. Does not affect any logic
+      // or output; read in Vercel → Logs, NOT the browser console.
+      console.log('[barbaros:profile]', JSON.stringify({
+        turn:             messages.filter(m => m.role === 'user').length,
+        confirmedSignals: confirmedSignals.length,
+        insightCount,
+        depth:            statePatch.candidateProfile?.depth,
+        clarity:          statePatch.candidateProfile?.clarity,
+        engagement:       statePatch.candidateProfile?.engagement,
+        confidenceLevel:  statePatch.candidateProfile?.confidenceLevel,
+      }))
     } catch {
       score = null
     }
+  } else if (lastUserMsg) {
+    // TEMP DIAGNOSTIC — remove after Phase 2 verification. Makes a signal-less
+    // turn explicit, so a frozen profile is never ambiguous in the logs.
+    console.log('[barbaros:profile] skipped — no confirmed signals this turn', JSON.stringify({
+      turn:             messages.filter(m => m.role === 'user').length,
+      confirmedSignals: confirmedSignals.length,
+      insightCount,
+    }))
   }
 
   // ── 5b. Director — tactical decision (what should Barbaros DO next?) ─────────

@@ -36,6 +36,16 @@
 //   Persisted equivalents that DO exist on state:
 //     - contradiction count  → metrics.contradictionCount
 //     - contradictions array  → contradictions
+//
+// END-OF-SESSION HARDENING:
+//   buildSessionSnapshot → toScoreSnapshot dereferences
+//   scoreBreakdown.dimensions.engagement, but this end path passes an EMPTY
+//   scoreBreakdown stub ({}), which threw "Cannot read properties of undefined
+//   (reading 'engagement')" and 500'd the session close. The snapshot +
+//   longitudinal work is NOT launch-critical, so it is now isolated in a guard:
+//   on any failure the session closes gracefully (snapshot=null, trackers
+//   unchanged). The proper fix is to feed a REAL score breakdown here — that is
+//   the "connect engine data to the report" item, handled separately.
 
 import type { InterviewConfig, Message, CandidateProfile }  from './types'
 import type { SessionState }              from './state/session-state'
@@ -406,8 +416,10 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
         engagement:       statePatch.candidateProfile?.engagement,
         confidenceLevel:  statePatch.candidateProfile?.confidenceLevel,
       }))
-    } catch {
+    } catch (err) {
+      // Scoring is a secondary feature — never let it break the interview.
       score = null
+      console.error('[barbaros:profile] scoring failed — skipped this turn:', err)
     }
   } else if (lastUserMsg) {
     // TEMP DIAGNOSTIC — remove after Phase 2 verification. Makes a signal-less
@@ -578,12 +590,28 @@ async function buildEndOfSessionOutput(
     now,
   } as unknown as Parameters<typeof buildSessionSnapshot>[0]
 
-  const snapshot = buildSessionSnapshot(snapshotInput)
-
-  const delta         = computeSessionDelta(snapshot, previousSnapshot, now)
-  const sessionId     = (state as any).sessionId ?? 'unknown'
-  const weaknessPatch = updateWeaknessTracker(weaknessState, delta, sessionId, now)
-  const growthPatch   = updateGrowthTracker(growthState,     delta, sessionId, now)
+  // HARDENING: the snapshot stub above passes an EMPTY scoreBreakdown ({}), and
+  // buildSessionSnapshot → toScoreSnapshot dereferences
+  // scoreBreakdown.dimensions.engagement → throws "reading 'engagement'" and
+  // 500's the session close. The snapshot + longitudinal work is NOT
+  // launch-critical, so we isolate it: on ANY failure we close the session
+  // gracefully (snapshot=null, trackers unchanged). The proper fix is to feed a
+  // real score breakdown here — the "connect engine data to the report" item.
+  let snapshot: SessionSnapshot | null = null
+  let weaknessPatch = weaknessState
+  let growthPatch   = growthState
+  try {
+    snapshot        = buildSessionSnapshot(snapshotInput)
+    const delta     = computeSessionDelta(snapshot, previousSnapshot, now)
+    const sessionId = (state as any).sessionId ?? 'unknown'
+    weaknessPatch   = updateWeaknessTracker(weaknessState, delta, sessionId, now)
+    growthPatch     = updateGrowthTracker(growthState,     delta, sessionId, now)
+  } catch (err) {
+    console.error('[barbaros:endSession] snapshot/longitudinal failed — closing gracefully:', err)
+    snapshot      = null
+    weaknessPatch = weaknessState
+    growthPatch   = growthState
+  }
 
   return {
     content:         closingContent,

@@ -16,10 +16,14 @@
 //   mapping below is the Language Layer (presentation of an already-made
 //   decision — not decision-making). It can later move to system-layers.ts.
 //
-// CLOSING WINDOW:
-// - When the Director marks CLOSE_TOPIC with targetRef:
-//   final_candidate_question → ask only the candidate's final question.
-//   prepare_closing          → do not ask a new question. Prepare to close.
+// CLOSING WINDOW (layer 3 — graceful wind-down):
+// - The Director now signals the close with two dedicated, session-level intents
+//   (not CLOSE_TOPIC, which the LLM reads as "switch topic" → a new question):
+//     FINAL_QUESTION   → one last consolidating question; do NOT open a new topic.
+//     INVITE_QUESTIONS → no new evaluation question; invite the candidate's own
+//                        final question and prepare to close (≤75s / closing phase).
+//   The actual farewell + report handoff is owned by the engine
+//   (buildEndOfSessionOutput) and page.tsx.
 
 import type { InterviewConfig }        from '../types'
 import type { SessionState }           from '../state/session-state'
@@ -173,34 +177,34 @@ export function buildPrompt(
  * salient instruction; protected so it is never truncated.
  */
 function buildDirectorLayer(decision: DirectorDecision): SystemLayer {
-  // CLOSING WINDOW — FINAL CANDIDATE QUESTION
-  // This prevents the LLM from opening a new assessment line in the final 90 seconds.
-  if (decision.intent === 'CLOSE_TOPIC' && decision.targetRef === 'final_candidate_question') {
+  // CLOSING WINDOW — FINAL CONSOLIDATING QUESTION (≈120–75s remaining).
+  // Prevents the LLM from opening a new assessment line near the end: it gets
+  // exactly one last question and is forbidden from starting a new topic.
+  if (decision.intent === 'FINAL_QUESTION') {
     return {
       label:  'director',
       weight: 95,
       content:
-        'INTERVIEW DIRECTOR — FINAL QUESTION WINDOW (mandatory)\n' +
-        'The interview is in its final 90 seconds.\n' +
-        'Do NOT ask a new evaluation question.\n' +
-        'Do NOT ask about experience, campaigns, metrics, pressure, contradictions, or a new competency.\n' +
-        'Ask only this final candidate question, in one concise sentence:\n' +
-        '"Final question. Do you have any questions about this role or Organisation?"',
+        'INTERVIEW DIRECTOR — FINAL QUESTION (mandatory)\n' +
+        'The interview is in its final stretch.\n' +
+        'Do NOT open a new topic, competency, contradiction, or pressure line.\n' +
+        'Ask ONE last consolidating question, in a single concise sentence, that lets the candidate add the single most important thing still missing. Then stop.',
     }
   }
 
-  // CLOSING WINDOW — PREPARE TO CLOSE
-  // This prevents any new question in the final minute.
-  if (decision.intent === 'CLOSE_TOPIC' && decision.targetRef === 'prepare_closing') {
+  // CLOSING WINDOW — INVITE CANDIDATE QUESTIONS / PREPARE TO CLOSE
+  // (≤75s remaining, or already in the closing phase).
+  // No new evaluation question at all — wind the interview down.
+  if (decision.intent === 'INVITE_QUESTIONS') {
     return {
       label:  'director',
       weight: 95,
       content:
         'INTERVIEW DIRECTOR — PREPARE TO CLOSE (mandatory)\n' +
-        'The interview is in its final minute.\n' +
-        'Do NOT ask any new question.\n' +
-        'Do NOT open a new topic, challenge, contradiction, metric probe, or follow-up.\n' +
-        'Give only a brief professional acknowledgement and prepare to close.',
+        'The interview is nearly out of time.\n' +
+        'Do NOT ask any new evaluation question, and do NOT open a new topic, challenge, contradiction, or follow-up.\n' +
+        'In one concise sentence, invite the candidate to ask any final question (for example: "Before we close, do you have any questions about the role or Organisation?"), then prepare to close.\n' +
+        'Do NOT reveal any verdict, score, or assessment.',
     }
   }
 
@@ -219,6 +223,10 @@ function buildDirectorLayer(decision: DirectorDecision): SystemLayer {
       'Return to an earlier point the candidate left unresolved or contradicted. Quote back what they said earlier and ask them to reconcile it. Do not let them avoid it.',
     CLOSE_TOPIC:
       'Wrap up the current topic cleanly. Do not open a major new line of questioning.',
+    FINAL_QUESTION:
+      'Ask one last consolidating question. Do not open a new topic. Keep it to a single sentence.',
+    INVITE_QUESTIONS:
+      'Do not ask a new evaluation question. Invite the candidate to ask any final question, then prepare to close. Reveal no verdict or score.',
   }
 
   const directive = directives[decision.intent]
@@ -330,23 +338,4 @@ function skippedInTruncation(label: string): void {
 
 /**
  * describePrompt
- * Returns a human-readable summary of what was built.
- * Used in development/logging — never injected into LLM.
- */
-export function describePrompt(built: BuiltPrompt): string {
-  const lines = [
-    `Layers: ${built.layerCount}`,
-    `Chars:  ${built.charCount} / ${SYSTEM_PROMPT_CHAR_LIMIT}`,
-    `Truncated: ${built.truncated}`,
-  ]
-
-  if (built.skippedLayers.length > 0) {
-    lines.push(`Skipped (empty): ${built.skippedLayers.join(', ')}`)
-  }
-
-  if (built.openingMessage) {
-    lines.push(`Opening: "${built.openingMessage.slice(0, 60)}..."`)
-  }
-
-  return lines.join('\n')
-}
+ * Returns

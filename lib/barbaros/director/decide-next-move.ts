@@ -13,17 +13,21 @@
 //   instead of repeating the hard move. This rations authority across the
 //   session the way a real interviewer picks their battles.
 //
-// CLOSING WINDOW:
-//   The final window starts early enough to protect the last 90 visible seconds.
+// CLOSING WINDOW (layer 3 — graceful wind-down):
+//   The final window winds the interview DOWN instead of opening new threads.
+//   The two windows now emit DISTINCT, session-level intents (not CLOSE_TOPIC,
+//   which the LLM reads as "switch topic" → a fresh question at the last second):
 //   - >120s: normal assessment behavior.
-//   - 120–75s: only a final candidate question is allowed.
-//   - 75–30s: prepare to close. No new evaluation question.
-//   - 30–0s: handled by page.tsx, which starts the farewell screen.
+//   - 120–75s: FINAL_QUESTION    — one last consolidating question, no new topic.
+//   - ≤75s (or closing phase): INVITE_QUESTIONS — invite the candidate's
+//     questions / signal the close. No new evaluation question.
+//   - 30–0s: the engine (buildEndOfSessionOutput) + page.tsx own the actual
+//     farewell + report handoff.
 //
 // PRIORITY ORDER (first match wins):
-//   1. Closing window                           → CLOSE_TOPIC
+//   1. Closing window (≤75 → INVITE_QUESTIONS, ≤120 → FINAL_QUESTION)
 //   2. Major unresolved contradiction (+budget) → RETURN_TO_PREVIOUS
-//   3. Closing phase                            → CLOSE_TOPIC
+//   3. Closing phase                            → INVITE_QUESTIONS
 //   4. Opening phase                            → OPEN_NEW_TOPIC
 //   5. Lesser unresolved contradiction (+budget)→ RETURN_TO_PREVIOUS
 //   6. Strong but shallow                       → RAISE_DIFFICULTY / soften
@@ -88,19 +92,23 @@ export function createInterventionBudget(plan: Plan): InterventionBudget {
 export function decideNextMove(ctx: DirectorContext): DirectorDecision {
   const { now, budget } = ctx;
 
-  const secondsRemaining = Math.max(
-    0,
-    (ctx.totalMinutes - ctx.elapsedMinutes) * 60
-  );
+  // Prefer the engine-supplied absolute seconds (layer 3). Fall back to deriving
+  // from minutes so this stays correct before engine.ts populates the field.
+  const secondsRemaining =
+    typeof ctx.secondsRemaining === 'number'
+      ? Math.max(0, ctx.secondsRemaining)
+      : Math.max(0, (ctx.totalMinutes - ctx.elapsedMinutes) * 60);
 
-  // 1. Closing Window.
-  // Starts at 120s to prevent a normal assessment question from appearing
-  // inside the last 90 visible seconds after backend and audio latency.
+  // 1. Closing window (graceful wind-down).
+  // Tighter window first: ≤75s invites the candidate's questions / signals the
+  // close; otherwise ≤120s asks one last consolidating question. Both emit
+  // distinct, session-level intents so the LLM winds DOWN instead of opening a
+  // new topic in the last visible seconds.
   if (secondsRemaining <= THRESHOLDS.prepareClosingSeconds) {
     return makeDecision(
-      'CLOSE_TOPIC',
-      'prepare_closing',
-      ['time_running_low'],
+      'INVITE_QUESTIONS',
+      null,
+      ['invite_questions_window'],
       budget,
       null,
       now,
@@ -109,9 +117,9 @@ export function decideNextMove(ctx: DirectorContext): DirectorDecision {
 
   if (secondsRemaining <= THRESHOLDS.finalQuestionSeconds) {
     return makeDecision(
-      'CLOSE_TOPIC',
-      'final_candidate_question',
-      ['time_running_low'],
+      'FINAL_QUESTION',
+      null,
+      ['final_question_window'],
       budget,
       null,
       now,
@@ -134,7 +142,7 @@ export function decideNextMove(ctx: DirectorContext): DirectorDecision {
   // 3. Closing phase.
   if (ctx.phase === 'closing') {
     return makeDecision(
-      'CLOSE_TOPIC',
+      'INVITE_QUESTIONS',
       null,
       ['closing_phase'],
       budget,

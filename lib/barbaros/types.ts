@@ -1,6 +1,12 @@
 // ============================================================================
-// Barbaros V4 — Type System (Unified Contract v3 — STABILIZED)
+// Barbaros V4 — Type System (Unified Contract v3.1 — STABILIZED)
 // Single source of truth. Pure types only — zero runtime logic.
+//
+// CHANGELOG v3 → v3.1 (additive, non-breaking):
+//   + Added: Contradiction optional fields — source, confidence,
+//            suggestedProbe, contradictionType (semantic-detection metadata).
+//            Heuristic-detected contradictions leave them undefined; the
+//            Director consumes id/severity unchanged. suggestedProbe is advisory.
 //
 // CHANGELOG v2 → v3:
 //   - Removed: sessionStartTime (duplicate of metrics.startedAt)
@@ -165,6 +171,27 @@ export interface Contradiction {
   addressed: boolean
   detectedAt: number
   phase: InterviewPhase
+
+  // ── Optional semantic-detection metadata (v3.1, additive) ────────────────
+  // Populated ONLY by the semantic detector (detectContradictionsSemantic).
+  // Heuristic-detected contradictions leave these undefined.
+  // The Director still consumes only `id` + `severity` (unchanged); the fields
+  // below are advisory context for downstream layers, never decision inputs.
+
+  // Detection origin. Absent ⇒ treat as 'heuristic' for backward compatibility.
+  source?: 'heuristic' | 'semantic'
+
+  // Semantic-judge confidence, 0-100. Used to gate entry into state
+  // (only high-confidence semantic contradictions are persisted).
+  confidence?: number
+
+  // Advisory confrontation phrasing produced by the semantic judge.
+  // NOT binding — the personality / question layer owns final wording.
+  suggestedProbe?: string
+
+  // Nature of the conflict, e.g. 'logical' | 'factual' | 'temporal'
+  // | 'numerical' | 'scope'. Free-form to avoid over-constraining the judge.
+  contradictionType?: string
 }
 
 /**

@@ -14,6 +14,14 @@
 //   opening → motivation → cv_deep_dive → technical
 //   → behavioral → pressure → closing
 //
+// TIME-AWARENESS GUARD (layer 2):
+//   Public `evaluatePhaseTransition` wraps the raw transition logic and refuses
+//   to ENTER 'closing' while more than MIN_MS_BEFORE_CLOSING (90s) remains, so
+//   Barbaros keeps pressing instead of winding down early. The only sub-90s path
+//   into closing is time_critical (≤60s) — below the floor, so never blocked.
+//   shouldEndSession is protected transitively (it ends only via the closing
+//   phase, which the guard refuses to enter early).
+//
 // ARCHITECTURAL RULES:
 //   - Pure functions. No mutation. No LLM calls.
 //   - All time queries use `Date.now()` internally for live decisions,
@@ -55,6 +63,13 @@ function getTimeRemainingMs(state: InterviewState): number {
     getSessionTimeLimitMs(state) - getSessionDurationMs(state)
   );
 }
+
+// Time-Awareness floor (layer 2): the interview must NOT wind down into the
+// 'closing' phase while more than this much time remains. Keeps Barbaros
+// pressing on weaknesses / contradictions instead of closing early. The only
+// path into closing below this floor is time_critical (≤60s), which is itself
+// below 90s, so it is never affected by this guard.
+const MIN_MS_BEFORE_CLOSING = 90 * 1000;
 
 /**
  * Phase weights for time budgeting.
@@ -102,7 +117,7 @@ function getStrongCompetencyRatio(state: InterviewState): number {
 // SECTION 3 — TRANSITION DECISION (main entry)
 // ─────────────────────────────────────────────────────────────
 
-export function evaluatePhaseTransition(
+function evaluatePhaseTransitionRaw(
   state: InterviewState
 ): PhaseTransitionResult {
   const current = state.phase;
@@ -166,6 +181,37 @@ export function evaluatePhaseTransition(
 
   // Smart phase-specific signals
   return evaluatePhaseSpecificSignals(state, current, next);
+}
+
+/**
+ * Public entry point. Runs the raw transition logic, then applies the
+ * Time-Awareness guard (layer 2): refuse to ENTER 'closing' while more than
+ * MIN_MS_BEFORE_CLOSING remains — stay in the current phase and keep pressing.
+ *
+ * The time_critical (≤60s) and time-up paths are below the 90s floor, so they
+ * are never blocked here. shouldEndSession is protected transitively, because
+ * it can only end the session via the closing phase, which this guard refuses
+ * to enter early.
+ */
+export function evaluatePhaseTransition(
+  state: InterviewState
+): PhaseTransitionResult {
+  const result = evaluatePhaseTransitionRaw(state);
+
+  if (
+    result.transitioned &&
+    result.nextPhase === "closing" &&
+    getTimeRemainingMs(state) > MIN_MS_BEFORE_CLOSING
+  ) {
+    return {
+      previousPhase: state.phase,
+      nextPhase: state.phase,
+      transitioned: false,
+      reason: "closing_deferred_time_remaining",
+    };
+  }
+
+  return result;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -341,17 +387,17 @@ export function calculateInterviewProgress(state: InterviewState): number {
 // ─────────────────────────────────────────────────────────────
 
 /**
- * advancePhase — alias used by engine.ts
- * Returns { phase, changed } compatible with engine.ts expectations.
+ * advancePhase — legacy alias. NO LONGER USED by engine.ts (which now calls
+ * evaluatePhaseTransition with the real state). Kept for backward compatibility
+ * with any other importer; do NOT use for live decisions — it fabricates a stub
+ * state (per-phase count from messageCount, faked phaseStartedAt, hardcoded plan)
+ * which races the phase to 'closing'. Prefer evaluatePhaseTransition(realState).
  */
 export function advancePhase(
   currentPhase: InterviewPhase,
-  messageCount:  number,
+  messageCount: number,
   elapsedMinutes: number
 ): { phase: InterviewPhase; changed: boolean } {
-  // Build a minimal stub state for evaluatePhaseTransition
-  // Since engine.ts passes (phase, messageCount, elapsedMinutes),
-  // we use phaseQuestionCount from messageCount approximation.
   const stubState = {
     phase: currentPhase,
     phaseQuestionCount: Math.floor(messageCount / 2),
@@ -364,20 +410,20 @@ export function advancePhase(
       pressureEscalations: 0,
     },
     candidateProfile: { engagement: 50 },
-    config: { plan: 'go' },
-  } as unknown as InterviewState
+    config: { plan: "go" },
+  } as unknown as InterviewState;
 
-  const result = evaluatePhaseTransition(stubState)
+  const result = evaluatePhaseTransition(stubState);
 
   return {
-    phase:   result.nextPhase,
+    phase: result.nextPhase,
     changed: result.transitioned,
-  }
+  };
 }
 
 /**
  * isSessionComplete — alias used by engine.ts
  */
 export function isSessionComplete(state: InterviewState): boolean {
-  return shouldEndSession(state)
+  return shouldEndSession(state);
 }

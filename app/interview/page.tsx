@@ -1,3 +1,6 @@
+
+
+```tsx
 'use client'
 
 import { useState, useEffect, useRef, useCallback } from 'react'
@@ -25,6 +28,7 @@ function buildConfig() {
       if (stored) raw = JSON.parse(stored)
     } catch {}
   }
+
   return {
     sessionId:       raw.sessionId       ?? `session_${Date.now()}`,
     candidateName:   raw.candidateName   ?? 'Candidate',
@@ -32,13 +36,13 @@ function buildConfig() {
     institution:     raw.institution      ?? 'Organisation',
     sector:          raw.sector           ?? 'General',
     yearsExperience: raw.yearsExperience  ?? '3 years',
-    language:        raw.language          ?? 'en',
-    plan:            raw.plan              ?? 'go',
-    jobRequirements: raw.jobRequirements   ?? '',
+    language:        raw.language         ?? 'en',
+    plan:            raw.plan             ?? 'go',
+    jobRequirements: raw.jobRequirements  ?? '',
     hasCv:           Boolean(raw.hasCv),
-    cvFileName:      raw.cvFileName         ?? '',
-    cvMimeType:      raw.cvMimeType         ?? '',
-    cvBase64:        raw.cvBase64           ?? '',
+    cvFileName:      raw.cvFileName       ?? '',
+    cvMimeType:      raw.cvMimeType       ?? '',
+    cvBase64:        raw.cvBase64         ?? '',
     difficulty:      'standard',
   }
 }
@@ -53,6 +57,7 @@ function scoreLabel(s: number): { text: string; color: string } {
 // Bilingual micro-copy. Arabic only when the candidate chose Arabic.
 function t(lang: string) {
   const ar = lang === 'ar'
+
   return {
     sessionActive:   ar ? 'جلسة تقييم جارية'          : 'Interview Session Active',
     ready:           ar ? 'جاهز'                       : 'Ready',
@@ -83,6 +88,12 @@ function t(lang: string) {
     endGenerate:     ar ? 'إنهاء وإنشاء التقرير'         : 'End & Generate Report',
     complete:        ar ? 'اكتملت المقابلة'             : 'Interview Complete',
     generating:      ar ? 'جارٍ إنشاء تقرير التقييم...'  : 'Generating Assessment Report...',
+
+    // CLOSING FLOW FIX
+    // Shown during the short farewell screen before report generation.
+    closing:         ar ? 'ينهي المقابلة'               : 'Closing',
+    closingSub:      ar ? 'رسالة ختامية قبل التقرير...' : 'Final closing message before your report...',
+
     retry:           ar ? 'إعادة المحاولة'              : 'Retry',
     newInterview:    ar ? 'مقابلة جديدة'                : 'Start New Interview',
   }
@@ -102,6 +113,13 @@ function InterviewRoom() {
   })
   const [questionCount, setQuestionCount]   = useState(1)
   const [isEnded, setIsEnded]               = useState(false)
+
+  // CLOSING FLOW FIX
+  // isClosing separates the farewell screen from the report generation screen.
+  // Before: isEndOfSession triggered isEnded immediately, then goToReport stopped audio.
+  // Now: Barbaros shows the final message first, then moves to report generation.
+  const [isClosing, setIsClosing]           = useState(false)
+
   const [isMuted, setIsMuted]               = useState(false)
   const [isRecording, setIsRecording]       = useState(false)
   const [isTranscribing, setIsTranscribing] = useState(false)
@@ -127,6 +145,7 @@ function InterviewRoom() {
   const messagesRef       = useRef<Message[]>([])
   const isLoadingRef      = useRef(false)
   const isEndedRef        = useRef(false)
+  const isClosingRef      = useRef(false)
   const isRecordingRef    = useRef(false)
   const isTranscribingRef = useRef(false)
   const isPausedRef       = useRef(false)
@@ -137,9 +156,14 @@ function InterviewRoom() {
   const mediaRecorderRef  = useRef<MediaRecorder | null>(null)
   const audioChunksRef    = useRef<Blob[]>([])
 
+  // CLOSING FLOW FIX
+  // Prevents duplicate closing timers and ensures the report starts only after farewell.
+  const closingTimerRef   = useRef<any>(null)
+
   useEffect(() => { messagesRef.current       = messages       }, [messages])
   useEffect(() => { isLoadingRef.current      = isLoading      }, [isLoading])
   useEffect(() => { isEndedRef.current        = isEnded        }, [isEnded])
+  useEffect(() => { isClosingRef.current      = isClosing      }, [isClosing])
   useEffect(() => { isRecordingRef.current    = isRecording    }, [isRecording])
   useEffect(() => { isTranscribingRef.current = isTranscribing }, [isTranscribing])
   useEffect(() => { isPausedRef.current       = isPaused       }, [isPaused])
@@ -147,19 +171,132 @@ function InterviewRoom() {
 
   useEffect(() => { setMounted(true) }, [])
 
+  // CLOSING FLOW FIX
+  // Cleanup audio and timers on unmount.
+  useEffect(() => {
+    return () => {
+      if (closingTimerRef.current) clearTimeout(closingTimerRef.current)
+      if (silenceTimer.current) clearTimeout(silenceTimer.current)
+
+      if (audioRef.current) {
+        audioRef.current.pause()
+        audioRef.current.src = ''
+        audioRef.current = null
+      }
+    }
+  }, [])
+
+  // CLOSING FLOW FIX
+  // Local generic closing is used only for time-up or manual early ending.
+  // Engine-based end uses the backend closing message with covered assessment areas.
+  const genericClosingMessage = useCallback(() => {
+    return CONFIG.language === 'ar'
+      ? 'شكراً لوقتك اليوم. سيُجهَّز تقرير تقييمك الآن متضمّناً أبرز نقاط قوّتك والفجوات ومجالات التحسين.'
+      : 'Thank you for your time today. Your assessment report will now be prepared with your key strengths, gaps, and improvement points.'
+  }, [CONFIG.language])
+
+  // CLOSING FLOW FIX
+  // Moves from the closing screen to the existing report generation flow.
+  const finishClosing = useCallback(() => {
+    if (closingTimerRef.current) {
+      clearTimeout(closingTimerRef.current)
+      closingTimerRef.current = null
+    }
+
+    setIsClosing(false)
+    isClosingRef.current = false
+    setIsEnded(true)
+  }, [])
+
+  // CLOSING FLOW FIX
+  // Shows the farewell message, plays its audio if available, then moves to report generation.
+  // This keeps goToReport unchanged and prevents it from cutting off the farewell audio.
+  const beginClosing = useCallback((message: string, audioBase64?: string | null) => {
+    if (isClosingRef.current || isEndedRef.current) return
+
+    setIsClosing(true)
+    isClosingRef.current = true
+
+    setIsPaused(false)
+    isPausedRef.current = false
+
+    if (silenceTimer.current) clearTimeout(silenceTimer.current)
+
+    if (audioRef.current) {
+      audioRef.current.pause()
+      audioRef.current.src = ''
+      audioRef.current = null
+    }
+
+    setIsSpeaking(false)
+
+    if (message?.trim()) {
+      const closingMsg: Message = { role: 'assistant', content: message.trim() }
+
+      setMessages(prev => {
+        const last = prev[prev.length - 1]
+        if (last?.role === 'assistant' && last.content === closingMsg.content) return prev
+        return [...prev, closingMsg]
+      })
+    }
+
+    const done = () => finishClosing()
+
+    if (closingTimerRef.current) clearTimeout(closingTimerRef.current)
+
+    const fallbackMs = audioBase64 && !isMutedRef.current && audioReadyRef.current ? 12000 : 6000
+    closingTimerRef.current = setTimeout(done, fallbackMs)
+
+    if (audioBase64 && !isMutedRef.current && audioReadyRef.current) {
+      try {
+        const audio = new Audio(`data:audio/mpeg;base64,${audioBase64}`)
+        audioRef.current = audio
+
+        audio.onplay = () => setIsSpeaking(true)
+
+        audio.onended = () => {
+          setIsSpeaking(false)
+          if (audioRef.current === audio) audioRef.current = null
+          done()
+        }
+
+        audio.onerror = () => {
+          setIsSpeaking(false)
+          done()
+        }
+
+        audio.play().catch(() => {
+          setIsSpeaking(false)
+          done()
+        })
+      } catch {
+        setIsSpeaking(false)
+        done()
+      }
+    }
+  }, [finishClosing])
+
   useEffect(() => {
     const id = setInterval(() => {
       setTimeLeft(prev => {
-        if (prev <= 1) { clearInterval(id); return 0 }
+        if (prev <= 1) {
+          clearInterval(id)
+          return 0
+        }
         return prev - 1
       })
     }, 1000)
+
     return () => clearInterval(id)
   }, [])
 
+  // CLOSING FLOW FIX
+  // Time-up now shows a short generic farewell first, then starts report generation.
   useEffect(() => {
-    if (timeLeft === 0 && !isEndedRef.current) setIsEnded(true)
-  }, [timeLeft])
+    if (timeLeft === 0 && !isEndedRef.current && !isClosingRef.current) {
+      beginClosing(genericClosingMessage(), null)
+    }
+  }, [timeLeft, beginClosing, genericClosingMessage])
 
   const formatTime = (s: number) => {
     const m = Math.floor(s / 60)
@@ -176,34 +313,64 @@ function InterviewRoom() {
 
   const playAudioDirect = (audioBase64: string) => {
     if (isMutedRef.current) return
+
     try {
-      if (audioRef.current) { audioRef.current.pause(); audioRef.current.src = ''; audioRef.current = null }
+      if (audioRef.current) {
+        audioRef.current.pause()
+        audioRef.current.src = ''
+        audioRef.current = null
+      }
+
       const audio = new Audio(`data:audio/mpeg;base64,${audioBase64}`)
       audioRef.current = audio
-      audio.onplay  = () => { setIsSpeaking(true) }
+
+      audio.onplay = () => { setIsSpeaking(true) }
+
       audio.onended = () => {
         setIsSpeaking(false)
         if (audioRef.current === audio) audioRef.current = null
-        resetSilenceTimer()
+
+        // CLOSING FLOW FIX
+        // During farewell, do not restart silence timer.
+        if (!isClosingRef.current) resetSilenceTimer()
       }
+
       audio.onerror = () => { setIsSpeaking(false) }
-      audio.play().catch(err => { setIsSpeaking(false); console.warn('Audio play failed:', err) })
-    } catch (err) { setIsSpeaking(false); console.warn('Audio error:', err) }
+
+      audio.play().catch(err => {
+        setIsSpeaking(false)
+        console.warn('Audio play failed:', err)
+      })
+    } catch (err) {
+      setIsSpeaking(false)
+      console.warn('Audio error:', err)
+    }
   }
 
   const playAudio = useCallback((audioBase64: string) => {
     if (isMutedRef.current) return
-    if (!audioReadyRef.current) { setPendingAudio(audioBase64); return }
+
+    if (!audioReadyRef.current) {
+      setPendingAudio(audioBase64)
+      return
+    }
+
     playAudioDirect(audioBase64)
   }, [])
 
   const stopAudio = () => {
-    if (audioRef.current) { audioRef.current.pause(); audioRef.current = null }
+    if (audioRef.current) {
+      audioRef.current.pause()
+      audioRef.current = null
+    }
     setIsSpeaking(false)
   }
 
   const handleFirstInteraction = useCallback(() => {
-    if (!audioReadyRef.current) { audioReadyRef.current = true; setAudioReady(true) }
+    if (!audioReadyRef.current) {
+      audioReadyRef.current = true
+      setAudioReady(true)
+    }
   }, [])
 
   const toggleMute = () => {
@@ -213,14 +380,17 @@ function InterviewRoom() {
     if (next) stopAudio()
   }
 
-  // SILENCE → PAUSE (no backend call). Saves credits during inactivity and
-  // tells the candidate exactly what happened. Resumes when the mic is pressed.
+  // SILENCE → PAUSE. No backend call. Saves credits during inactivity.
   const resetSilenceTimer = useCallback(() => {
     if (silenceTimer.current) clearTimeout(silenceTimer.current)
+
     silenceTimer.current = setTimeout(() => {
       if (
-        !isLoadingRef.current && !isEndedRef.current &&
-        !isRecordingRef.current && !isTranscribingRef.current &&
+        !isLoadingRef.current &&
+        !isEndedRef.current &&
+        !isClosingRef.current &&
+        !isRecordingRef.current &&
+        !isTranscribingRef.current &&
         !isSpeakingRef.current
       ) {
         setIsPaused(true)
@@ -230,19 +400,28 @@ function InterviewRoom() {
   }, [])
 
   const startRecording = async () => {
-    if (isLoading || isTranscribing || isEnded) return
+    if (isLoading || isTranscribing || isEnded || isClosing) return
+
     try {
       handleFirstInteraction()
       setMicError(null)
       setIsPaused(false)
       isPausedRef.current = false
+
       if (silenceTimer.current) clearTimeout(silenceTimer.current)
+
       stopAudio()
+
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       const mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/mp4'
       const mediaRecorder = new MediaRecorder(stream, { mimeType })
+
       audioChunksRef.current = []
-      mediaRecorder.ondataavailable = e => { if (e.data.size > 0) audioChunksRef.current.push(e.data) }
+
+      mediaRecorder.ondataavailable = e => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data)
+      }
+
       mediaRecorder.start()
       mediaRecorderRef.current = mediaRecorder
       setIsRecording(true)
@@ -255,38 +434,57 @@ function InterviewRoom() {
 
   const stopRecording = async () => {
     if (!isRecordingRef.current || !mediaRecorderRef.current) return
+
     setIsRecording(false)
+
     const mediaRecorder = mediaRecorderRef.current
     mediaRecorder.stream.getTracks().forEach(t => t.stop())
+
     await new Promise<void>(resolve => {
       mediaRecorder.onstop = () => resolve()
       mediaRecorder.stop()
     })
+
     const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
-    if (blob.size < 1000) { resetSilenceTimer(); return }
+
+    if (blob.size < 1000) {
+      resetSilenceTimer()
+      return
+    }
+
     setIsTranscribing(true)
+
     try {
       const fd = new FormData()
       fd.append('audio', blob, 'recording.webm')
       fd.append('language', CONFIG.language)
+
       const res = await fetch('/api/transcribe', { method: 'POST', body: fd })
       const data = await res.json()
       const text = data.text?.trim()
+
       if (text) {
         const userMsg: Message = { role: 'user', content: text }
         const newMessages = [...messagesRef.current, userMsg]
+
         setMessages(newMessages)
         setInput('')
+
         await callAdam(newMessages)
       } else {
         resetSilenceTimer()
       }
-    } catch (err) { console.error('Transcription error:', err); resetSilenceTimer() }
-    finally { setIsTranscribing(false) }
+    } catch (err) {
+      console.error('Transcription error:', err)
+      resetSilenceTimer()
+    } finally {
+      setIsTranscribing(false)
+    }
   }
 
   const toggleRecording = () => {
-    if (isLoading || isTranscribing || isEnded) return
+    if (isLoading || isTranscribing || isEnded || isClosing) return
+
     if (isRecordingRef.current) {
       stopRecording()
     } else {
@@ -298,8 +496,11 @@ function InterviewRoom() {
     setIsLoading(true)
     setIsPaused(false)
     isPausedRef.current = false
+
     handleFirstInteraction()
+
     if (silenceTimer.current) clearTimeout(silenceTimer.current)
+
     try {
       const res = await fetch('/api/interview', {
         method: 'POST',
@@ -311,20 +512,34 @@ function InterviewRoom() {
           sessionStartTime
         })
       })
+
       const data = await res.json()
+
       if (!data.success) throw new Error(data.error)
 
-      const newMsg: Message = { role: 'assistant', content: data.content, score: data.score }
+      const newMsg: Message = {
+        role: 'assistant',
+        content: data.content,
+        score: data.score
+      }
+
       setMessages(prev => [...prev, newMsg])
 
       // Assessment focus: shown ONLY when the backend actually provides it.
       if (data.focus) setCurrentFocus(data.focus)
 
-      if (data.audioBase64) playAudio(data.audioBase64)
-
       if (data.score) setQuestionCount(prev => prev + 1)
 
-      if (data.isEndOfSession) { setIsEnded(true); return }
+      // CLOSING FLOW FIX
+      // End-of-session response now enters the farewell screen first.
+      // Audio is handled by beginClosing so it is not played twice.
+      if (data.isEndOfSession) {
+        beginClosing(data.content, data.audioBase64)
+        return
+      }
+
+      if (data.audioBase64) playAudio(data.audioBase64)
+
       resetSilenceTimer()
     } catch (err: any) {
       setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${err.message}` }])
@@ -334,21 +549,30 @@ function InterviewRoom() {
   }
 
   const sendMessage = async () => {
-    if (!input.trim() || isLoading || isEnded) return
+    if (!input.trim() || isLoading || isEnded || isClosing) return
+
     handleFirstInteraction()
     setIsPaused(false)
     isPausedRef.current = false
+
     if (silenceTimer.current) clearTimeout(silenceTimer.current)
+
     stopAudio()
+
     const userMsg: Message = { role: 'user', content: input.trim() }
     const newMessages = [...messagesRef.current, userMsg]
+
     setMessages(newMessages)
     setInput('')
+
     await callAdam(newMessages)
   }
 
   const handleKey = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage() }
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      sendMessage()
+    }
   }
 
   const genSteps = CONFIG.language === 'ar'
@@ -359,8 +583,11 @@ function InterviewRoom() {
     setGenError(null)
     setIsGenerating(true)
     setGenStep(0)
+
     if (silenceTimer.current) clearTimeout(silenceTimer.current)
+
     stopAudio()
+
     const stepTimer = setInterval(() => {
       setGenStep(prev => (prev + 1) % genSteps.length)
     }, 2200)
@@ -382,7 +609,9 @@ function InterviewRoom() {
           },
         }),
       })
+
       const data = await res.json()
+
       if (!data.success) throw new Error(data.error || 'Report generation failed')
 
       sessionStorage.setItem('barbaros_report', JSON.stringify({
@@ -409,7 +638,8 @@ function InterviewRoom() {
     }
   }
 
-  // Time up OR engine-signalled end → auto-generate the report (no manual step).
+  // Time-up or engine-signalled end now routes through isClosing first.
+  // goToReport runs only after finishClosing sets isEnded.
   useEffect(() => {
     if (isEnded && !isGenerating && !genError) goToReport()
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -418,20 +648,39 @@ function InterviewRoom() {
   const started = messages.length > 0 || isLoading
   const lastQuestion = [...messages].reverse().find(m => m.role === 'assistant')?.content || ''
 
-  // ── Presence state ──
+  // Presence state
   let stateLabel = L.ready
   let stateSub   = L.readySub
   let glow       = '#3A4252'
   let stateKey   = 'ready'
+
   if (isPaused) {
-    stateLabel = L.paused; stateSub = L.pausedSub; glow = '#6B7280'; stateKey = 'paused'
+    stateLabel = L.paused
+    stateSub = L.pausedSub
+    glow = '#6B7280'
+    stateKey = 'paused'
+  } else if (isClosing) {
+    stateLabel = L.closing
+    stateSub = L.closingSub
+    glow = '#CC785C'
+    stateKey = 'speaking'
   } else if (isSpeaking) {
-    stateLabel = L.speaking; stateSub = L.speakingSub; glow = '#CC785C'; stateKey = 'speaking'
+    stateLabel = L.speaking
+    stateSub = L.speakingSub
+    glow = '#CC785C'
+    stateKey = 'speaking'
   } else if (isLoading || isTranscribing) {
-    stateLabel = L.evaluating; stateSub = L.evaluatingSub; glow = '#F59E0B'; stateKey = 'evaluating'
+    stateLabel = L.evaluating
+    stateSub = L.evaluatingSub
+    glow = '#F59E0B'
+    stateKey = 'evaluating'
   } else if (isRecording) {
-    stateLabel = L.listening; stateSub = L.listeningSub; glow = '#8B96FF'; stateKey = 'listening'
+    stateLabel = L.listening
+    stateSub = L.listeningSub
+    glow = '#8B96FF'
+    stateKey = 'listening'
   }
+
   const animated = stateKey === 'speaking' || stateKey === 'evaluating' || stateKey === 'listening'
 
   if (!mounted) {
@@ -445,13 +694,70 @@ function InterviewRoom() {
     )
   }
 
-  // ── Ended → Generating report (auto) ──
+  // CLOSING FLOW FIX
+  // This screen appears before report generation. It lets the candidate see and hear the farewell.
+  if (isClosing) {
+    const lastClosingMessage = [...messages].reverse().find(m => m.role === 'assistant')?.content || genericClosingMessage()
+
+    return (
+      <div style={{ fontFamily: 'system-ui, sans-serif', background: '#0B0D11', color: '#F0EDE8', minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 24, textAlign: 'center' }}>
+        <div style={{ fontWeight: 900, fontSize: 20, marginBottom: 28 }}>
+          <span style={{ color: '#F0EDE8' }}>Barbar</span><span style={{ color: '#CC785C' }}>os</span>
+        </div>
+
+        <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 28 }}>
+          <div className="ring" style={{ borderColor: 'rgba(204,120,92,0.35)' }} />
+          <div className="ring ring2" style={{ borderColor: 'rgba(204,120,92,0.22)' }} />
+          <div className="orb breathe" style={{ boxShadow: '0 0 70px rgba(204,120,92,0.45), inset 0 0 44px rgba(204,120,92,0.14)', borderColor: 'rgba(204,120,92,0.55)' }}>
+            <div style={{ fontWeight: 900, fontSize: 28 }}>
+              <span style={{ color: '#F0EDE8' }}>B</span><span style={{ color: '#CC785C' }}>os</span>
+            </div>
+          </div>
+        </div>
+
+        <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 0.6, textTransform: 'uppercase', color: '#CC785C', marginBottom: 8 }}>
+          {L.closing}
+        </div>
+
+        <div style={{ fontSize: 11, color: 'rgba(240,237,232,0.4)', marginBottom: 22 }}>
+          {L.closingSub}
+        </div>
+
+        <div style={{ maxWidth: 520, fontSize: 17, lineHeight: 1.7, fontWeight: 500, color: '#F0EDE8' }}>
+          {lastClosingMessage}
+        </div>
+
+        <style>{`
+          .orb {
+            width: 150px; height: 150px; border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            background: radial-gradient(circle at 50% 40%, rgba(255,255,255,0.05), rgba(15,17,23,0.9));
+            border: 1px solid; transition: box-shadow .4s, border-color .4s;
+          }
+          .breathe { animation: breathe 2.6s ease-in-out infinite; }
+          .ring {
+            position: absolute; width: 150px; height: 150px; border-radius: 50%;
+            border: 1px solid; animation: ringPulse 2.2s ease-out infinite;
+          }
+          .ring2 { animation-delay: 1.1s; }
+          @keyframes breathe { 0%,100% { transform: scale(1) } 50% { transform: scale(1.04) } }
+          @keyframes ringPulse {
+            0%   { transform: scale(1);   opacity: .7 }
+            100% { transform: scale(1.7); opacity: 0 }
+          }
+        `}</style>
+      </div>
+    )
+  }
+
+  // Ended → Generating report
   if (isEnded) {
     return (
       <div style={{ fontFamily: 'system-ui, sans-serif', background: '#0B0D11', color: '#F0EDE8', minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 24, textAlign: 'center' }}>
         <div style={{ fontWeight: 900, fontSize: 20, marginBottom: 28 }}>
           <span style={{ color: '#F0EDE8' }}>Barbar</span><span style={{ color: '#CC785C' }}>os</span>
         </div>
+
         {genError ? (
           <>
             <div style={{ fontSize: 13, color: '#F87171', marginBottom: 18, maxWidth: 360 }}>{genError}</div>
@@ -460,6 +766,7 @@ function InterviewRoom() {
                 style={{ padding: '12px 24px', background: '#CC785C', border: 'none', borderRadius: 10, color: '#fff', fontSize: 14, fontWeight: 800, cursor: 'pointer', fontFamily: 'inherit' }}>
                 {L.retry}
               </button>
+
               <button type="button" onClick={() => { window.location.href = '/onboarding' }}
                 style={{ padding: '11px 24px', background: 'transparent', border: '0.5px solid rgba(255,255,255,0.15)', borderRadius: 10, color: 'rgba(240,237,232,0.6)', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
                 {L.newInterview}
@@ -469,15 +776,18 @@ function InterviewRoom() {
         ) : (
           <>
             <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 12 }}>{L.complete}</div>
+
             <div style={{ display: 'flex', justifyContent: 'center', gap: 6, margin: '8px 0 16px' }}>
               {[0,1,2].map(i => (
                 <div key={i} className="bdot" style={{ animationDelay: `${i * 0.2}s` }} />
               ))}
             </div>
+
             <div style={{ fontSize: 14, color: '#F0EDE8', fontWeight: 600, minHeight: 20, transition: 'opacity .3s' }}>{genSteps[genStep]}</div>
             <div style={{ fontSize: 11, color: 'rgba(240,237,232,0.4)', marginTop: 6 }}>{L.generating}</div>
           </>
         )}
+
         <style>{`
           .bdot { width: 9px; height: 9px; background: #CC785C; border-radius: 50%; animation: pulse 1.2s infinite; }
           @keyframes pulse { 0%,100% { opacity: .3; transform: scale(.8) } 50% { opacity: 1; transform: scale(1.2) } }
@@ -486,13 +796,13 @@ function InterviewRoom() {
     )
   }
 
-  // ── Main Executive Interview Room ──
+  // Main Executive Interview Room
   return (
     <div
       onClick={handleFirstInteraction}
       style={{ fontFamily: 'system-ui, sans-serif', background: '#0B0D11', color: '#F0EDE8', minHeight: '100vh', display: 'flex', flexDirection: 'column', position: 'relative', overflow: 'hidden' }}
     >
-      {/* ── Top bar ── */}
+      {/* Top bar */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 18px', borderBottom: '0.5px solid rgba(255,255,255,0.07)', background: 'rgba(15,17,23,0.6)' }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{CONFIG.jobTitle}</div>
@@ -524,7 +834,7 @@ function InterviewRoom() {
         </div>
       )}
 
-      {/* ── Center: Barbaros presence ── */}
+      {/* Center: Barbaros presence */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 26, padding: '20px 24px' }}>
         {!started ? (
           <>
@@ -533,10 +843,12 @@ function InterviewRoom() {
                 <span style={{ color: '#F0EDE8' }}>B</span><span style={{ color: '#CC785C' }}>os</span>
               </div>
             </div>
+
             <div style={{ textAlign: 'center' }}>
               <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 6 }}>{L.readyTitle}</div>
               <div style={{ fontSize: 12, color: 'rgba(240,237,232,0.5)' }}>{CONFIG.candidateName} · {CONFIG.jobTitle}</div>
             </div>
+
             <button type="button" onClick={() => callAdam([])}
               style={{ padding: '13px 36px', background: '#CC785C', border: 'none', borderRadius: 12, color: '#fff', fontSize: 14, fontWeight: 800, cursor: 'pointer', fontFamily: 'inherit', boxShadow: '0 6px 24px rgba(204,120,92,0.35)' }}>
               {L.begin}
@@ -575,7 +887,7 @@ function InterviewRoom() {
         )}
       </div>
 
-      {/* ── Bottom controls ── */}
+      {/* Bottom controls */}
       {started && (
         <div style={{ padding: '14px 18px 22px', borderTop: '0.5px solid rgba(255,255,255,0.05)' }}>
           {micError && (
@@ -586,16 +898,18 @@ function InterviewRoom() {
               </button>
             </div>
           )}
+
           <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', alignItems: 'center' }}>
             <div />
-            {/* Microphone (primary, centered) */}
-            <button type="button" onClick={toggleRecording} disabled={isLoading || isTranscribing}
-              style={{ justifySelf: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, background: 'none', border: 'none', cursor: (isLoading || isTranscribing) ? 'not-allowed' : 'pointer', fontFamily: 'inherit' }}>
+
+            <button type="button" onClick={toggleRecording} disabled={isLoading || isTranscribing || isClosing}
+              style={{ justifySelf: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, background: 'none', border: 'none', cursor: (isLoading || isTranscribing || isClosing) ? 'not-allowed' : 'pointer', fontFamily: 'inherit' }}>
               <div style={{
                 width: 76, height: 76, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 30,
                 background: isRecording ? '#DC2626' : '#CC785C',
                 boxShadow: isRecording ? '0 0 28px rgba(220,38,38,0.65)' : '0 6px 22px rgba(204,120,92,0.4)',
-                transition: 'all .15s', opacity: (isLoading || isTranscribing) ? 0.4 : 1,
+                transition: 'all .15s',
+                opacity: (isLoading || isTranscribing || isClosing) ? 0.4 : 1,
               }}>
                 {isTranscribing ? '⏳' : isRecording ? '⏹' : '🎤'}
               </div>
@@ -604,7 +918,6 @@ function InterviewRoom() {
               </span>
             </button>
 
-            {/* End (right) */}
             <div style={{ justifySelf: 'end' }}>
               <button type="button" onClick={() => setShowEndModal(true)}
                 style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(248,113,113,0.7)', fontFamily: 'inherit' }}>
@@ -616,7 +929,7 @@ function InterviewRoom() {
         </div>
       )}
 
-      {/* ── Transcript panel ── */}
+      {/* Transcript panel */}
       {showTranscript && (
         <div style={{ position: 'absolute', inset: 0, background: 'rgba(11,13,17,0.96)', display: 'flex', flexDirection: 'column', zIndex: 20 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 18px', borderBottom: '0.5px solid rgba(255,255,255,0.07)' }}>
@@ -626,9 +939,11 @@ function InterviewRoom() {
               ✕ {L.close}
             </button>
           </div>
+
           <div ref={chatRef} style={{ flex: 1, overflowY: 'auto', padding: '16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
             {messages.map((msg, i) => {
               const label = msg.score?.score !== undefined ? scoreLabel(msg.score.score) : null
+
               return (
                 <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: msg.role === 'assistant' ? 'flex-start' : 'flex-end', maxWidth: '88%', alignSelf: msg.role === 'assistant' ? 'flex-start' : 'flex-end' }}>
                   <div style={{ background: msg.role === 'assistant' ? '#1a1f2e' : '#1E3A8A', borderRadius: 10, padding: '10px 13px', fontSize: 13, lineHeight: 1.7 }}>
@@ -649,7 +964,7 @@ function InterviewRoom() {
         </div>
       )}
 
-      {/* ── Text input panel (mic fallback) ── */}
+      {/* Text input panel */}
       {showTextInput && (
         <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, background: '#0F1117', borderTop: '0.5px solid rgba(255,255,255,0.1)', padding: '14px 16px', zIndex: 25, boxShadow: '0 -10px 30px rgba(0,0,0,0.4)' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
@@ -657,27 +972,34 @@ function InterviewRoom() {
             <button type="button" onClick={() => setShowTextInput(false)}
               style={{ background: 'none', border: 'none', color: 'rgba(240,237,232,0.5)', fontSize: 14, cursor: 'pointer' }}>✕</button>
           </div>
+
           <div style={{ display: 'flex', gap: 8 }}>
             <textarea ref={inputRef} value={input} onChange={e => setInput(e.target.value)} onKeyDown={handleKey}
-              placeholder={L.typeHere} disabled={isLoading} rows={1}
+              placeholder={L.typeHere} disabled={isLoading || isClosing} rows={1}
               style={{ flex: 1, background: '#16181F', border: '0.5px solid rgba(255,255,255,0.08)', color: '#F0EDE8', fontFamily: 'inherit', fontSize: 13, padding: '10px 12px', borderRadius: 8, outline: 'none', resize: 'none' }} />
-            <button type="button" onClick={sendMessage} disabled={isLoading || !input.trim()}
-              style={{ width: 46, background: (isLoading || !input.trim()) ? '#1a1a22' : '#2563EB', border: 'none', borderRadius: 8, cursor: (isLoading || !input.trim()) ? 'not-allowed' : 'pointer', color: '#fff', fontSize: 18, flexShrink: 0 }}>→</button>
+
+            <button type="button" onClick={sendMessage} disabled={isLoading || isClosing || !input.trim()}
+              style={{ width: 46, background: (isLoading || isClosing || !input.trim()) ? '#1a1a22' : '#2563EB', border: 'none', borderRadius: 8, cursor: (isLoading || isClosing || !input.trim()) ? 'not-allowed' : 'pointer', color: '#fff', fontSize: 18, flexShrink: 0 }}>→</button>
           </div>
         </div>
       )}
 
-      {/* ── End Interview modal ── */}
+      {/* End Interview modal */}
       {showEndModal && (
         <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 30, padding: 24 }}>
           <div style={{ background: '#12151C', border: '0.5px solid rgba(255,255,255,0.1)', borderRadius: 16, padding: '26px 22px', maxWidth: 360, width: '100%', textAlign: 'center' }}>
             <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 12 }}>{L.endTitle}</div>
             <div style={{ fontSize: 13, color: 'rgba(240,237,232,0.6)', lineHeight: 1.6, marginBottom: 22 }}>{L.endBody}</div>
+
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <button type="button" onClick={() => { setShowEndModal(false); setIsEnded(true) }}
+              <button type="button" onClick={() => {
+                setShowEndModal(false)
+                beginClosing(genericClosingMessage(), null)
+              }}
                 style={{ padding: '12px 20px', background: '#CC785C', border: 'none', borderRadius: 10, color: '#fff', fontSize: 14, fontWeight: 800, cursor: 'pointer', fontFamily: 'inherit' }}>
                 {L.endGenerate}
               </button>
+
               <button type="button" onClick={() => setShowEndModal(false)}
                 style={{ padding: '11px 20px', background: 'transparent', border: '0.5px solid rgba(255,255,255,0.15)', borderRadius: 10, color: 'rgba(240,237,232,0.7)', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
                 {L.continueBtn}
@@ -713,3 +1035,4 @@ function InterviewRoom() {
 export default function InterviewPage() {
   return <InterviewRoom />
 }
+```

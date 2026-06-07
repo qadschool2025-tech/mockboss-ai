@@ -15,6 +15,11 @@
 //   chosen tactical move rather than pick its own. The intent→instruction
 //   mapping below is the Language Layer (presentation of an already-made
 //   decision — not decision-making). It can later move to system-layers.ts.
+//
+// CLOSING WINDOW:
+// - When the Director marks CLOSE_TOPIC with targetRef:
+//   final_candidate_question → ask only the candidate's final question.
+//   prepare_closing          → do not ask a new question. Prepare to close.
 
 import type { InterviewConfig }        from '../types'
 import type { SessionState }           from '../state/session-state'
@@ -168,6 +173,37 @@ export function buildPrompt(
  * salient instruction; protected so it is never truncated.
  */
 function buildDirectorLayer(decision: DirectorDecision): SystemLayer {
+  // CLOSING WINDOW — FINAL CANDIDATE QUESTION
+  // This prevents the LLM from opening a new assessment line in the final 90 seconds.
+  if (decision.intent === 'CLOSE_TOPIC' && decision.targetRef === 'final_candidate_question') {
+    return {
+      label:  'director',
+      weight: 95,
+      content:
+        'INTERVIEW DIRECTOR — FINAL QUESTION WINDOW (mandatory)\n' +
+        'The interview is in its final 90 seconds.\n' +
+        'Do NOT ask a new evaluation question.\n' +
+        'Do NOT ask about experience, campaigns, metrics, pressure, contradictions, or a new competency.\n' +
+        'Ask only this final candidate question, in one concise sentence:\n' +
+        '"Final question. Do you have any questions about this role or Organisation?"',
+    }
+  }
+
+  // CLOSING WINDOW — PREPARE TO CLOSE
+  // This prevents any new question in the final minute.
+  if (decision.intent === 'CLOSE_TOPIC' && decision.targetRef === 'prepare_closing') {
+    return {
+      label:  'director',
+      weight: 95,
+      content:
+        'INTERVIEW DIRECTOR — PREPARE TO CLOSE (mandatory)\n' +
+        'The interview is in its final minute.\n' +
+        'Do NOT ask any new question.\n' +
+        'Do NOT open a new topic, challenge, contradiction, metric probe, or follow-up.\n' +
+        'Give only a brief professional acknowledgement and prepare to close.',
+    }
+  }
+
   const directives: Record<DirectorIntent, string> = {
     OPEN_NEW_TOPIC:
       'Move the interview to a new topic or competency that has not yet been explored. Do not linger on the previous topic.',

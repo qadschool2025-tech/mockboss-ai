@@ -10,6 +10,16 @@
 //                                + applyContradictionPatch  (contradiction-tracker.ts)
 // - computeAggregateScore      → aggregateScores            (score-aggregator.ts)
 //
+// PHASE BOOKKEEPING (Time-Awareness fix, layer 1):
+//   The phase decision now uses the REAL state with the REAL config reconciled
+//   in, via evaluatePhaseTransition. The previous advancePhase alias fabricated
+//   a stub state (per-phase count derived from messages.length, phaseStartedAt
+//   faked to session start, plan hardcoded to 'go', empty competencyCoverage),
+//   which raced the phase to 'closing' far too early. In addition, the live path
+//   never maintained phaseQuestionCount (appendMessage is unused server-side) nor
+//   phaseStartedAt (transitionPhase unused) nor a real config (route seeds a
+//   'free' stub). Those three are now reconnected in statePatch below.
+//
 // DIRECTOR INTEGRATION:
 //   After state patches and before prompt assembly, the Director decides the
 //   single tactical move for the next turn (decide-next-move.ts) and the prompt
@@ -64,7 +74,7 @@ import type { GrowthTrackerState }        from './longitudinal/growth-tracker'
 import type { SessionSnapshot }           from './artifacts/session-snapshot'
 import type { SessionDelta }              from './longitudinal/session-delta'
 
-import { advancePhase, isSessionComplete }   from './state/phase-engine'
+import { evaluatePhaseTransition, isSessionComplete } from './state/phase-engine'
 import { recordTopicsFromText }              from './state/topic-memory'
 import {
   matchCompetenciesInText,
@@ -175,7 +185,7 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
 
   // ── 1. Session end check ────────────────────────────────────────────────────
 
-  if (elapsedSeconds >= totalSeconds || isSessionComplete(state)) {
+ if (elapsedSeconds >= totalSeconds || isSessionComplete({ ...state, config })) {
     return buildEndOfSessionOutput(input, elapsedMinutes, totalMinutes, now)
   }
 
@@ -227,16 +237,20 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
   }
 
   // ── 2. Phase advancement ────────────────────────────────────────────────────
+  // Decide the phase from the REAL state with the REAL config reconciled in.
+  // The previous `advancePhase` alias fabricated a stub state (per-phase count
+  // derived from messages.length, phaseStartedAt faked to session start, plan
+  // hardcoded to 'go', empty competencyCoverage) which raced the phase to
+  // 'closing' far too early. Feeding the real state + config fixes all of that;
+  // per-turn bookkeeping (phaseStartedAt / phaseQuestionCount) is maintained in
+  // statePatch below so future turns read correct values.
 
-  const { phase: newPhase, changed: phaseChanged } = advancePhase(
-    state.phase,
-    messages.length,
-    elapsedMinutes
-  )
+  const stateForPhase: SessionState = { ...state, config }
+  const transition   = evaluatePhaseTransition(stateForPhase)
+  const newPhase      = transition.nextPhase
+  const phaseChanged  = transition.transitioned
 
-  const stateWithPhase: SessionState = phaseChanged
-    ? { ...state, phase: newPhase }
-    : state
+  const stateWithPhase: SessionState = { ...state, config, phase: newPhase }
 
   // ── 2b. Engine-local behavior/pressure carry-over ───────────────────────────
   // These fields are NOT persisted on SessionState. We read any prior values
@@ -381,6 +395,14 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
   // statePatch contains ONLY real SessionState fields.
   const statePatch: Partial<SessionState> = {
     phase:              newPhase,
+    // Phase bookkeeping — reconnected. Reset on phase change, otherwise count
+    // this turn's question (Barbaros asks one question per turn). This is what
+    // makes evaluatePhaseTransition's per-phase counters and timers work at all.
+    phaseStartedAt:     phaseChanged ? now : state.phaseStartedAt,
+    phaseQuestionCount: phaseChanged ? 1 : state.phaseQuestionCount + 1,
+    // Reconcile the REAL config into state. route.ts seeds a 'free' stub config
+    // that was never reconciled, which broke plan-based time budgets (pro/expert).
+    config,
     contradictions:     updatedContradictions,
     recentTopics:       stateAfterCompetency.recentTopics,
     competencyCoverage: stateAfterCompetency.competencyCoverage,

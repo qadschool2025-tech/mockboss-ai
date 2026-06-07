@@ -13,18 +13,25 @@
 //   instead of repeating the hard move. This rations authority across the
 //   session the way a real interviewer picks their battles.
 //
+// CLOSING WINDOW:
+//   The final 90 seconds are protected.
+//   - >90s: normal assessment behavior.
+//   - 90–60s: only a final candidate question is allowed.
+//   - 60–30s: prepare to close. No new evaluation question.
+//   - 30–0s: handled by page.tsx, which starts the farewell screen.
+//
 // PRIORITY ORDER (first match wins):
-//   1. Major unresolved contradiction (+budget)  → RETURN_TO_PREVIOUS
-//   2. Closing phase                             → CLOSE_TOPIC
-//   3. Time nearly up                            → CLOSE_TOPIC
-//   4. Opening phase                             → OPEN_NEW_TOPIC
-//   5. Lesser unresolved contradiction (+budget) → RETURN_TO_PREVIOUS
-//   6. Strong but shallow                        → RAISE_DIFFICULTY / soften
-//   7. Vague or evasive                          → CHALLENGE / soften
-//   8. No concrete example                       → REQUEST_EXAMPLE
-//   9. Topic sufficiently covered (plan-aware)   → OPEN_NEW_TOPIC / CLOSE_TOPIC  [TEMP]
-//  10. Topic saturated + gaps remain             → OPEN_NEW_TOPIC
-//  11. Default                                   → GO_DEEPER
+//   1. Closing window                           → CLOSE_TOPIC
+//   2. Major unresolved contradiction (+budget) → RETURN_TO_PREVIOUS
+//   3. Closing phase                            → CLOSE_TOPIC
+//   4. Opening phase                            → OPEN_NEW_TOPIC
+//   5. Lesser unresolved contradiction (+budget)→ RETURN_TO_PREVIOUS
+//   6. Strong but shallow                       → RAISE_DIFFICULTY / soften
+//   7. Vague or evasive                         → CHALLENGE / soften
+//   8. No concrete example                      → REQUEST_EXAMPLE
+//   9. Topic sufficiently covered (plan-aware)  → OPEN_NEW_TOPIC / CLOSE_TOPIC  [TEMP]
+//  10. Topic saturated + gaps remain            → OPEN_NEW_TOPIC
+//  11. Default                                  → GO_DEEPER
 
 import type { Plan } from '../types';
 import type {
@@ -39,10 +46,11 @@ import type {
 // ─── Thresholds (change here only) ─────────────────────────────────────────────
 
 const THRESHOLDS = {
-  highConfidence: 70,     // candidateProfile.confidenceLevel ≥ → "can take more"
-  lowDepth: 50,           // candidateProfile.depth < → answer lacks substance
-  timeLowFraction: 0.85,  // elapsed/total ≥ → wind-down mode (no new hard moves)
-  maxTopicVisits: 3,      // a topic visited ≥ this is considered saturated
+  highConfidence: 70,            // candidateProfile.confidenceLevel ≥ → "can take more"
+  lowDepth: 50,                  // candidateProfile.depth < → answer lacks substance
+  finalQuestionSeconds: 90,      // final candidate question window starts here
+  prepareClosingSeconds: 60,     // no new evaluation question after this point
+  maxTopicVisits: 3,             // a topic visited ≥ this is considered saturated
 } as const;
 
 // ─── Per-plan starting budgets ─────────────────────────────────────────────────
@@ -90,11 +98,41 @@ export function createInterventionBudget(plan: Plan): InterventionBudget {
  */
 export function decideNextMove(ctx: DirectorContext): DirectorDecision {
   const { now, budget } = ctx;
-  const timeFraction =
-    ctx.totalMinutes > 0 ? ctx.elapsedMinutes / ctx.totalMinutes : 0;
 
-  // 1. Flagship move — a MAJOR unresolved contradiction. Worth pursuing even
-  //    late in the session, but only if escalation budget remains.
+  const secondsRemaining = Math.max(
+    0,
+    (ctx.totalMinutes - ctx.elapsedMinutes) * 60
+  );
+
+  // 1. Closing Window — highest priority.
+  //    Last 90 seconds are reserved for controlled closing behavior.
+  //    90–60s: only the final candidate question is allowed.
+  //    60–30s: no new evaluation question. Prepare to close.
+  //    30–0s: handled by page.tsx, which starts the farewell.
+  if (secondsRemaining <= THRESHOLDS.prepareClosingSeconds) {
+    return makeDecision(
+      'CLOSE_TOPIC',
+      'prepare_closing',
+      ['time_running_low'],
+      budget,
+      null,
+      now,
+    );
+  }
+
+  if (secondsRemaining <= THRESHOLDS.finalQuestionSeconds) {
+    return makeDecision(
+      'CLOSE_TOPIC',
+      'final_candidate_question',
+      ['time_running_low'],
+      budget,
+      null,
+      now,
+    );
+  }
+
+  // 2. Flagship move — a MAJOR unresolved contradiction. Worth pursuing while
+  //    outside the protected closing window, but only if escalation budget remains.
   const major = ctx.unaddressedContradictions.find((c) => c.severity === 'major');
   if (major && budget.contradictionEscalation > 0) {
     return makeDecision(
@@ -107,14 +145,9 @@ export function decideNextMove(ctx: DirectorContext): DirectorDecision {
     );
   }
 
-  // 2. Closing phase — wind down, no new probing.
+  // 3. Closing phase — wind down, no new probing.
   if (ctx.phase === 'closing') {
     return makeDecision('CLOSE_TOPIC', null, ['closing_phase'], budget, null, now);
-  }
-
-  // 3. Time nearly up — steer toward closing; suppress new hard moves.
-  if (timeFraction >= THRESHOLDS.timeLowFraction) {
-    return makeDecision('CLOSE_TOPIC', null, ['time_running_low'], budget, null, now);
   }
 
   // 4. Opening phase — get into a real topic.
@@ -158,6 +191,7 @@ export function decideNextMove(ctx: DirectorContext): DirectorDecision {
         now,
       );
     }
+
     return makeDecision(
       'REQUEST_EXAMPLE',
       currentTopic(ctx),
@@ -173,9 +207,11 @@ export function decideNextMove(ctx: DirectorContext): DirectorDecision {
     const reasons: DirectorReason[] = ctx.lastAnswerHasExamples
       ? ['vague_answer']
       : ['evasive_answer'];
+
     if (budget.challenge > 0) {
       return makeDecision('CHALLENGE', currentTopic(ctx), reasons, budget, 'challenge', now);
     }
+
     return makeDecision(
       'REQUEST_EXAMPLE',
       currentTopic(ctx),
@@ -194,16 +230,12 @@ export function decideNextMove(ctx: DirectorContext): DirectorDecision {
   // 9. TEMPORARY — current topic sufficiently covered for this plan.
   //    Reached only for concrete answers (not closing/opening, no unresolved
   //    contradiction, vagueness is not 'high', and an example WAS given — see
-  //    branches 1–8 above). Once the current topic has been engaged enough times
-  //    for the plan, move on instead of deepening further. This breaks the
-  //    GO_DEEPER loop on good answers, and the CLOSE_TOPIC branch breaks the
-  //    "no missing competencies → deepen forever" loop.
-  //
-  //    TEMPORARY: visit-based gating is a stopgap. Replace with longitudinal
-  //    evidence progression from CandidateEvolutionProfile (see TODO above).
+  //    branches above). Once the current topic has been engaged enough times
+  //    for the plan, move on instead of deepening further.
   const coverageVisitsThreshold =
     COVERAGE_SUFFICIENT_VISITS_BY_PLAN[ctx.plan] ??
     COVERAGE_SUFFICIENT_VISITS_BY_PLAN.free;
+
   if (currentTopicVisits(ctx) >= coverageVisitsThreshold) {
     if (ctx.missingCompetencies.length > 0) {
       return makeDecision(
@@ -215,6 +247,7 @@ export function decideNextMove(ctx: DirectorContext): DirectorDecision {
         now,
       );
     }
+
     return makeDecision(
       'CLOSE_TOPIC',
       currentTopic(ctx),
@@ -254,6 +287,7 @@ export function summarizeDecision(decision: DirectorDecision): string {
         .map(([k, v]) => `${k}×${v}`)
         .join(', ')}]`
     : '';
+
   return `${decision.intent}${target} — ${decision.reasons.join(', ')}${spent}`;
 }
 
@@ -287,10 +321,13 @@ function makeDecision(
  */
 function currentTopic(ctx: DirectorContext): string | null {
   if (ctx.recentTopics.length === 0) return null;
+
   let latest = ctx.recentTopics[0];
+
   for (const t of ctx.recentTopics) {
     if (t.lastVisitedAt > latest.lastVisitedAt) latest = t;
   }
+
   return latest.topic;
 }
 
@@ -300,11 +337,12 @@ function currentTopic(ctx: DirectorContext): string | null {
  * NOTE: `timesVisited` is incremented per candidate message that mentions the
  * topic keyword (topic-memory.ts), so it is a candidate-vocabulary proxy for
  * probing depth — not a precise interviewer follow-up count. Used here only as
- * a stopgap gate; see the TEMPORARY TODO above.
+ * a stopgap gate.
  */
 function currentTopicVisits(ctx: DirectorContext): number {
   const topic = currentTopic(ctx);
   if (!topic) return 0;
+
   const record = ctx.recentTopics.find((t) => t.topic === topic);
   return record ? record.timesVisited : 0;
 }
@@ -322,6 +360,7 @@ function pickMissingCompetency(ctx: DirectorContext): string | null {
 function isCurrentTopicSaturated(ctx: DirectorContext): boolean {
   const topic = currentTopic(ctx);
   if (!topic) return false;
+
   const record = ctx.recentTopics.find((t) => t.topic === topic);
   return !!record && record.timesVisited >= THRESHOLDS.maxTopicVisits;
 }

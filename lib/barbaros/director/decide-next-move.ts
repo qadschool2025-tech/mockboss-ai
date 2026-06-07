@@ -14,10 +14,10 @@
 //   session the way a real interviewer picks their battles.
 //
 // CLOSING WINDOW:
-//   The final 90 seconds are protected.
-//   - >90s: normal assessment behavior.
-//   - 90–60s: only a final candidate question is allowed.
-//   - 60–30s: prepare to close. No new evaluation question.
+//   The final window starts early enough to protect the last 90 visible seconds.
+//   - >120s: normal assessment behavior.
+//   - 120–75s: only a final candidate question is allowed.
+//   - 75–30s: prepare to close. No new evaluation question.
 //   - 30–0s: handled by page.tsx, which starts the farewell screen.
 //
 // PRIORITY ORDER (first match wins):
@@ -29,7 +29,7 @@
 //   6. Strong but shallow                       → RAISE_DIFFICULTY / soften
 //   7. Vague or evasive                         → CHALLENGE / soften
 //   8. No concrete example                      → REQUEST_EXAMPLE
-//   9. Topic sufficiently covered (plan-aware)  → OPEN_NEW_TOPIC / CLOSE_TOPIC  [TEMP]
+//   9. Topic sufficiently covered (plan-aware)  → OPEN_NEW_TOPIC / CLOSE_TOPIC
 //  10. Topic saturated + gaps remain            → OPEN_NEW_TOPIC
 //  11. Default                                  → GO_DEEPER
 
@@ -43,19 +43,17 @@ import type {
   InterventionBudget,
 } from './director-types';
 
-// ─── Thresholds (change here only) ─────────────────────────────────────────────
+// ─── Thresholds ───────────────────────────────────────────────────────────────
 
 const THRESHOLDS = {
-  highConfidence: 70,            // candidateProfile.confidenceLevel ≥ → "can take more"
-  lowDepth: 50,                  // candidateProfile.depth < → answer lacks substance
-  finalQuestionSeconds: 90,      // final candidate question window starts here
-  prepareClosingSeconds: 60,     // no new evaluation question after this point
-  maxTopicVisits: 3,             // a topic visited ≥ this is considered saturated
+  highConfidence: 70,
+  lowDepth: 50,
+  finalQuestionSeconds: 120,
+  prepareClosingSeconds: 75,
+  maxTopicVisits: 3,
 } as const;
 
-// ─── Per-plan starting budgets ─────────────────────────────────────────────────
-// Scaled by session duration. Matches the agreed Expert profile
-// (challenge 4, interruption 2, contradictionEscalation 2).
+// ─── Per-plan starting budgets ────────────────────────────────────────────────
 
 const BUDGET_BY_PLAN: Record<Plan, InterventionBudget> = {
   free:   { challenge: 2, interruption: 1, contradictionEscalation: 1 },
@@ -64,15 +62,7 @@ const BUDGET_BY_PLAN: Record<Plan, InterventionBudget> = {
   expert: { challenge: 4, interruption: 2, contradictionEscalation: 2 },
 };
 
-// ─── Per-plan "sufficiently covered" visit threshold ────────────────────────────
-//
-// TEMPORARY
-// Replace visit-based coverage gating with longitudinal evidence progression
-// from CandidateEvolutionProfile (longitudinal engine). This is a local stopgap
-// to break the GO_DEEPER loop on good answers; it is NOT the final coverage
-// model. Plan-aware so Go favors breadth (move on sooner) while Pro/Expert allow
-// more depth. NOTE: the effective ceiling is bounded by THRESHOLDS.maxTopicVisits
-// (still plan-blind) until that is unified in the deferred audit.
+// ─── Per-plan coverage threshold ──────────────────────────────────────────────
 
 const COVERAGE_SUFFICIENT_VISITS_BY_PLAN: Record<Plan, number> = {
   free:   2,
@@ -82,19 +72,18 @@ const COVERAGE_SUFFICIENT_VISITS_BY_PLAN: Record<Plan, number> = {
 };
 
 /**
- * Initialize the intervention budget for a session. Called once at session
- * start by the engine and persisted on state between turns.
+ * Initialize the intervention budget for a session.
  */
 export function createInterventionBudget(plan: Plan): InterventionBudget {
   const base = BUDGET_BY_PLAN[plan] ?? BUDGET_BY_PLAN.free;
   return { ...base };
 }
 
-// ─── Main Decision Function ─────────────────────────────────────────────────────
+// ─── Main Decision Function ──────────────────────────────────────────────────
 
 /**
  * Sole entry point. Reads the decision-relevant slice of state and returns a
- * single tactical decision. Pure — never mutates `ctx`.
+ * single tactical decision. Pure. Never mutates ctx.
  */
 export function decideNextMove(ctx: DirectorContext): DirectorDecision {
   const { now, budget } = ctx;
@@ -104,11 +93,9 @@ export function decideNextMove(ctx: DirectorContext): DirectorDecision {
     (ctx.totalMinutes - ctx.elapsedMinutes) * 60
   );
 
-  // 1. Closing Window — highest priority.
-  //    Last 90 seconds are reserved for controlled closing behavior.
-  //    90–60s: only the final candidate question is allowed.
-  //    60–30s: no new evaluation question. Prepare to close.
-  //    30–0s: handled by page.tsx, which starts the farewell.
+  // 1. Closing Window.
+  // Starts at 120s to prevent a normal assessment question from appearing
+  // inside the last 90 visible seconds after backend and audio latency.
   if (secondsRemaining <= THRESHOLDS.prepareClosingSeconds) {
     return makeDecision(
       'CLOSE_TOPIC',
@@ -131,8 +118,7 @@ export function decideNextMove(ctx: DirectorContext): DirectorDecision {
     );
   }
 
-  // 2. Flagship move — a MAJOR unresolved contradiction. Worth pursuing while
-  //    outside the protected closing window, but only if escalation budget remains.
+  // 2. Major unresolved contradiction.
   const major = ctx.unaddressedContradictions.find((c) => c.severity === 'major');
   if (major && budget.contradictionEscalation > 0) {
     return makeDecision(
@@ -145,12 +131,19 @@ export function decideNextMove(ctx: DirectorContext): DirectorDecision {
     );
   }
 
-  // 3. Closing phase — wind down, no new probing.
+  // 3. Closing phase.
   if (ctx.phase === 'closing') {
-    return makeDecision('CLOSE_TOPIC', null, ['closing_phase'], budget, null, now);
+    return makeDecision(
+      'CLOSE_TOPIC',
+      null,
+      ['closing_phase'],
+      budget,
+      null,
+      now,
+    );
   }
 
-  // 4. Opening phase — get into a real topic.
+  // 4. Opening phase.
   if (ctx.phase === 'opening') {
     return makeDecision(
       'OPEN_NEW_TOPIC',
@@ -162,8 +155,7 @@ export function decideNextMove(ctx: DirectorContext): DirectorDecision {
     );
   }
 
-  // 5. A lesser (moderate/minor) unresolved contradiction, if budget remains.
-  //    Contradictions are pre-sorted major-first; majors are handled above.
+  // 5. Lesser unresolved contradiction.
   const lesser = ctx.unaddressedContradictions[0];
   if (lesser && budget.contradictionEscalation > 0) {
     return makeDecision(
@@ -176,7 +168,7 @@ export function decideNextMove(ctx: DirectorContext): DirectorDecision {
     );
   }
 
-  // 6. Strong but shallow — escalate difficulty (soften if budget exhausted).
+  // 6. Strong but shallow.
   if (
     ctx.candidateProfile.confidenceLevel >= THRESHOLDS.highConfidence &&
     ctx.candidateProfile.depth < THRESHOLDS.lowDepth
@@ -202,14 +194,21 @@ export function decideNextMove(ctx: DirectorContext): DirectorDecision {
     );
   }
 
-  // 7. Vague or evasive answer — challenge it (soften if budget exhausted).
+  // 7. Vague or evasive answer.
   if (ctx.lastAnswerVagueness === 'high') {
     const reasons: DirectorReason[] = ctx.lastAnswerHasExamples
       ? ['vague_answer']
       : ['evasive_answer'];
 
     if (budget.challenge > 0) {
-      return makeDecision('CHALLENGE', currentTopic(ctx), reasons, budget, 'challenge', now);
+      return makeDecision(
+        'CHALLENGE',
+        currentTopic(ctx),
+        reasons,
+        budget,
+        'challenge',
+        now,
+      );
     }
 
     return makeDecision(
@@ -222,16 +221,19 @@ export function decideNextMove(ctx: DirectorContext): DirectorDecision {
     );
   }
 
-  // 8. No concrete example offered — ask for one (no budget cost).
+  // 8. No concrete example.
   if (!ctx.lastAnswerHasExamples) {
-    return makeDecision('REQUEST_EXAMPLE', currentTopic(ctx), ['vague_answer'], budget, null, now);
+    return makeDecision(
+      'REQUEST_EXAMPLE',
+      currentTopic(ctx),
+      ['vague_answer'],
+      budget,
+      null,
+      now,
+    );
   }
 
-  // 9. TEMPORARY — current topic sufficiently covered for this plan.
-  //    Reached only for concrete answers (not closing/opening, no unresolved
-  //    contradiction, vagueness is not 'high', and an example WAS given — see
-  //    branches above). Once the current topic has been engaged enough times
-  //    for the plan, move on instead of deepening further.
+  // 9. Current topic sufficiently covered for this plan.
   const coverageVisitsThreshold =
     COVERAGE_SUFFICIENT_VISITS_BY_PLAN[ctx.plan] ??
     COVERAGE_SUFFICIENT_VISITS_BY_PLAN.free;
@@ -258,7 +260,7 @@ export function decideNextMove(ctx: DirectorContext): DirectorDecision {
     );
   }
 
-  // 10. Current topic saturated and competency gaps remain — open a new topic.
+  // 10. Current topic saturated and gaps remain.
   if (isCurrentTopicSaturated(ctx) && ctx.missingCompetencies.length > 0) {
     return makeDecision(
       'OPEN_NEW_TOPIC',
@@ -270,16 +272,19 @@ export function decideNextMove(ctx: DirectorContext): DirectorDecision {
     );
   }
 
-  // 11. Default — probe deeper on the current thread.
-  return makeDecision('GO_DEEPER', currentTopic(ctx), ['default_deepen'], budget, null, now);
+  // 11. Default.
+  return makeDecision(
+    'GO_DEEPER',
+    currentTopic(ctx),
+    ['default_deepen'],
+    budget,
+    null,
+    now,
+  );
 }
 
-// ─── Inspection helper (audit trail / debugging) ────────────────────────────────
+// ─── Inspection helper ────────────────────────────────────────────────────────
 
-/**
- * Human-readable one-line summary of a decision. Mirrors escalation-policy's
- * summarizeDecision for a consistent audit format.
- */
 export function summarizeDecision(decision: DirectorDecision): string {
   const target = decision.targetRef ? ` → ${decision.targetRef}` : '';
   const spent = Object.keys(decision.budgetSpent).length
@@ -291,12 +296,8 @@ export function summarizeDecision(decision: DirectorDecision): string {
   return `${decision.intent}${target} — ${decision.reasons.join(', ')}${spent}`;
 }
 
-// ─── Internal Helpers ────────────────────────────────────────────────────────────
+// ─── Internal Helpers ─────────────────────────────────────────────────────────
 
-/**
- * Build a decision and apply any budget cost in one place, so spending is
- * never duplicated across branches.
- */
 function makeDecision(
   intent: DirectorIntent,
   targetRef: string | null,
@@ -313,12 +314,16 @@ function makeDecision(
     budgetSpent[spendKey] = 1;
   }
 
-  return { intent, targetRef, reasons, budgetSpent, budgetAfter, decidedAt: now };
+  return {
+    intent,
+    targetRef,
+    reasons,
+    budgetSpent,
+    budgetAfter,
+    decidedAt: now,
+  };
 }
 
-/**
- * Most recently visited topic name, or null if none recorded yet.
- */
 function currentTopic(ctx: DirectorContext): string | null {
   if (ctx.recentTopics.length === 0) return null;
 
@@ -331,14 +336,6 @@ function currentTopic(ctx: DirectorContext): string | null {
   return latest.topic;
 }
 
-/**
- * Visit count of the current topic, or 0 if none recorded yet.
- *
- * NOTE: `timesVisited` is incremented per candidate message that mentions the
- * topic keyword (topic-memory.ts), so it is a candidate-vocabulary proxy for
- * probing depth — not a precise interviewer follow-up count. Used here only as
- * a stopgap gate.
- */
 function currentTopicVisits(ctx: DirectorContext): number {
   const topic = currentTopic(ctx);
   if (!topic) return 0;
@@ -347,16 +344,10 @@ function currentTopicVisits(ctx: DirectorContext): number {
   return record ? record.timesVisited : 0;
 }
 
-/**
- * First competency still missing coverage, or null.
- */
 function pickMissingCompetency(ctx: DirectorContext): string | null {
   return ctx.missingCompetencies.length > 0 ? ctx.missingCompetencies[0] : null;
 }
 
-/**
- * Whether the current topic has been visited enough to be considered saturated.
- */
 function isCurrentTopicSaturated(ctx: DirectorContext): boolean {
   const topic = currentTopic(ctx);
   if (!topic) return false;

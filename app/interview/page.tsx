@@ -1,3 +1,4 @@
+
 'use client'
 
 import { useState, useEffect, useRef, useCallback } from 'react'
@@ -19,8 +20,10 @@ interface Message {
 
 // CLOSING WINDOW
 // The farewell must begin inside the interview time.
-// Last 30 seconds are reserved for the final goodbye before report generation.
-const CLOSING_START_SECONDS = 30
+// 45s: request closing, but do not cut active speech.
+// 15s: force closing if the system is still waiting.
+const CLOSING_REQUEST_SECONDS = 45
+const CLOSING_FORCE_SECONDS = 15
 
 function buildConfig() {
   let raw: any = {}
@@ -118,8 +121,6 @@ function InterviewRoom() {
 
   // CLOSING FLOW FIX
   // isClosing separates the farewell screen from the report generation screen.
-  // Before: isEndOfSession triggered isEnded immediately, then goToReport stopped audio.
-  // Now: Barbaros shows the final message first, then moves to report generation.
   const [isClosing, setIsClosing]           = useState(false)
 
   const [isMuted, setIsMuted]               = useState(false)
@@ -159,8 +160,11 @@ function InterviewRoom() {
   const audioChunksRef    = useRef<Blob[]>([])
 
   // CLOSING FLOW FIX
-  // Prevents duplicate closing timers and ensures the report starts only after farewell.
-  const closingTimerRef   = useRef<any>(null)
+  // Prevent duplicate closing timers and avoid cutting active speech unless forced.
+  const closingTimerRef        = useRef<any>(null)
+  const pendingClosingRef      = useRef(false)
+  const pendingClosingMessage  = useRef<string | null>(null)
+  const pendingClosingAudio    = useRef<string | null>(null)
 
   useEffect(() => { messagesRef.current       = messages       }, [messages])
   useEffect(() => { isLoadingRef.current      = isLoading      }, [isLoading])
@@ -212,9 +216,13 @@ function InterviewRoom() {
 
   // CLOSING FLOW FIX
   // Shows the farewell message, plays its audio if available, then moves to report generation.
-  // This keeps goToReport unchanged and prevents it from cutting off the farewell audio.
   const beginClosing = useCallback((message: string, audioBase64?: string | null) => {
     if (isClosingRef.current || isEndedRef.current) return
+
+    pendingClosingRef.current = false
+    pendingClosingMessage.current = null
+    pendingClosingAudio.current = null
+    setPendingAudio(null)
 
     setIsClosing(true)
     isClosingRef.current = true
@@ -278,6 +286,31 @@ function InterviewRoom() {
     }
   }, [finishClosing])
 
+  // CLOSING FLOW FIX
+  // Requests closing. If Barbaros is speaking, wait for audio to finish.
+  // If forced, start immediately to avoid reaching 0:00 without farewell.
+  const requestClosing = useCallback((message: string, audioBase64?: string | null, force = false) => {
+    if (isClosingRef.current || isEndedRef.current) return
+
+    pendingClosingRef.current = true
+    pendingClosingMessage.current = message
+    pendingClosingAudio.current = audioBase64 ?? null
+    setPendingAudio(null)
+
+    if (!force && isSpeakingRef.current) {
+      return
+    }
+
+    const finalMessage = pendingClosingMessage.current || message
+    const finalAudio = pendingClosingAudio.current
+
+    pendingClosingRef.current = false
+    pendingClosingMessage.current = null
+    pendingClosingAudio.current = null
+
+    beginClosing(finalMessage, finalAudio)
+  }, [beginClosing])
+
   useEffect(() => {
     const id = setInterval(() => {
       setTimeLeft(prev => {
@@ -293,25 +326,35 @@ function InterviewRoom() {
   }, [])
 
   // CLOSING FLOW FIX
-  // The farewell must start inside the interview time, not after 0:00.
-  // Last 30 seconds are reserved for the final goodbye before report generation.
+  // Start farewell inside interview time.
+  // At 45s, request closing without cutting active speech.
+  // At 15s, force closing if not recording/transcribing.
   useEffect(() => {
+    if (isEndedRef.current || isClosingRef.current) return
+
     if (
-      timeLeft <= CLOSING_START_SECONDS &&
-      !isEndedRef.current &&
-      !isClosingRef.current &&
+      timeLeft <= CLOSING_FORCE_SECONDS &&
+      !isRecording &&
+      !isTranscribing
+    ) {
+      requestClosing(genericClosingMessage(), null, true)
+      return
+    }
+
+    if (
+      timeLeft <= CLOSING_REQUEST_SECONDS &&
       !isLoading &&
       !isRecording &&
       !isTranscribing
     ) {
-      beginClosing(genericClosingMessage(), null)
+      requestClosing(genericClosingMessage(), null, false)
     }
   }, [
     timeLeft,
     isLoading,
     isRecording,
     isTranscribing,
-    beginClosing,
+    requestClosing,
     genericClosingMessage,
   ])
 
@@ -322,7 +365,7 @@ function InterviewRoom() {
   }
 
   useEffect(() => {
-    if (audioReady && pendingAudio) {
+    if (audioReady && pendingAudio && !pendingClosingRef.current && !isClosingRef.current) {
       playAudioDirect(pendingAudio)
       setPendingAudio(null)
     }
@@ -330,6 +373,7 @@ function InterviewRoom() {
 
   const playAudioDirect = (audioBase64: string) => {
     if (isMutedRef.current) return
+    if (isClosingRef.current || pendingClosingRef.current) return
 
     try {
       if (audioRef.current) {
@@ -345,18 +389,53 @@ function InterviewRoom() {
 
       audio.onended = () => {
         setIsSpeaking(false)
+
         if (audioRef.current === audio) audioRef.current = null
 
-        // CLOSING FLOW FIX
-        // During farewell, do not restart silence timer.
+        if (pendingClosingRef.current) {
+          const finalMessage = pendingClosingMessage.current || genericClosingMessage()
+          const finalAudio = pendingClosingAudio.current
+
+          pendingClosingRef.current = false
+          pendingClosingMessage.current = null
+          pendingClosingAudio.current = null
+
+          beginClosing(finalMessage, finalAudio)
+          return
+        }
+
         if (!isClosingRef.current) resetSilenceTimer()
       }
 
-      audio.onerror = () => { setIsSpeaking(false) }
+      audio.onerror = () => {
+        setIsSpeaking(false)
+
+        if (pendingClosingRef.current) {
+          const finalMessage = pendingClosingMessage.current || genericClosingMessage()
+          const finalAudio = pendingClosingAudio.current
+
+          pendingClosingRef.current = false
+          pendingClosingMessage.current = null
+          pendingClosingAudio.current = null
+
+          beginClosing(finalMessage, finalAudio)
+        }
+      }
 
       audio.play().catch(err => {
         setIsSpeaking(false)
         console.warn('Audio play failed:', err)
+
+        if (pendingClosingRef.current) {
+          const finalMessage = pendingClosingMessage.current || genericClosingMessage()
+          const finalAudio = pendingClosingAudio.current
+
+          pendingClosingRef.current = false
+          pendingClosingMessage.current = null
+          pendingClosingAudio.current = null
+
+          beginClosing(finalMessage, finalAudio)
+        }
       })
     } catch (err) {
       setIsSpeaking(false)
@@ -366,6 +445,7 @@ function InterviewRoom() {
 
   const playAudio = useCallback((audioBase64: string) => {
     if (isMutedRef.current) return
+    if (isClosingRef.current || pendingClosingRef.current) return
 
     if (!audioReadyRef.current) {
       setPendingAudio(audioBase64)
@@ -548,10 +628,17 @@ function InterviewRoom() {
       if (data.score) setQuestionCount(prev => prev + 1)
 
       // CLOSING FLOW FIX
-      // End-of-session response now enters the farewell screen first.
-      // Audio is handled by beginClosing so it is not played twice.
+      // End-of-session response enters the farewell screen first.
       if (data.isEndOfSession) {
-        beginClosing(data.content, data.audioBase64)
+        requestClosing(data.content, data.audioBase64, false)
+        return
+      }
+
+      // CLOSING FLOW FIX
+      // If time is already in closing territory after the backend responds,
+      // do not play a normal question audio. Move into closing instead.
+      if (timeLeft <= CLOSING_REQUEST_SECONDS) {
+        requestClosing(genericClosingMessage(), null, timeLeft <= CLOSING_FORCE_SECONDS)
         return
       }
 
@@ -1011,7 +1098,7 @@ function InterviewRoom() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               <button type="button" onClick={() => {
                 setShowEndModal(false)
-                beginClosing(genericClosingMessage(), null)
+                requestClosing(genericClosingMessage(), null, true)
               }}
                 style={{ padding: '12px 20px', background: '#CC785C', border: 'none', borderRadius: 10, color: '#fff', fontSize: 14, fontWeight: 800, cursor: 'pointer', fontFamily: 'inherit' }}>
                 {L.endGenerate}
@@ -1052,3 +1139,4 @@ function InterviewRoom() {
 export default function InterviewPage() {
   return <InterviewRoom />
 }
+```

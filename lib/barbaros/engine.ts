@@ -37,6 +37,16 @@
 //     - contradiction count  → metrics.contradictionCount
 //     - contradictions array  → contradictions
 //
+// CONTRADICTION DETECTION (semantic layer, Phase-2 contradiction work):
+//   Section 4 now runs TWO detectors in sequence on the contradiction array:
+//     STEP 1 detectContradictions        — heuristic, sync, free (unchanged)
+//     STEP 2 detectContradictionsSemantic — narrow JSON-only LLM judge, async
+//   The semantic judge is INJECTED (callClaude as transport only) and its result
+//   is confidence-gated inside the tracker. Both detectors write into the SAME
+//   state.contradictions (single source of truth), so the Director, metrics, and
+//   scoring INPUT all see the augmented set. NOTE: scoring LOGIC is untouched —
+//   buildRawScoreInput simply receives a more complete contradiction array.
+//
 // END-OF-SESSION HARDENING:
 //   buildSessionSnapshot → toScoreSnapshot dereferences
 //   scoreBreakdown.dimensions.engagement, but this end path passes an EMPTY
@@ -62,9 +72,11 @@ import {
 }                                            from './state/competency-tracker'
 import {
   detectContradictions,
+  detectContradictionsSemantic,
   applyContradictionPatch,
   getUnaddressedContradictions,
 }                                            from './state/contradiction-tracker'
+import type { SemanticModelCall }            from './state/contradiction-tracker'
 
 import { orchestrateBehavior }               from './analysis/behavior/behavior-orchestrator'
 import type { OrchestratorSessionState }     from './analysis/behavior/behavior-orchestrator'
@@ -324,7 +336,8 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
     }
   }
 
-  // Contradiction tracker — detect new contradictions from full message history
+  // Contradiction tracker — detect new contradictions from full message history.
+  // STEP 1 (heuristic, sync, free): keyword / negation-pair matching.
   const contradictionPatch = detectContradictions(
     {
       messages,
@@ -333,10 +346,37 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
     },
     stateWithPhase.contradictions ?? []
   )
-  const updatedContradictions = applyContradictionPatch(
+  let updatedContradictions = applyContradictionPatch(
     stateWithPhase.contradictions ?? [],
     contradictionPatch
   )
+
+  // STEP 2 (semantic, async, LLM): catches logical conflicts the heuristic
+  // cannot — e.g. "I don't formally track participation" vs "participation
+  // improved" (no shared keyword, no negation pair). ONE narrow JSON-only model
+  // call per turn; the tracker guards <2 user messages (no call on the first
+  // answer) and confidence-gates entry. The injected judge fully controls the
+  // model via the tracker's own system prompt — callClaude only lends transport.
+  // Fail-safe: any failure yields an empty patch and never breaks the turn.
+  const semanticJudge: SemanticModelCall = ({ system, user }) =>
+    callClaude({
+      systemPrompt: system,
+      messages: [{ role: 'user', content: user, timestamp: now }],
+    })
+  try {
+    const semanticPatch = await detectContradictionsSemantic(
+      {
+        messages,
+        currentPhase: stateWithPhase.phase,
+        now,
+      },
+      updatedContradictions,
+      semanticJudge
+    )
+    updatedContradictions = applyContradictionPatch(updatedContradictions, semanticPatch)
+  } catch (err) {
+    console.error('[barbaros:contradiction] semantic detection failed — skipped:', err)
+  }
 
   // statePatch contains ONLY real SessionState fields.
   const statePatch: Partial<SessionState> = {

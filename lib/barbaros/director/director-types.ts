@@ -16,6 +16,19 @@
 //     budget; when a counter reaches zero the decider falls back to a softer
 //     intent. This is what prevents Barbaros from becoming an interrogator.
 //
+// TIME-AWARENESS (layer 3):
+//   Two soft, time-driven intents wind the interview down gracefully inside the
+//   final window, so Barbaros stops opening new threads near the end instead of
+//   asking a fresh probe at the last second:
+//     FINAL_QUESTION    — one last consolidating question (≈90–60s remaining)
+//     INVITE_QUESTIONS  — invite the candidate's questions / signal the close
+//                         (≤60s remaining, or already in the closing phase)
+//   The actual farewell + session end is owned by the engine
+//   (buildEndOfSessionOutput) and phase-engine (time_critical / shouldEndSession);
+//   the Director only shapes the QUESTION CONTENT in this window. There is
+//   deliberately no ENTER_CLOSING intent — that would duplicate the engine's
+//   farewell ownership.
+//
 // DEPENDENCIES:
 //   Imports type-only from ../types (the unified contract). No runtime imports.
 
@@ -37,8 +50,12 @@ import type {
  * EXACTLY ONE is selected per turn by the decider.
  *
  * Soft intents (no budget cost):   GO_DEEPER, REQUEST_EXAMPLE, OPEN_NEW_TOPIC,
- *                                  CLOSE_TOPIC
+ *                                  CLOSE_TOPIC, FINAL_QUESTION, INVITE_QUESTIONS
  * Hard intents (consume budget):   CHALLENGE, RAISE_DIFFICULTY, RETURN_TO_PREVIOUS
+ *
+ * Time-driven soft intents (layer 3): FINAL_QUESTION, INVITE_QUESTIONS.
+ * These take priority over deepening/pressure inside the final window so the
+ * interview winds down instead of opening new topics at the last second.
  */
 export type DirectorIntent =
   | 'OPEN_NEW_TOPIC'      // move to a fresh competency / topic
@@ -48,6 +65,8 @@ export type DirectorIntent =
   | 'RAISE_DIFFICULTY'   // escalate complexity for a strong candidate
   | 'RETURN_TO_PREVIOUS' // revisit an earlier unresolved point / contradiction
   | 'CLOSE_TOPIC'        // wrap up current topic (coverage met or time tight)
+  | 'FINAL_QUESTION'     // final window: one last consolidating question, no new topic
+  | 'INVITE_QUESTIONS'   // closing window: invite the candidate's questions / wind down
 
 // ============================================================================
 // SECTION 2 — BUDGET
@@ -87,6 +106,8 @@ export type DirectorReason =
   | 'missing_competency'
   | 'topic_coverage_complete'
   | 'time_running_low'
+  | 'final_question_window'      // layer 3: ≈90–60s remaining → one last question
+  | 'invite_questions_window'    // layer 3: ≤60s remaining / closing → wind down
   | 'opening_phase'
   | 'closing_phase'
   | 'budget_exhausted_softened'
@@ -105,6 +126,7 @@ export type DirectorReason =
  *   - RETURN_TO_PREVIOUS / CHALLENGE              → a Contradiction.id
  *   - OPEN_NEW_TOPIC / CLOSE_TOPIC                → a competency key or topic
  *   - GO_DEEPER / REQUEST_EXAMPLE / RAISE_DIFFICULTY → current topic, or null
+ *   - FINAL_QUESTION / INVITE_QUESTIONS           → null (time-driven, not topic-bound)
  *
  * `budgetSpent` records what this decision consumed (empty for soft intents).
  * `budgetAfter` is the full budget state once this decision is applied — the
@@ -156,6 +178,13 @@ export interface DirectorContext {
   // Time & budget.
   elapsedMinutes: number
   totalMinutes: number
+
+  // Absolute seconds remaining — drives the layer-3 time windows
+  // (FINAL_QUESTION ≈90–60s, INVITE_QUESTIONS ≤60s). OPTIONAL so this contract
+  // does not break the build before engine.ts is updated to populate it; when
+  // absent the decider derives it from (totalMinutes - elapsedMinutes) * 60.
+  secondsRemaining?: number
+
   budget: InterventionBudget
 
   // Injected for deterministic time (testing / replay) — never Date.now().

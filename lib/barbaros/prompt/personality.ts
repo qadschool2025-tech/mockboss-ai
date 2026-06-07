@@ -3,9 +3,12 @@
 // Consumed by: prompt-builder.ts (injected once into system prompt)
 //
 // Rules:
-// - No logic, no computation, no imports
 // - Pure data — strings and readonly objects only
-// - Never changes based on session state or candidate data
+// - No imports, no session state, no candidate data
+// - EXCEPTION: the "Closing Message Builder" section at the end of this file
+//   contains small, self-contained, deterministic formatting logic (no imports,
+//   no state) for the end-of-session farewell. Kept here per the prompt-layer
+//   ownership of Barbaros's voice.
 
 // ─── Identity ─────────────────────────────────────────────────────────────────
 
@@ -115,6 +118,9 @@ export const BARBAROS_OPENING_TEMPLATE =
   `Hello {candidateName}, I'm Barbaros. We're here today for the {jobTitle} position at {institution}. Are you ready to begin?` as const
 
 // ─── Closing Script ───────────────────────────────────────────────────────────
+// LEGACY static template — retained for backward compatibility. The live
+// farewell is now produced by buildClosingMessage() (see end of file), which
+// names only the criteria genuinely covered this session.
 
 export const BARBAROS_CLOSING_TEMPLATE =
   `That concludes our interview, {candidateName}. Thank you for your time today. You'll receive a full assessment shortly — I'd encourage you to review it carefully.` as const
@@ -196,3 +202,184 @@ export const BARBAROS_LANGUAGE_RULES: Record<string, string> = {
 }
 
 export const DEFAULT_LANGUAGE_RULE = BARBAROS_LANGUAGE_RULES['en']
+
+// ============================================================================
+// CLOSING MESSAGE BUILDER
+// ============================================================================
+// Produces the end-of-session farewell. Pure & deterministic (no imports, no
+// state). Spec:
+//   - NEVER reveals a verdict, score, or strength/weakness judgment.
+//   - Names ONLY criteria genuinely covered (evidence-backed), as friendly
+//     labels — never raw internal competency keys.
+//   - NEVER names un-covered criteria. NEVER upsells a longer assessment.
+//   - Honesty guard: if fewer than 2 covered labels are derivable, fall back to
+//     a warm GENERIC farewell with no named criteria (so it never sounds hollow).
+
+export type ClosingFriendlyLabel =
+  | 'professional_clarity'
+  | 'practical_experience'
+  | 'role_fit'
+  | 'communication'
+  | 'follow_up'
+  | 'pressure'
+
+// Canonical display order — keeps the listed criteria stable across sessions.
+const CLOSING_LABEL_ORDER: readonly ClosingFriendlyLabel[] = [
+  'professional_clarity',
+  'practical_experience',
+  'role_fit',
+  'communication',
+  'follow_up',
+  'pressure',
+] as const
+
+// Human phrasing per language, written to read naturally inside
+// "...we explored your {phrase}, {phrase}, and {phrase}."
+const FRIENDLY_LABEL_TEXT: Record<ClosingFriendlyLabel, { en: string; ar: string }> = {
+  professional_clarity: { en: 'professional clarity',       ar: 'وضوحك المهني' },
+  practical_experience: { en: 'practical experience',       ar: 'خبرتك العملية' },
+  role_fit:             { en: 'role fit',                   ar: 'مدى ملاءمتك للدور' },
+  communication:        { en: 'communication',              ar: 'تواصلك' },
+  follow_up:            { en: 'how you handled follow-ups', ar: 'تعاملك مع الأسئلة التتبّعية' },
+  pressure:             { en: 'composure under pressure',    ar: 'تماسكك تحت الضغط' },
+}
+
+// Internal competency key → friendly label. Keys come from constants.ts
+// (UNIVERSAL_COMPETENCIES + SECTOR_COMPETENCIES). Keys with no clear, honest fit
+// are intentionally omitted — we never invent a covered criterion. `follow_up`
+// has no competency source (it is a Q&A behavior, not a competency), so it is
+// never produced from coverage; it stays available for a future explicit signal.
+export const COMPETENCY_FRIENDLY_LABEL_MAP: Readonly<Record<string, ClosingFriendlyLabel>> = {
+  // Universal
+  communication:          'communication',
+  problem_solving:        'professional_clarity',
+  ownership:              'practical_experience',
+  adaptability:           'role_fit',
+  // General
+  critical_thinking:      'professional_clarity',
+  collaboration:          'communication',
+  time_management:        'practical_experience',
+  leadership:             'practical_experience',
+  // Technology
+  technical_depth:        'practical_experience',
+  system_design:          'practical_experience',
+  debugging:              'professional_clarity',
+  code_quality:           'practical_experience',
+  architecture:           'practical_experience',
+  // Education
+  pedagogy:               'practical_experience',
+  classroom_management:   'practical_experience',
+  curriculum_design:      'practical_experience',
+  student_assessment:     'professional_clarity',
+  differentiation:        'practical_experience',
+  // Healthcare
+  clinical_judgment:      'professional_clarity',
+  patient_care:           'practical_experience',
+  protocol_adherence:     'role_fit',
+  crisis_management:      'pressure',
+  empathy:                'communication',
+  // Finance
+  analytical_thinking:    'professional_clarity',
+  financial_modeling:     'practical_experience',
+  risk_assessment:        'professional_clarity',
+  regulatory_knowledge:   'role_fit',
+  attention_to_detail:    'professional_clarity',
+  // Government
+  policy_understanding:   'role_fit',
+  stakeholder_management: 'communication',
+  compliance:             'role_fit',
+  public_service_ethos:   'role_fit',
+  // Marketing
+  strategic_thinking:     'professional_clarity',
+  creativity:             'practical_experience',
+  data_analysis:          'professional_clarity',
+  brand_understanding:    'role_fit',
+  campaign_execution:     'practical_experience',
+  // Sales
+  persuasion:             'communication',
+  pipeline_management:    'practical_experience',
+  objection_handling:     'pressure',
+  relationship_building:  'communication',
+  closing_skills:         'practical_experience',
+  // Legal
+  legal_reasoning:        'professional_clarity',
+  research_skills:        'practical_experience',
+  negotiation:            'communication',
+  ethics:                 'role_fit',
+  // Customer Support
+  de_escalation:          'pressure',
+  product_knowledge:      'practical_experience',
+  efficiency:             'practical_experience',
+  patience:               'pressure',
+  // Human Resources
+  people_judgment:        'professional_clarity',
+  conflict_resolution:    'pressure',
+  policy_knowledge:       'role_fit',
+  confidentiality:        'role_fit',
+  talent_assessment:      'professional_clarity',
+  // Operations
+  process_optimization:   'practical_experience',
+  logistics:              'practical_experience',
+  vendor_management:      'communication',
+  cost_control:           'professional_clarity',
+  scalability:            'professional_clarity',
+}
+
+const MIN_LABELS_TO_NAME = 2
+
+const GENERIC_CLOSING: Record<'en' | 'ar', string> = {
+  en: 'Thank you for your time today. Your assessment report will now be prepared with your key strengths, gaps, and improvement points.',
+  ar: 'شكراً لوقتك اليوم. سيُجهَّز تقرير تقييمك الآن متضمّناً أبرز نقاط قوّتك والفجوات ومجالات التحسين.',
+}
+
+/**
+ * Map covered competency keys to DISTINCT friendly labels, in canonical order.
+ * Unmapped keys are dropped (never invented).
+ */
+export function competencyKeysToFriendlyLabels(
+  coveredKeys: string[]
+): ClosingFriendlyLabel[] {
+  const found = new Set<ClosingFriendlyLabel>()
+  for (const key of coveredKeys) {
+    const label = COMPETENCY_FRIENDLY_LABEL_MAP[key]
+    if (label) found.add(label)
+  }
+  return CLOSING_LABEL_ORDER.filter((l) => found.has(l))
+}
+
+function joinEn(parts: string[]): string {
+  if (parts.length === 1) return parts[0]
+  if (parts.length === 2) return `${parts[0]} and ${parts[1]}`
+  return `${parts.slice(0, -1).join(', ')}, and ${parts[parts.length - 1]}`
+}
+
+function joinAr(parts: string[]): string {
+  if (parts.length === 1) return parts[0]
+  return parts.slice(0, -1).join('، ') + ' و' + parts[parts.length - 1]
+}
+
+/**
+ * Build the end-of-session farewell from the covered friendly labels.
+ * Honesty guard: < MIN_LABELS_TO_NAME → GENERIC farewell (no named criteria).
+ * Non-Arabic languages fall back to English wording.
+ */
+export function buildClosingMessage(
+  coveredLabels: ClosingFriendlyLabel[],
+  language: string
+): string {
+  const lang: 'en' | 'ar' = language === 'ar' ? 'ar' : 'en'
+
+  // Distinct + canonical order (defensive; caller usually pre-dedupes).
+  const distinct = CLOSING_LABEL_ORDER.filter((l) => coveredLabels.includes(l))
+
+  if (distinct.length < MIN_LABELS_TO_NAME) {
+    return GENERIC_CLOSING[lang]
+  }
+
+  const phrases = distinct.map((l) => FRIENDLY_LABEL_TEXT[l][lang])
+
+  if (lang === 'ar') {
+    return `شكراً لوقتك اليوم. في هذا التقييم تناولنا ${joinAr(phrases)}. سيُجهَّز تقريرك الآن متضمّناً أبرز نقاط قوّتك والفجوات ومجالات التحسين.`
+  }
+  return `Thank you for your time today. In this assessment, we explored your ${joinEn(phrases)}. Your report will now be prepared with your key strengths, gaps, and improvement points.`
+}

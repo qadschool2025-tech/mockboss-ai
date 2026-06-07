@@ -321,6 +321,15 @@ export async function detectContradictionsSemantic(
     contradictionType: judged.type?.trim() || undefined,
   };
 
+  // TEMP DIAGNOSTIC — remove after contradiction verification. Proves the
+  // SEMANTIC detector (not the heuristic, not the LLM interviewer's own
+  // judgment) is what caught this contradiction. Read in Vercel → Logs.
+  // Logs only: no behavior, Director, prompt, or scoring change.
+  console.log(
+    '[barbaros:contradiction]',
+    `source=semantic confidence=${confidence} type=${contradiction.contradictionType ?? 'unknown'} topic=${contradiction.topic} id=${contradiction.id}`
+  );
+
   return { add: [contradiction] };
 }
 

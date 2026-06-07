@@ -134,4 +134,227 @@ export function buildPrompt(
   // Separate empty layers
   const skippedLayers: string[] = []
   const activeLayers = sorted.filter(layer => {
-    if (layer.content.
+    if (layer.content.trim() === '') {
+      skippedLayers.push(layer.label)
+      return false
+    }
+    return true
+  })
+
+  // Enforce token budget — truncate non-protected layers if over limit
+  const { layers: budgetedLayers, truncated } = enforceBudget(
+    activeLayers,
+    SYSTEM_PROMPT_CHAR_LIMIT
+  )
+
+  // Assemble: layers separated by double newline for LLM readability
+  const systemPrompt = budgetedLayers
+    .map(l => l.content.trim())
+    .join('\n\n')
+
+  // Opening message — injected only on first message of session
+  const openingMessage = isFirstMessage
+    ? buildOpeningMessage(config)
+    : null
+
+  return {
+    systemPrompt,
+    openingMessage,
+    layerCount:    budgetedLayers.length,
+    charCount:     systemPrompt.length,
+    truncated,
+    skippedLayers,
+  }
+}
+
+// ─── Director Layer (Language Layer) ────────────────────────────────────────────
+
+/**
+ * buildDirectorLayer
+ * Translates an already-made DirectorDecision into a mandatory instruction for
+ * the LLM. This is presentation of a decision, not decision-making — the choice
+ * was made by decide-next-move.ts. High weight so it reads as the final, most
+ * salient instruction; protected so it is never truncated.
+ */
+function buildDirectorLayer(decision: DirectorDecision): SystemLayer {
+  // CLOSING WINDOW — FINAL CONSOLIDATING QUESTION (≈120–75s remaining).
+  // Prevents the LLM from opening a new assessment line near the end: it gets
+  // exactly one last question and is forbidden from starting a new topic.
+  if (decision.intent === 'FINAL_QUESTION') {
+    return {
+      label:  'director',
+      weight: 95,
+      content:
+        'INTERVIEW DIRECTOR — FINAL QUESTION (mandatory)\n' +
+        'The interview is in its final stretch.\n' +
+        'Do NOT open a new topic, competency, contradiction, or pressure line.\n' +
+        'Ask ONE last consolidating question, in a single concise sentence, that lets the candidate add the single most important thing still missing. Then stop.',
+    }
+  }
+
+  // CLOSING WINDOW — INVITE CANDIDATE QUESTIONS / PREPARE TO CLOSE
+  // (≤75s remaining, or already in the closing phase).
+  // No new evaluation question at all — wind the interview down.
+  if (decision.intent === 'INVITE_QUESTIONS') {
+    return {
+      label:  'director',
+      weight: 95,
+      content:
+        'INTERVIEW DIRECTOR — PREPARE TO CLOSE (mandatory)\n' +
+        'The interview is nearly out of time.\n' +
+        'Do NOT ask any new evaluation question, and do NOT open a new topic, challenge, contradiction, or follow-up.\n' +
+        'In one concise sentence, invite the candidate to ask any final question (for example: "Before we close, do you have any questions about the role or Organisation?"), then prepare to close.\n' +
+        'Do NOT reveal any verdict, score, or assessment.',
+    }
+  }
+
+  const directives: Record<DirectorIntent, string> = {
+    OPEN_NEW_TOPIC:
+      'Move the interview to a new topic or competency that has not yet been explored. Do not linger on the previous topic.',
+    GO_DEEPER:
+      'Stay on the current topic and probe one level deeper. Ask a sharper follow-up that forces more specificity than the candidate has given so far.',
+    REQUEST_EXAMPLE:
+      'Ask for one concrete, specific example. Reject generalities — require an actual situation, the action taken, and the result.',
+    CHALLENGE:
+      "Push back on the candidate's last answer. Name the weakness, vagueness, or gap directly and require them to defend or sharpen it. Stay professional, never hostile.",
+    RAISE_DIFFICULTY:
+      'The candidate is comfortable. Raise the difficulty: pose a harder, more demanding question within the current topic that tests depth, trade-offs, or edge cases.',
+    RETURN_TO_PREVIOUS:
+      'Return to an earlier point the candidate left unresolved or contradicted. Quote back what they said earlier and ask them to reconcile it. Do not let them avoid it.',
+    CLOSE_TOPIC:
+      'Wrap up the current topic cleanly. Do not open a major new line of questioning.',
+    FINAL_QUESTION:
+      'Ask one last consolidating question. Do not open a new topic. Keep it to a single sentence.',
+    INVITE_QUESTIONS:
+      'Do not ask a new evaluation question. Invite the candidate to ask any final question, then prepare to close. Reveal no verdict or score.',
+  }
+
+  const directive = directives[decision.intent]
+  const target = decision.targetRef ? `\nFocus target: ${decision.targetRef}` : ''
+
+  return {
+    label:   'director',
+    weight:  95,
+    content:
+      'INTERVIEW DIRECTOR — NEXT MOVE (mandatory)\n' +
+      'Execute exactly this move on your next turn. Do not choose a different direction.\n' +
+      `Move: ${decision.intent}\n` +
+      `${directive}${target}`,
+  }
+}
+
+// ─── Opening Message ──────────────────────────────────────────────────────────
+
+/**
+ * buildOpeningMessage
+ * Fills the opening template with candidate-specific data.
+ * Injected as the assistant's first turn — not part of system prompt.
+ */
+function buildOpeningMessage(config: InterviewConfig): string {
+  return BARBAROS_OPENING_TEMPLATE
+    .replace('{candidateName}', config.candidateName)
+    .replace('{jobTitle}',      config.jobTitle)
+    .replace('{institution}',   config.institution)
+}
+
+// ─── Budget Enforcement ───────────────────────────────────────────────────────
+
+/**
+ * enforceBudget
+ *
+ * If total char count exceeds limit:
+ * 1. Protected layers are never touched
+ * 2. Largest non-protected layer is truncated first
+ * 3. Truncation appends '[truncated]' marker for debugging
+ *
+ * This is a last-resort safeguard — in practice the prompt should stay well
+ * under limit. If this fires frequently, session_context or weakness layers
+ * need their own internal truncation.
+ */
+function enforceBudget(
+  layers: SystemLayer[],
+  limit:  number
+): { layers: SystemLayer[]; truncated: boolean } {
+  const total = layers.reduce((sum, l) => sum + l.content.length, 0)
+
+  if (total <= limit) {
+    return { layers, truncated: false }
+  }
+
+  // Log warning — visible in Vercel logs
+  console.warn(
+    `[prompt-builder] System prompt over budget: ${total} chars > ${limit} limit. Truncating.`
+  )
+
+  let remaining = limit
+  const result: SystemLayer[] = []
+  let truncated = false
+
+  // Protected layers first — guaranteed full
+  const protected_  = layers.filter(l => PROTECTED_LAYER_LABELS.has(l.label))
+  const unprotected = layers.filter(l => !PROTECTED_LAYER_LABELS.has(l.label))
+
+  for (const l of protected_) {
+    result.push(l)
+    remaining -= l.content.length
+  }
+
+  // Distribute remaining budget across unprotected layers proportionally
+  const unprotectedTotal = unprotected.reduce((s, l) => s + l.content.length, 0)
+
+  for (const l of unprotected) {
+    if (remaining <= 0) {
+      skippedInTruncation(l.label)
+      truncated = true
+      continue
+    }
+
+    if (l.content.length <= remaining) {
+      result.push(l)
+      remaining -= l.content.length
+    } else {
+      // Truncate this layer
+      const allowedChars = Math.max(remaining - 20, 0)
+      result.push({
+        ...l,
+        content: l.content.slice(0, allowedChars) + '\n[truncated]',
+      })
+      remaining = 0
+      truncated = true
+    }
+  }
+
+  // Restore original weight order after budget pass
+  result.sort((a, b) => a.weight - b.weight)
+
+  return { layers: result, truncated }
+}
+
+function skippedInTruncation(label: string): void {
+  console.warn(`[prompt-builder] Layer "${label}" skipped due to budget overflow.`)
+}
+
+// ─── Debug Helper ─────────────────────────────────────────────────────────────
+
+/**
+ * describePrompt
+ * Returns a human-readable summary of what was built.
+ * Used in development/logging — never injected into LLM.
+ */
+export function describePrompt(built: BuiltPrompt): string {
+  const lines = [
+    `Layers: ${built.layerCount}`,
+    `Chars:  ${built.charCount} / ${SYSTEM_PROMPT_CHAR_LIMIT}`,
+    `Truncated: ${built.truncated}`,
+  ]
+
+  if (built.skippedLayers.length > 0) {
+    lines.push(`Skipped (empty): ${built.skippedLayers.join(', ')}`)
+  }
+
+  if (built.openingMessage) {
+    lines.push(`Opening: "${built.openingMessage.slice(0, 60)}..."`)
+  }
+
+  return lines.join('\n')
+}

@@ -17,6 +17,11 @@ interface Message {
   voiceAnalysis?: VoiceAnalysis
 }
 
+// CLOSING WINDOW
+// The farewell must begin inside the interview time.
+// Last 30 seconds are reserved for the final goodbye before report generation.
+const CLOSING_START_SECONDS = 30
+
 function buildConfig() {
   let raw: any = {}
   if (typeof window !== 'undefined') {
@@ -288,12 +293,27 @@ function InterviewRoom() {
   }, [])
 
   // CLOSING FLOW FIX
-  // Time-up now shows a short generic farewell first, then starts report generation.
+  // The farewell must start inside the interview time, not after 0:00.
+  // Last 30 seconds are reserved for the final goodbye before report generation.
   useEffect(() => {
-    if (timeLeft === 0 && !isEndedRef.current && !isClosingRef.current) {
+    if (
+      timeLeft <= CLOSING_START_SECONDS &&
+      !isEndedRef.current &&
+      !isClosingRef.current &&
+      !isLoading &&
+      !isRecording &&
+      !isTranscribing
+    ) {
       beginClosing(genericClosingMessage(), null)
     }
-  }, [timeLeft, beginClosing, genericClosingMessage])
+  }, [
+    timeLeft,
+    isLoading,
+    isRecording,
+    isTranscribing,
+    beginClosing,
+    genericClosingMessage,
+  ])
 
   const formatTime = (s: number) => {
     const m = Math.floor(s / 60)

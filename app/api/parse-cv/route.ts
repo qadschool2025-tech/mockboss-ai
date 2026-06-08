@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { createHash } from 'crypto'
-import type { ParsedCv } from '@/lib/barbaros/types'
+import type {
+  ParsedCv,
+  ParsedCvRole,
+  ParsedCvEducation,
+  ParsedCvProject,
+} from '@/lib/barbaros/types'
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
 
@@ -61,31 +66,35 @@ export async function POST(req: NextRequest) {
 
     const trimmedText = text.slice(0, 4000)
     const sourceTextHash = createHash('sha256').update(trimmedText).digest('hex')
-    const fallbackSummary = buildFallbackSummary(trimmedText)
 
     if (!trimmedText.trim()) {
+      const parsedCv = buildFallbackParsedCv(trimmedText, file.name, sourceTextHash, '')
       return NextResponse.json({
         text: trimmedText,
-        cvSummary: fallbackSummary,
-        parsedCv: buildFallbackParsedCv(trimmedText, file.name, sourceTextHash, fallbackSummary),
+        cvSummary: parsedCv.summary ?? '',
+        parsedCv,
       })
     }
 
     try {
       const parsedCv = await extractParsedCv(trimmedText, file.name, sourceTextHash)
-
       return NextResponse.json({
         text: trimmedText,
-        cvSummary: parsedCv.summary || fallbackSummary,
+        cvSummary: parsedCv.summary ?? buildFallbackSummary(trimmedText),
         parsedCv,
       })
     } catch (parseErr: any) {
       console.error('parse-cv structured parse failed:', parseErr.message)
-
+      const parsedCv = buildFallbackParsedCv(
+        trimmedText,
+        file.name,
+        sourceTextHash,
+        buildFallbackSummary(trimmedText)
+      )
       return NextResponse.json({
         text: trimmedText,
-        cvSummary: fallbackSummary,
-        parsedCv: buildFallbackParsedCv(trimmedText, file.name, sourceTextHash, fallbackSummary),
+        cvSummary: parsedCv.summary ?? '',
+        parsedCv,
       })
     }
   } catch (err: any) {
@@ -178,16 +187,16 @@ ${text}`,
   const raw = collectTextBlocks(response)
   const parsed = safeJsonParse(raw)
 
-  return {
+  const parsedCv: ParsedCv = {
     candidateName: asString(parsed.candidateName),
     headline: asString(parsed.headline),
     currentTitle: asString(parsed.currentTitle),
     currentCompany: asString(parsed.currentCompany),
     totalYearsExperience: asString(parsed.totalYearsExperience),
-    summary: asString(parsed.summary) || buildFallbackSummary(text),
-    roles: asArray(parsed.roles),
-    education: asArray(parsed.education),
-    projects: asArray(parsed.projects),
+    summary: asString(parsed.summary) ?? buildFallbackSummary(text),
+    roles: asTypedArray<ParsedCvRole>(parsed.roles),
+    education: asTypedArray<ParsedCvEducation>(parsed.education),
+    projects: asTypedArray<ParsedCvProject>(parsed.projects),
     skills: asStringArray(parsed.skills),
     certifications: asStringArray(parsed.certifications),
     languages: asStringArray(parsed.languages),
@@ -197,6 +206,8 @@ ${text}`,
     sourceTextHash,
     parsedAt: Date.now(),
   }
+
+  return parsedCv
 }
 
 function collectTextBlocks(response: any): string {
@@ -245,8 +256,8 @@ function asString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined
 }
 
-function asArray<T = any>(value: unknown): T[] {
-  return Array.isArray(value) ? value : []
+function asTypedArray<T>(value: unknown): T[] {
+  return Array.isArray(value) ? (value as T[]) : []
 }
 
 function asStringArray(value: unknown): string[] {

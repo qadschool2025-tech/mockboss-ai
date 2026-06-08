@@ -337,7 +337,12 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const coveredAreas = normalizeCoveredAreas(rawCoveredAreas)
+   const normalizedCoveredAreas = normalizeCoveredAreas(rawCoveredAreas)
+
+const coveredAreas =
+  normalizedCoveredAreas.length > 0
+    ? normalizedCoveredAreas
+    : [...ESSENTIAL_AXIS_ORDER]
     const assessmentCoverage = buildAssessmentCoverage(
       coveredAreas,
       config.language

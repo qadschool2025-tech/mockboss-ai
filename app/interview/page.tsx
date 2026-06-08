@@ -300,11 +300,14 @@ function InterviewRoom() {
 
         audio.onplay = () => setIsSpeaking(true)
 
-        audio.onended = () => {
-          setIsSpeaking(false)
-          if (audioRef.current === audio) audioRef.current = null
-          done()
-        }
+       audio.onended = () => {
+  setIsSpeaking(false)
+  if (audioRef.current === audio) audioRef.current = null
+
+  // Keep the closing message visible briefly after the farewell audio ends.
+  // This prevents the report screen from appearing too abruptly.
+  setTimeout(done, 2000)
+}
 
         audio.onerror = () => {
           setIsSpeaking(false)

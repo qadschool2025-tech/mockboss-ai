@@ -1,4 +1,3 @@
-
 'use client'
 
 import { useState, useEffect, useRef, useCallback } from 'react'
@@ -19,11 +18,12 @@ interface Message {
 }
 
 // CLOSING WINDOW
-// The farewell must begin inside the interview time.
-// 45s: request closing, but do not cut active speech.
-// 15s: force closing if the system is still waiting.
-const CLOSING_REQUEST_SECONDS = 45
-const CLOSING_FORCE_SECONDS = 15
+// The final assessment question must be asked before the timer reaches zero.
+// After the candidate answers that final question, the room shows the farewell
+// and then moves to report generation. The page must not cut the candidate off.
+const FINAL_QUESTION_WINDOW_SECONDS = 180
+const CLOSING_REQUEST_SECONDS = 90
+const CLOSING_FORCE_SECONDS = 0
 
 function buildConfig() {
   let raw: any = {}
@@ -72,6 +72,12 @@ function scoreLabel(s: number): { text: string; color: string } {
   if (s >= 65) return { text: 'Good',          color: '#86EFAC' }
   if (s >= 50) return { text: 'Fair',          color: '#F59E0B' }
   return            { text: 'Needs clarity', color: '#F87171' }
+}
+
+function isQuestionLike(content: string): boolean {
+  const clean = content.trim()
+  if (!clean) return false
+  return clean.endsWith('?') || clean.endsWith('؟')
 }
 
 // Bilingual micro-copy. Arabic only when the candidate chose Arabic.
@@ -156,6 +162,7 @@ function InterviewRoom() {
   const [showTextInput, setShowTextInput]   = useState(false)
   const [showEndModal, setShowEndModal]     = useState(false)
   const [currentFocus, setCurrentFocus]     = useState<string | null>(null)
+  const [isAwaitingFinalAnswer, setIsAwaitingFinalAnswer] = useState(false)
 
   const chatRef           = useRef<HTMLDivElement>(null)
   const inputRef          = useRef<HTMLTextAreaElement>(null)
@@ -180,6 +187,12 @@ function InterviewRoom() {
   const pendingClosingRef      = useRef(false)
   const pendingClosingMessage  = useRef<string | null>(null)
   const pendingClosingAudio    = useRef<string | null>(null)
+
+  // FINAL ANSWER FLOW
+  // Once Barbaros has asked the final assessment question, the page waits for
+  // the candidate's answer. It does not jump to the report at 0:00.
+  const finalQuestionAskedRef   = useRef(false)
+  const awaitingFinalAnswerRef  = useRef(false)
 
   useEffect(() => { messagesRef.current       = messages       }, [messages])
   useEffect(() => { isLoadingRef.current      = isLoading      }, [isLoading])
@@ -212,9 +225,17 @@ function InterviewRoom() {
   // Engine-based end uses the backend closing message with covered assessment areas.
   const genericClosingMessage = useCallback(() => {
     return CONFIG.language === 'ar'
-      ? 'شكراً لوقتك اليوم. سيُجهَّز تقرير تقييمك الآن متضمّناً أبرز نقاط قوّتك والفجوات ومجالات التحسين.'
-      : 'Thank you for your time today. Your assessment report will now be prepared with your key strengths, gaps, and improvement points.'
+      ? 'شكراً لك. بهذا نكون قد أنهينا مقابلة هذه الباقة. خلال الجلسة غطّينا ملاءمة الدور، اتساق السيرة، ارتباط الخبرة بمتطلبات الوظيفة، التواصل، ومستوى المسؤولية. سيتم تجهيز تقريرك الآن. ولتقييم أعمق عبر محاور أكثر وتفاصيل أوسع، يمكنك اختيار باقة أطول في المرات القادمة.'
+      : 'Thank you. This completes the interview for your current package. Today we covered role fit, CV consistency, job requirement match, communication, and ownership. Your report is being prepared now. For deeper assessment across more areas and more detailed feedback, a longer package can provide broader coverage next time.'
   }, [CONFIG.language])
+
+  const markFinalQuestionAsked = useCallback(() => {
+    if (finalQuestionAskedRef.current) return
+
+    finalQuestionAskedRef.current = true
+    awaitingFinalAnswerRef.current = true
+    setIsAwaitingFinalAnswer(true)
+  }, [])
 
   // CLOSING FLOW FIX
   // Moves from the closing screen to the existing report generation flow.
@@ -301,6 +322,12 @@ function InterviewRoom() {
     }
   }, [finishClosing])
 
+  const closeAfterFinalAnswer = useCallback(() => {
+    awaitingFinalAnswerRef.current = false
+    setIsAwaitingFinalAnswer(false)
+    beginClosing(genericClosingMessage(), null)
+  }, [beginClosing, genericClosingMessage])
+
   // CLOSING FLOW FIX
   // Requests closing. If Barbaros is speaking, wait for audio to finish.
   // If forced, start immediately to avoid reaching 0:00 without farewell.
@@ -341,28 +368,21 @@ function InterviewRoom() {
   }, [])
 
   // CLOSING FLOW FIX
-  // Start farewell inside interview time.
-  // At 45s, request closing without cutting active speech.
-  // At 15s, force closing if not recording/transcribing.
+  // Do not cut off the candidate at 0:00.
+  // If the final assessment question has been asked, wait for the candidate's
+  // answer, then close. If no final answer is pending and the timer reaches zero,
+  // show the farewell and move to the report.
   useEffect(() => {
     if (isEndedRef.current || isClosingRef.current) return
 
     if (
       timeLeft <= CLOSING_FORCE_SECONDS &&
-      !isRecording &&
-      !isTranscribing
-    ) {
-      requestClosing(genericClosingMessage(), null, true)
-      return
-    }
-
-    if (
-      timeLeft <= CLOSING_REQUEST_SECONDS &&
+      !awaitingFinalAnswerRef.current &&
       !isLoading &&
       !isRecording &&
       !isTranscribing
     ) {
-      requestClosing(genericClosingMessage(), null, false)
+      requestClosing(genericClosingMessage(), null, true)
     }
   }, [
     timeLeft,
@@ -582,6 +602,11 @@ function InterviewRoom() {
         setMessages(newMessages)
         setInput('')
 
+        if (awaitingFinalAnswerRef.current) {
+          closeAfterFinalAnswer()
+          return
+        }
+
         await callAdam(newMessages)
       } else {
         resetSilenceTimer()
@@ -637,6 +662,15 @@ function InterviewRoom() {
 
       setMessages(prev => [...prev, newMsg])
 
+      if (
+        !data.isEndOfSession &&
+        !finalQuestionAskedRef.current &&
+        timeLeft <= FINAL_QUESTION_WINDOW_SECONDS &&
+        isQuestionLike(data.content)
+      ) {
+        markFinalQuestionAsked()
+      }
+
       // Assessment focus: shown ONLY when the backend actually provides it.
       if (data.focus) setCurrentFocus(data.focus)
 
@@ -649,12 +683,15 @@ function InterviewRoom() {
         return
       }
 
-      // CLOSING FLOW FIX
-      // If time is already in closing territory after the backend responds,
-      // do not play a normal question audio. Move into closing instead.
-      if (timeLeft <= CLOSING_REQUEST_SECONDS) {
-        requestClosing(genericClosingMessage(), null, timeLeft <= CLOSING_FORCE_SECONDS)
-        return
+      // FINAL ANSWER FLOW
+      // In the final window, keep the last question visible and wait for the
+      // candidate's answer. Do not jump to the report before the answer.
+      if (
+        timeLeft <= CLOSING_REQUEST_SECONDS &&
+        isQuestionLike(data.content) &&
+        !data.isEndOfSession
+      ) {
+        markFinalQuestionAsked()
       }
 
       if (data.audioBase64) playAudio(data.audioBase64)
@@ -683,6 +720,11 @@ function InterviewRoom() {
 
     setMessages(newMessages)
     setInput('')
+
+    if (awaitingFinalAnswerRef.current) {
+      closeAfterFinalAnswer()
+      return
+    }
 
     await callAdam(newMessages)
   }
@@ -778,6 +820,13 @@ function InterviewRoom() {
     stateSub = L.pausedSub
     glow = '#6B7280'
     stateKey = 'paused'
+  } else if (isAwaitingFinalAnswer) {
+    stateLabel = L.ready
+    stateSub = CONFIG.language === 'ar'
+      ? 'أجب عن السؤال الأخير، ثم سيتم تجهيز التقرير.'
+      : 'Answer the final question, then your report will be prepared.'
+    glow = '#3A4252'
+    stateKey = 'ready'
   } else if (isClosing) {
     stateLabel = L.closing
     stateSub = L.closingSub

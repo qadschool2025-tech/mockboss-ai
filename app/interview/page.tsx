@@ -17,6 +17,38 @@ interface Message {
   voiceAnalysis?: VoiceAnalysis
 }
 
+type EssentialAxis =
+  | 'role_fit'
+  | 'cv_consistency'
+  | 'job_requirement_match'
+  | 'domain_expertise'
+  | 'communication_clarity'
+  | 'ownership_level'
+
+const ESSENTIAL_AXIS_ORDER: readonly EssentialAxis[] = [
+  'role_fit',
+  'cv_consistency',
+  'job_requirement_match',
+  'domain_expertise',
+  'communication_clarity',
+  'ownership_level',
+] as const
+
+function normalizeCoveredAreas(value: unknown): EssentialAxis[] {
+  if (!Array.isArray(value)) return []
+
+  const allowed = new Set<EssentialAxis>(ESSENTIAL_AXIS_ORDER)
+  const found = new Set<EssentialAxis>()
+
+  for (const item of value) {
+    if (typeof item === 'string' && allowed.has(item as EssentialAxis)) {
+      found.add(item as EssentialAxis)
+    }
+  }
+
+  return ESSENTIAL_AXIS_ORDER.filter(axis => found.has(axis))
+}
+
 // CLOSING WINDOW
 // The final assessment question must be asked before the timer reaches zero.
 // After the candidate answers that final question, the room shows the farewell
@@ -194,6 +226,11 @@ function InterviewRoom() {
   const finalQuestionAskedRef   = useRef(false)
   const awaitingFinalAnswerRef  = useRef(false)
 
+  // ASSESSMENT COVERAGE HANDOFF
+  // Captured from the backend at end-of-session and passed unchanged to the
+  // report so the farewell and report use the same covered criteria.
+  const coveredAreasRef = useRef<EssentialAxis[]>([])
+
   useEffect(() => { messagesRef.current       = messages       }, [messages])
   useEffect(() => { isLoadingRef.current      = isLoading      }, [isLoading])
   useEffect(() => { isEndedRef.current        = isEnded        }, [isEnded])
@@ -225,8 +262,8 @@ function InterviewRoom() {
   // Engine-based end uses the backend closing message with covered assessment areas.
   const genericClosingMessage = useCallback(() => {
     return CONFIG.language === 'ar'
-      ? 'شكراً لك. بهذا نكون قد أنهينا مقابلة هذه الباقة. خلال الجلسة غطّينا ملاءمة الدور، اتساق السيرة، ارتباط الخبرة بمتطلبات الوظيفة، التواصل، ومستوى المسؤولية. سيتم تجهيز تقريرك الآن. ولتقييم أعمق عبر محاور أكثر وتفاصيل أوسع، يمكنك اختيار باقة أطول في المرات القادمة.'
-      : 'Thank you. This completes the interview for your current package. Today we covered role fit, CV consistency, job requirement match, communication, and ownership. Your report is being prepared now. For deeper assessment across more areas and more detailed feedback, a longer package can provide broader coverage next time.'
+      ? 'شكراً لك. بهذا تنتهي جلستنا. يجري الآن إعداد تقريرك الكامل وسيكون جاهزاً بعد قليل.'
+      : 'Thank you. That brings our session to a close. Your full report is being prepared now and will be ready shortly.'
   }, [CONFIG.language])
 
   const markFinalQuestionAsked = useCallback(() => {
@@ -290,7 +327,7 @@ function InterviewRoom() {
 
     if (closingTimerRef.current) clearTimeout(closingTimerRef.current)
 
-   const fallbackMs = audioBase64 && !isMutedRef.current && audioReadyRef.current ? 15000 : 6000
+    const fallbackMs = audioBase64 && !isMutedRef.current && audioReadyRef.current ? 15000 : 6000
     closingTimerRef.current = setTimeout(done, fallbackMs)
 
     if (audioBase64 && !isMutedRef.current && audioReadyRef.current) {
@@ -300,14 +337,14 @@ function InterviewRoom() {
 
         audio.onplay = () => setIsSpeaking(true)
 
-       audio.onended = () => {
-  setIsSpeaking(false)
-  if (audioRef.current === audio) audioRef.current = null
+        audio.onended = () => {
+          setIsSpeaking(false)
+          if (audioRef.current === audio) audioRef.current = null
 
-  // Keep the closing message visible briefly after the farewell audio ends.
-  // This prevents the report screen from appearing too abruptly.
-  setTimeout(done, 2000)
-}
+          // Keep the closing message visible briefly after the farewell audio ends.
+          // This prevents the report screen from appearing too abruptly.
+          setTimeout(done, 2000)
+        }
 
         audio.onerror = () => {
           setIsSpeaking(false)
@@ -657,6 +694,11 @@ function InterviewRoom() {
 
       if (!data.success) throw new Error(data.error)
 
+      const responseCoveredAreas = normalizeCoveredAreas(data.coveredAreas)
+      if (data.isEndOfSession) {
+        coveredAreasRef.current = responseCoveredAreas
+      }
+
       const newMsg: Message = {
         role: 'assistant',
         content: data.content,
@@ -762,6 +804,7 @@ function InterviewRoom() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           messages: messagesRef.current,
+          coveredAreas: coveredAreasRef.current,
           config: {
             candidateName:   CONFIG.candidateName,
             jobTitle:        CONFIG.jobTitle,
@@ -770,6 +813,7 @@ function InterviewRoom() {
             yearsExperience: CONFIG.yearsExperience,
             language:        CONFIG.language,
             plan:            CONFIG.plan,
+            coveredAreas:    coveredAreasRef.current,
           },
         }),
       })
@@ -787,6 +831,7 @@ function InterviewRoom() {
         yearsExperience: CONFIG.yearsExperience,
         language:        CONFIG.language,
         plan:            CONFIG.plan,
+        coveredAreas:    coveredAreasRef.current,
       }))
 
       clearInterval(stepTimer)

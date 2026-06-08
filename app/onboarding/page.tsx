@@ -2,6 +2,7 @@
 
 import { useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
+import type { ParsedCv } from '@/lib/barbaros/types'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -16,6 +17,9 @@ interface OnboardingData {
   cvMimeType: string
   cvBase64: string
   cvSize: number
+  cvText: string
+  cvSummary: string
+  parsedCv: ParsedCv | null
 }
 
 type RoleStatus = 'idle' | 'checking' | 'valid' | 'invalid'
@@ -263,6 +267,22 @@ const S = {
     flexShrink: 0,
   },
   cvHook: { fontSize: 12.5, color: '#8a8278', lineHeight: 1.55, marginTop: 10, fontStyle: 'italic' as const },
+  cvParsing: {
+    fontSize: 12,
+    color: '#CC785C',
+    marginTop: 8,
+    fontFamily: "'Georgia', serif",
+    display: 'flex',
+    alignItems: 'center',
+    gap: 6,
+  },
+  cvParsed: {
+    fontSize: 12,
+    color: '#5a8a5a',
+    marginTop: 8,
+    fontWeight: 700,
+    fontFamily: "'Georgia', serif",
+  },
   errorText: { fontSize: 12, color: '#C0392B', marginTop: 8, fontFamily: "'Georgia', serif" },
   valueBox: { background: '#1A1A1A', borderRadius: 14, padding: '20px 22px', marginTop: 26 },
   valueTitle: { fontSize: 12.5, fontWeight: 700, color: '#F5F1EB', marginBottom: 12, fontFamily: "'Georgia', serif", lineHeight: 1.5 },
@@ -303,19 +323,20 @@ const S = {
     fontFamily: "'Georgia', serif",
     transition: 'all 0.15s',
   }),
-  btnStart: {
+  btnStart: (disabled: boolean) => ({
     flex: 2,
     padding: '15px',
     border: 'none',
     borderRadius: 11,
-    background: '#CC785C',
-    color: '#fff',
+    background: disabled ? '#E5DDD0' : '#CC785C',
+    color: disabled ? '#aaa' : '#fff',
     fontSize: 15,
     fontWeight: 900,
-    cursor: 'pointer',
+    cursor: disabled ? 'not-allowed' : 'pointer',
     fontFamily: "'Georgia', serif",
     letterSpacing: 0.3,
-  },
+    transition: 'all 0.15s',
+  }),
   hint: { fontSize: 11.5, color: '#a59c8e', marginTop: 6, lineHeight: 1.5 },
   footer: { marginTop: 26, fontSize: 11, color: '#bbb', fontFamily: "'Georgia', serif" },
 }
@@ -345,7 +366,6 @@ function RecommendedBadge() {
   return <span style={S.recommendBadge}>★ Recommended</span>
 }
 
-// Step label: digits rendered in dark for clearer visual hierarchy
 function StepLabel({ text }: { text: string }) {
   return (
     <div style={S.stepLabel}>
@@ -384,9 +404,9 @@ function Step1({
     data.yearsExperience &&
     data.language
 
-  const roleInputStyle = errors.jobTitle ? { ...S.input, borderColor: '#C0392B' } : S.input
+  const roleInputStyle = errors.jobTitle   ? { ...S.input, borderColor: '#C0392B' } : S.input
   const nameInputStyle = errors.candidateName ? { ...S.input, borderColor: '#C0392B' } : S.input
-  const instInputStyle = errors.institution ? { ...S.input, borderColor: '#C0392B' } : S.input
+  const instInputStyle = errors.institution   ? { ...S.input, borderColor: '#C0392B' } : S.input
 
   return (
     <>
@@ -481,7 +501,7 @@ function Step1({
 // ─── Step 2: Interview Intelligence ────────────────────────────────────────────
 
 function Step2({
-  data, onChange, onCvSelect, onCvClear, onBack, onStart, error
+  data, onChange, onCvSelect, onCvClear, onBack, onStart, error, cvParsing
 }: {
   data: OnboardingData
   onChange: (key: keyof OnboardingData, val: string) => void
@@ -490,10 +510,12 @@ function Step2({
   onBack: () => void
   onStart: () => void
   error: string
+  cvParsing: boolean
 }) {
   const inputRef = useRef<HTMLInputElement>(null)
   const hasCv = Boolean(data.cvFileName)
   const ext = data.cvFileName.split('.').pop()?.toUpperCase() || 'CV'
+  const cvReady = !hasCv || (!cvParsing)
 
   return (
     <>
@@ -539,11 +561,21 @@ function Step2({
                   <div style={S.fileSize}>{formatSize(data.cvSize)} · attached</div>
                 </div>
               </div>
-              <button style={S.fileRemove} onClick={onCvClear}>Remove</button>
+              <button style={S.fileRemove} onClick={onCvClear} disabled={cvParsing}>
+                Remove
+              </button>
             </div>
           </div>
         )}
 
+        {cvParsing && (
+          <div style={S.cvParsing}>
+            <span>⟳</span> Analysing CV…
+          </div>
+        )}
+        {!cvParsing && hasCv && data.parsedCv && (
+          <div style={S.cvParsed}>✓ CV analysed</div>
+        )}
         {error && <div style={S.errorText}>{error}</div>}
         <div style={S.cvHook}>
           Candidates who upload a CV receive significantly more personalized interviews and deeper evaluation.
@@ -582,8 +614,14 @@ function Step2({
       </div>
 
       <div style={S.btnRow}>
-        <button style={S.btnBack} onClick={onBack}>← Back</button>
-        <button style={S.btnStart} onClick={onStart}>Start Interview →</button>
+        <button style={S.btnBack} onClick={onBack} disabled={cvParsing}>← Back</button>
+        <button
+          style={S.btnStart(!cvReady)}
+          disabled={!cvReady}
+          onClick={onStart}
+        >
+          {cvParsing ? 'Analysing CV…' : 'Start Interview →'}
+        </button>
       </div>
     </>
   )
@@ -595,6 +633,7 @@ export default function OnboardingPage() {
   const router = useRouter()
   const [step, setStep] = useState(0)
   const [cvError, setCvError] = useState('')
+  const [cvParsing, setCvParsing] = useState(false)
   const [errors, setErrors] = useState<FieldErrors>({})
   const [roleStatus, setRoleStatus] = useState<RoleStatus>('idle')
   const [checking, setChecking] = useState(false)
@@ -611,6 +650,9 @@ export default function OnboardingPage() {
     cvMimeType:      '',
     cvBase64:        '',
     cvSize:          0,
+    cvText:          '',
+    cvSummary:       '',
+    parsedCv:        null,
   })
 
   const update = (key: keyof OnboardingData, val: any) => {
@@ -665,7 +707,7 @@ export default function OnboardingPage() {
     const next: FieldErrors = {}
 
     if (!isReasonableText(data.candidateName, 2, 60)) next.candidateName = 'Please enter your name.'
-    if (!isReasonableText(data.institution, 2, 80)) next.institution = 'Please enter a valid company or institution.'
+    if (!isReasonableText(data.institution, 2, 80))   next.institution = 'Please enter a valid company or institution.'
 
     const role = data.jobTitle.trim()
     if (!roleFormatOk(role)) next.jobTitle = 'Please enter a valid job title.'
@@ -698,17 +740,43 @@ export default function OnboardingPage() {
       setCvError('File is too large. Maximum size is 5 MB.')
       return
     }
+
     const reader = new FileReader()
-    reader.onload = () => {
+    reader.onload = async () => {
       const result = reader.result as string
       const base64 = result.includes(',') ? result.split(',')[1] : result
+
       setData(prev => ({
         ...prev,
         cvFileName: file.name,
         cvMimeType: file.type || (name.endsWith('.pdf') ? 'application/pdf' : 'application/octet-stream'),
         cvBase64:   base64,
         cvSize:     file.size,
+        cvText:     '',
+        cvSummary:  '',
+        parsedCv:   null,
       }))
+
+      // Parse CV in background — failure is non-blocking
+      setCvParsing(true)
+      try {
+        const form = new FormData()
+        form.append('file', file)
+        const res = await fetch('/api/parse-cv', { method: 'POST', body: form })
+        if (res.ok) {
+          const json = await res.json()
+          setData(prev => ({
+            ...prev,
+            cvText:    json.text     ?? '',
+            cvSummary: json.cvSummary ?? '',
+            parsedCv:  json.parsedCv  ?? null,
+          }))
+        }
+      } catch {
+        // parse failure is silent — interview still works without parsedCv
+      } finally {
+        setCvParsing(false)
+      }
     }
     reader.onerror = () => setCvError('Could not read the file. Please try again.')
     reader.readAsDataURL(file)
@@ -716,7 +784,17 @@ export default function OnboardingPage() {
 
   const handleCvClear = () => {
     setCvError('')
-    setData(prev => ({ ...prev, cvFileName: '', cvMimeType: '', cvBase64: '', cvSize: 0 }))
+    setCvParsing(false)
+    setData(prev => ({
+      ...prev,
+      cvFileName: '',
+      cvMimeType: '',
+      cvBase64:   '',
+      cvSize:     0,
+      cvText:     '',
+      cvSummary:  '',
+      parsedCv:   null,
+    }))
   }
 
   const generateSessionId = () =>
@@ -749,6 +827,9 @@ export default function OnboardingPage() {
       cvFileName:      data.cvFileName,
       cvMimeType:      data.cvMimeType,
       cvBase64:        data.cvBase64,
+      cvText:          data.cvText,
+      cvSummary:       data.cvSummary,
+      parsedCv:        data.parsedCv,
       createdAt:       Date.now(),
     }
 
@@ -790,6 +871,7 @@ export default function OnboardingPage() {
             onBack={() => setStep(0)}
             onStart={handleStart}
             error={cvError}
+            cvParsing={cvParsing}
           />
         )}
       </div>

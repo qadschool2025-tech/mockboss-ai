@@ -493,7 +493,7 @@ export default function ReportPage() {
                       textTransform: 'uppercase',
                     }}
                   >
-                    {isAr ? 'المحاور التي غطتها هذه الجلسة' : 'Covered in this session'}
+                {isAr ? 'المحاور التي تغطيها باقة Essential' : 'Covered by your Essential Assessment'}
                   </div>
 
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>

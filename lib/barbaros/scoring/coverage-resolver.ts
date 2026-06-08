@@ -1,47 +1,26 @@
 // lib/barbaros/scoring/coverage-resolver.ts
-// Barbaros V4 — Essential Assessment coverage resolver.
+// Barbaros V4, Essential Assessment coverage resolver.
 //
 // PURPOSE:
-//   Decides which of the 6 Essential Assessment axes were GENUINELY covered in a
-//   session. The result (`coveredAreas`) is the SINGLE SOURCE OF TRUTH shared by:
-//     - the spoken farewell (buildClosingMessage in prompt/personality.ts)
-//     - the report's "Assessment Coverage" section (later wiring)
-//   so the farewell can never diverge from the report.
+// Decides which of the 6 Essential Assessment axes were genuinely covered.
+// This result is the single source of truth for:
+// 1. the closing message
+// 2. the report Assessment Coverage section
 //
-// DESIGN — AXIS ← SIGNAL, NOT AXIS ← COMPETENCY-NAME:
-//   Only 3 of the 6 axes live in competencyCoverage. The other 3 are evaluative
-//   signals (contradictions / CV presence / job-requirement probing), so each
-//   axis reads its OWN correct source rather than a competency key:
+// DESIGN:
+// Coverage is based on real evidence inside the session.
+// It does not rely on phase position alone.
 //
-//     role_fit               ← candidate engaged with the role/motivation opening
-//     cv_consistency         ← a CV exists AND a consistency pass was possible
-//     job_requirement_match  ← job requirements existed AND a sector skill was probed
-//     domain_expertise       ← sector competencies (+ problem_solving) coverage
-//     communication_clarity  ← 'communication' competency coverage
-//     ownership_level        ← 'ownership' competency coverage
-//
-// EVIDENCE, NOT PHASE POSITION:
-//   At end-of-session the phase is forced to 'closing', so "phase >= motivation"
-//   is trivially true and would LIE. We therefore measure real evidence:
-//     - user answer count (from `messages` — ground truth; metrics.totalAnswers
-//       is NOT reliably maintained on the live server path)
-//     - competencyCoverage.coverage / .evidenceCount (maintained per turn)
-//     - presence of a CV / job requirements on the config
-//
-// HONESTY:
-//   This module returns ONLY the axes whose signal actually fired (0..6). It
-//   NEVER invents a covered axis. The "name at least 2 or stay generic" honesty
-//   guard for the farewell lives in buildClosingMessage — NOT here.
-//
-// PURITY:
-//   Pure & deterministic. No state mutation, no Date.now, no I/O, no LLM calls.
-//   Same (state, config, messages) → same output.
+// STAR RULE:
+// STAR is not an EssentialAxis.
+// STAR is an Evidence Quality lens for the report:
+// Situation, Task, Action, Result.
+// It should improve evidence quality scoring later, but it must not create a
+// separate covered area.
 
 import type { InterviewConfig, Message } from '../types'
-import type { SessionState }             from '../state/session-state'
-import { UNIVERSAL_COMPETENCIES }        from '../constants'
-
-// ─── Public taxonomy ──────────────────────────────────────────────────────────
+import type { SessionState } from '../state/session-state'
+import { UNIVERSAL_COMPETENCIES } from '../constants'
 
 export type EssentialAxis =
   | 'role_fit'
@@ -51,7 +30,6 @@ export type EssentialAxis =
   | 'communication_clarity'
   | 'ownership_level'
 
-// Canonical display order — keeps the covered list stable across sessions.
 export const ESSENTIAL_AXIS_ORDER: readonly EssentialAxis[] = [
   'role_fit',
   'cv_consistency',
@@ -61,30 +39,180 @@ export const ESSENTIAL_AXIS_ORDER: readonly EssentialAxis[] = [
   'ownership_level',
 ] as const
 
-// ─── Thresholds (reuse the engine's "missing < 50" convention) ──────────────────
+const COVERAGE_THRESHOLD = 50
+const MIN_ANSWERS_FOR_ROLE_FIT = 1
+const MIN_ANSWERS_FOR_CV_CHECK = 2
+const MIN_SECTOR_EVIDENCE_FOR_DOMAIN = 2
 
-const COVERAGE_THRESHOLD       = 50  // a competency counts as "covered" at >= this
-const MIN_ANSWERS_FOR_ROLE_FIT = 1   // one real answer = the role/motivation was touched
-const MIN_ANSWERS_FOR_CV_CHECK = 2   // contradiction detection needs >= 2 user answers
+const UNIVERSAL_COMPETENCY_SET = new Set<string>(UNIVERSAL_COMPETENCIES)
 
-// ─── Helpers ────────────────────────────────────────────────────────────────────
+const CV_SOURCE_CUES = [
+  'cv',
+  'resume',
+  'your cv',
+  'your resume',
+  'your background',
+  'your timeline',
+  'timeline gap',
+  'career gap',
+  'employment gap',
+  'your previous role',
+  'your current role',
+  'your listed role',
+  'your experience shows',
+  'your background shows',
+  'your cv shows',
+  'your resume shows',
+  'help me understand the level of ownership',
+  'level of ownership',
+  'role mismatch',
+  'gap between',
+  'in your cv',
+  'in your resume',
 
-// hasCv is NOT a typed InterviewConfig field (it is client-only in page.tsx).
-// Derive it type-safely from the declared optional CV fields.
+  'السيرة',
+  'السيرة الذاتية',
+  'سيرتك',
+  'خلفيتك',
+  'خبرتك',
+  'الفجوة',
+  'فجوة',
+  'المسمى',
+  'الدور السابق',
+  'دورك السابق',
+  'مسؤوليتك',
+  'مستوى المسؤولية',
+  'ترخيص',
+  'مرخص',
+  'مرخصة',
+]
+
+const JOB_REQUIREMENT_STOPWORDS = new Set([
+  'and',
+  'or',
+  'the',
+  'a',
+  'an',
+  'to',
+  'for',
+  'of',
+  'in',
+  'on',
+  'with',
+  'by',
+  'from',
+  'as',
+  'at',
+  'is',
+  'are',
+  'be',
+  'will',
+  'must',
+  'should',
+  'required',
+  'requirement',
+  'requirements',
+  'candidate',
+  'role',
+  'job',
+  'work',
+  'team',
+  'skills',
+  'skill',
+  'ability',
+  'experience',
+  'knowledge',
+
+  'و',
+  'أو',
+  'في',
+  'من',
+  'على',
+  'إلى',
+  'عن',
+  'مع',
+  'هذا',
+  'هذه',
+  'ذلك',
+  'تلك',
+  'يجب',
+  'مطلوب',
+  'المطلوب',
+  'متطلبات',
+  'الوظيفة',
+  'الدور',
+  'المرشح',
+  'المرشحة',
+  'خبرة',
+  'مهارة',
+  'مهارات',
+])
+
+export function resolveCoveredAreas(
+  state: SessionState,
+  config: InterviewConfig,
+  messages: Message[]
+): EssentialAxis[] {
+  const userAnswers = countUserAnswers(messages)
+  const transcript = normalizeText(messages.map(m => m.content).join(' '))
+  const assistantTranscript = normalizeText(
+    messages
+      .filter(m => m.role === 'assistant')
+      .map(m => m.content)
+      .join(' ')
+  )
+
+  const hasCv = deriveHasCv(config)
+  const hasJobRequirements = hasUsefulJobRequirements(config)
+  const sectorKeys = sectorCompetencyKeys(state)
+  const domainKeys = [...sectorKeys, 'problem_solving']
+
+  const signals: Record<EssentialAxis, boolean> = {
+    role_fit:
+      userAnswers >= MIN_ANSWERS_FOR_ROLE_FIT,
+
+    cv_consistency:
+      hasCv &&
+      userAnswers >= MIN_ANSWERS_FOR_CV_CHECK &&
+      cvWasActuallyUsed(config, transcript, assistantTranscript),
+
+    job_requirement_match:
+      hasJobRequirements &&
+      jobRequirementsWereActuallyUsed(config, transcript) &&
+      sectorKeys.some(key => evidenceCountOf(state, key) > 0),
+
+    domain_expertise:
+      domainExpertiseWasCovered(state, domainKeys, sectorKeys),
+
+    communication_clarity:
+      coverageOf(state, 'communication') >= COVERAGE_THRESHOLD,
+
+    ownership_level:
+      coverageOf(state, 'ownership') >= COVERAGE_THRESHOLD,
+  }
+
+  return ESSENTIAL_AXIS_ORDER.filter(axis => signals[axis])
+}
+
 function deriveHasCv(config: InterviewConfig): boolean {
-  return Boolean(config.cvText || config.cvSummary || config.parsedCv)
+  return Boolean(
+    config.cvText?.trim() ||
+    config.cvSummary?.trim() ||
+    config.parsedCv
+  )
+}
+
+function hasUsefulJobRequirements(config: InterviewConfig): boolean {
+  return (config.jobRequirements ?? '').trim().length > 0
 }
 
 function countUserAnswers(messages: Message[]): number {
-  return messages.filter(m => m.role === 'user').length
+  return messages.filter(m => m.role === 'user' && m.content.trim()).length
 }
 
-// Sector competencies = every seeded coverage key that is NOT universal.
-// competencyCoverage is seeded at init with UNIVERSAL + SECTOR[sector], so the
-// remainder is exactly the candidate's sector set — no normalizeSector needed.
 function sectorCompetencyKeys(state: SessionState): string[] {
   return Object.keys(state.competencyCoverage).filter(
-    key => !UNIVERSAL_COMPETENCIES.includes(key)
+    key => !UNIVERSAL_COMPETENCY_SET.has(key)
   )
 }
 
@@ -96,49 +224,125 @@ function evidenceCountOf(state: SessionState, key: string): number {
   return state.competencyCoverage[key]?.evidenceCount ?? 0
 }
 
-// ─── Resolver ─────────────────────────────────────────────────────────────────
+function domainExpertiseWasCovered(
+  state: SessionState,
+  domainKeys: string[],
+  sectorKeys: string[]
+): boolean {
+  const strongCoverage = domainKeys.some(
+    key => coverageOf(state, key) >= COVERAGE_THRESHOLD
+  )
 
-/**
- * Resolve the Essential axes genuinely covered this session.
- * Returns the fired axes only, in canonical order (0..6 items).
- */
-export function resolveCoveredAreas(
-  state:    SessionState,
-  config:   InterviewConfig,
-  messages: Message[]
-): EssentialAxis[] {
-  const userAnswers     = countUserAnswers(messages)
-  const hasCv           = deriveHasCv(config)
-  const hasJobReqs      = (config.jobRequirements ?? '').trim().length > 0
-  const sectorKeys      = sectorCompetencyKeys(state)
-  const domainKeys      = [...sectorKeys, 'problem_solving']
+  const sectorEvidenceCount = sectorKeys.filter(
+    key => evidenceCountOf(state, key) > 0
+  ).length
 
-  const signals: Record<EssentialAxis, boolean> = {
-    // The candidate engaged with the opening/role-fit question.
-    role_fit:
-      userAnswers >= MIN_ANSWERS_FOR_ROLE_FIT,
+  return strongCoverage || sectorEvidenceCount >= MIN_SECTOR_EVIDENCE_FOR_DOMAIN
+}
 
-    // A CV exists AND enough answers happened for a consistency pass to run.
-    // (No contradiction found is still a consistency check that ran.)
-    cv_consistency:
-      hasCv && userAnswers >= MIN_ANSWERS_FOR_CV_CHECK,
+function cvWasActuallyUsed(
+  config: InterviewConfig,
+  transcript: string,
+  assistantTranscript: string
+): boolean {
+  const staticCueHit = CV_SOURCE_CUES.some(cue =>
+    transcript.includes(normalizeText(cue))
+  )
 
-    // Job requirements were provided AND at least one sector skill was probed
-    // (evidence tied to the requirements, not generic domain mastery).
-    job_requirement_match:
-      hasJobReqs && sectorKeys.some(key => evidenceCountOf(state, key) > 0),
+  if (staticCueHit) return true
 
-    // Mastery of the field: any sector competency (or problem_solving) reached
-    // the coverage threshold. Independent of job requirements.
-    domain_expertise:
-      domainKeys.some(key => coverageOf(state, key) >= COVERAGE_THRESHOLD),
+  const cvTerms = extractCvEvidenceTerms(config)
+  if (cvTerms.length === 0) return false
 
-    communication_clarity:
-      coverageOf(state, 'communication') >= COVERAGE_THRESHOLD,
+  return cvTerms.some(term =>
+    assistantTranscript.includes(normalizeText(term))
+  )
+}
 
-    ownership_level:
-      coverageOf(state, 'ownership') >= COVERAGE_THRESHOLD,
+function extractCvEvidenceTerms(config: InterviewConfig): string[] {
+  const parsedCv = config.parsedCv
+  const terms: string[] = []
+
+  if (!parsedCv) return terms
+
+  pushIfUseful(terms, parsedCv.candidateName)
+  pushIfUseful(terms, parsedCv.currentTitle)
+  pushIfUseful(terms, parsedCv.currentCompany)
+
+  parsedCv.roles?.slice(0, 5).forEach(role => {
+    pushIfUseful(terms, role.title)
+    pushIfUseful(terms, role.company)
+  })
+
+  parsedCv.skills?.slice(0, 12).forEach(skill => {
+    pushIfUseful(terms, skill)
+  })
+
+  parsedCv.certifications?.slice(0, 6).forEach(certification => {
+    pushIfUseful(terms, certification)
+  })
+
+  return uniqueUsefulTerms(terms)
+}
+
+function jobRequirementsWereActuallyUsed(
+  config: InterviewConfig,
+  transcript: string
+): boolean {
+  const keywords = extractJobRequirementKeywords(config.jobRequirements ?? '')
+  if (keywords.length === 0) return false
+
+  const hits = keywords.filter(keyword =>
+    transcript.includes(normalizeText(keyword))
+  )
+
+  return hits.length > 0
+}
+
+function extractJobRequirementKeywords(text: string): string[] {
+  const normalized = normalizeText(text)
+  const words = normalized.match(/[a-z0-9+#.ء-ي]+/gi) ?? []
+
+  const candidates = words
+    .map(word => word.trim().toLowerCase())
+    .filter(word => word.length >= 4)
+    .filter(word => !JOB_REQUIREMENT_STOPWORDS.has(word))
+
+  return uniqueUsefulTerms(candidates).slice(0, 24)
+}
+
+function pushIfUseful(target: string[], value?: string): void {
+  if (!value) return
+
+  const clean = value.replace(/\s+/g, ' ').trim()
+  if (clean.length < 3) return
+
+  target.push(clean)
+}
+
+function uniqueUsefulTerms(values: string[]): string[] {
+  const seen = new Set<string>()
+  const result: string[] = []
+
+  for (const value of values) {
+    const normalized = normalizeText(value)
+    if (!normalized || normalized.length < 3) continue
+    if (seen.has(normalized)) continue
+
+    seen.add(normalized)
+    result.push(value.trim())
   }
 
-  return ESSENTIAL_AXIS_ORDER.filter(axis => signals[axis])
+  return result
+}
+
+function normalizeText(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[إأآا]/g, 'ا')
+    .replace(/[ى]/g, 'ي')
+    .replace(/[ة]/g, 'ه')
+    .replace(/[^\p{L}\p{N}+#.\s]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
 }

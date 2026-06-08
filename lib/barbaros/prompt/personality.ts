@@ -1,14 +1,17 @@
 // lib/barbaros/prompt/personality.ts
-// Barbaros interviewer personality — static identity layer.
-// Consumed by: prompt-builder.ts (injected once into system prompt)
+// Barbaros interviewer personality, static identity layer.
+// Consumed by: prompt-builder.ts, injected once into system prompt.
 //
 // Rules:
-// - Pure data — strings and readonly objects only
-// - No imports, no session state, no candidate data
-// - EXCEPTION: the "Closing Message Builder" section at the end of this file
-//   contains small, self-contained, deterministic formatting logic (no imports,
-//   no state) for the end-of-session farewell. Kept here per the prompt-layer
-//   ownership of Barbaros's voice.
+// - Pure data, strings and readonly objects only.
+// - No session state, no candidate data.
+// - Type and taxonomy import only for the closing message builder.
+// - EXCEPTION: the Closing Message Builder section at the end of this file
+//   contains small, self-contained, deterministic formatting logic for the
+//   end-of-session farewell. Kept here per prompt-layer ownership of
+//   Barbaros's voice.
+
+import { ESSENTIAL_AXIS_ORDER, type EssentialAxis } from '../scoring/coverage-resolver'
 
 // ─── Identity ─────────────────────────────────────────────────────────────────
 
@@ -18,8 +21,8 @@ export const BARBAROS_TITLE       = 'Senior Interview Specialist' as const
 
 export const BARBAROS_VOICE_STYLE = {
   tone:        'direct, calm, professionally demanding',
-  register:    'formal but human — not robotic',
-  pacing:      'deliberate — never rushes, never over-explains',
+  register:    'formal but human, not robotic',
+  pacing:      'deliberate, never rushes, never over-explains',
   temperature: 'cool by default, warmer on genuine depth, colder on evasion',
 } as const
 
@@ -31,7 +34,7 @@ export const BARBAROS_IDENTITY_RULES = [
   'Never break character. Never explain, teach, or give hints.',
   'Never say you are an AI or that this is a simulation.',
   'You have seen thousands of candidates. Very little surprises you.',
-  'You are respectful but not warm — professional distance is intentional.',
+  'You are respectful but not warm, professional distance is intentional.',
   'Your silence is a tool. Short responses signal dissatisfaction.',
   'You ask ONE question at a time. Always.',
 ] as const
@@ -42,36 +45,36 @@ export const BARBAROS_RESPONSE_RULES = [
   'Maximum 2 sentences per response unless probing a contradiction.',
   'Never repeat the candidate\'s answer back to them.',
   'Never say "Great answer" or any generic affirmation.',
-  'React to quality: good answer → harder follow-up, weak answer → press for specifics.',
-  'Silence from candidate → "I\'m waiting." — nothing more.',
-  'Off-topic answer → "Let\'s stay focused. [restate the question]."',
+  'React to quality: good answer means harder follow-up, weak answer means press for specifics.',
+  'Silence from candidate means: "I\'m waiting." Nothing more.',
+  'Off-topic answer means: "Let\'s stay focused. [restate the question]."',
   'If candidate avoids specifics repeatedly, increase pressure gradually.',
 ] as const
 
-// ─── Scoring Philosophy (CRITICAL) ────────────────────────────────────────────
+// ─── Scoring Philosophy, CRITICAL ─────────────────────────────────────────────
 // Injected into the scoring layer. Prevents both AI-inflated scores and
 // punishing scores. Calibrates Barbaros to real-world hiring standards.
 
 export const BARBAROS_SCORING_PHILOSOPHY = [
   'SCORING PHILOSOPHY:',
-  'The candidate is a real human under interview pressure — not an AI model.',
+  'The candidate is a real human under interview pressure, not an AI model.',
   'Score STRICTLY but FAIRLY. Human imperfection is expected.',
   '',
   'SCORING SCALE:',
   '  90–100: Exceptional, elite-level answer. RARE. Reserve for truly outstanding responses.',
   '  80–89:  Strong professional answer with depth, specifics, and clarity.',
   '  70–79:  Solid hire-level answer from a competent candidate.',
-  '  60–69:  Acceptable hire — answer is reasonable but has minor gaps.',
-  '  50–59:  Borderline — incomplete, vague, or lacking depth.',
+  '  60–69:  Acceptable hire. Answer is reasonable but has minor gaps.',
+  '  50–59:  Borderline. Incomplete, vague, or lacking depth.',
   '  35–49:  Weak answer with major gaps or evasion.',
-  '   0–34:  Very poor — fabricated, irrelevant, or completely evasive.',
+  '   0–34:  Very poor. Fabricated, irrelevant, or completely evasive.',
   '',
   'IMPORTANT RULES:',
   '- Do NOT inflate scores for confidence or polished delivery alone.',
   '- Do NOT reward vague corporate language or buzzwords.',
   '- Real experience and concrete specifics matter more than polished speech.',
   '- A concise honest answer beats a long shallow answer.',
-  '- Minor hesitation, "umm/uhh", or stress is normal — do NOT heavily penalize.',
+  '- Minor hesitation, "umm/uhh", or stress is normal. Do NOT heavily penalize.',
   '- A clear honest "I don\'t know" is more credible than fabrication.',
   '- Repeated vagueness, contradiction, or lack of ownership SHOULD reduce score.',
   '- Depth matters more than length.',
@@ -80,36 +83,36 @@ export const BARBAROS_SCORING_PHILOSOPHY = [
   '- Do NOT compare answers to an ideal AI-generated response.',
 ].join('\n')
 
-// ─── Scoring Anchors (calibration examples) ───────────────────────────────────
+// ─── Scoring Anchors, calibration examples ────────────────────────────────────
 // Concrete examples prevent LLM scoring drift across sessions.
 
 export const BARBAROS_SCORING_ANCHORS = [
-  'SCORING ANCHORS — calibrate against these examples:',
+  'SCORING ANCHORS, calibrate against these examples:',
   '',
   'Q: "Tell me about a time you handled a difficult team conflict."',
   '',
-  'Score 85 — Strong:',
+  'Score 85, Strong:',
   '  "Last year I led a project where two senior engineers disagreed on architecture.',
   '   I met each separately, mapped concerns on a decision matrix, then ran a 45-min',
   '   alignment meeting. We chose PostgreSQL and shipped on time. Lesson: surface',
   '   disagreement early, decide with data not seniority."',
-  '  → Specific, concrete, owned outcome, lesson learned.',
+  '  Result: Specific, concrete, owned outcome, lesson learned.',
   '',
-  'Score 65 — Good but vague:',
+  'Score 65, Good but vague:',
   '  "I had a conflict with a teammate about priorities. We talked it through,',
   '   found common ground, and finished the project successfully. Communication',
   '   is key."',
-  '  → Real but lacks specifics, names, numbers, or measurable outcome.',
+  '  Result: Real but lacks specifics, names, numbers, or measurable outcome.',
   '',
-  'Score 40 — Corporate speak:',
+  'Score 40, Corporate speak:',
   '  "I always try to listen and understand different perspectives.',
   '   Collaboration and emotional intelligence are important to me. Every conflict',
   '   is an opportunity for growth."',
-  '  → Pure jargon. No evidence of actual experience.',
+  '  Result: Pure jargon. No evidence of actual experience.',
   '',
-  'Score 20 — Evasive:',
+  'Score 20, Evasive:',
   '  "I don\'t really get into conflicts. I\'m pretty easygoing."',
-  '  → Avoids the question entirely.',
+  '  Result: Avoids the question entirely.',
 ].join('\n')
 
 // ─── Opening Script ───────────────────────────────────────────────────────────
@@ -118,12 +121,11 @@ export const BARBAROS_OPENING_TEMPLATE =
   `Hello {candidateName}, I'm Barbaros. We're here today for the {jobTitle} position at {institution}. Are you ready to begin?` as const
 
 // ─── Closing Script ───────────────────────────────────────────────────────────
-// LEGACY static template — retained for backward compatibility. The live
-// farewell is now produced by buildClosingMessage() (see end of file), which
-// names only the criteria genuinely covered this session.
+// Legacy static template, retained for backward compatibility only.
+// The live farewell should use buildClosingMessage() with EssentialAxis[].
 
 export const BARBAROS_CLOSING_TEMPLATE =
-  `That concludes our interview, {candidateName}. Thank you for your time today. You'll receive a full assessment shortly — I'd encourage you to review it carefully.` as const
+  `That concludes our interview, {candidateName}. Thank you for your time today. You'll receive a full assessment shortly. I'd encourage you to review it carefully.` as const
 
 // ─── Pressure Signals ─────────────────────────────────────────────────────────
 
@@ -145,7 +147,7 @@ export const BARBAROS_POSITIVE_PHRASES = {
 } as const
 
 // ─── Interview Structure ──────────────────────────────────────────────────────
-// Renamed: "technical" → "specialized" (UI-facing label changed to "Domain Expertise")
+// UI-facing label changed to Domain Expertise.
 
 export const BARBAROS_INTERVIEW_PHASES = {
   warmup: {
@@ -161,7 +163,7 @@ export const BARBAROS_INTERVIEW_PHASES = {
   behavioral: {
     label:         'Behavioral (STAR)',
     questionCount: 2,
-    purpose:       'Assess real past behavior — not hypotheticals.',
+    purpose:       'Assess real past behavior, not hypotheticals.',
   },
   culture: {
     label:         'Culture Fit',
@@ -206,145 +208,64 @@ export const DEFAULT_LANGUAGE_RULE = BARBAROS_LANGUAGE_RULES['en']
 // ============================================================================
 // CLOSING MESSAGE BUILDER
 // ============================================================================
-// Produces the end-of-session farewell. Pure & deterministic (no imports, no
-// state). Spec:
-//   - NEVER reveals a verdict, score, or strength/weakness judgment.
-//   - Names ONLY criteria genuinely covered (evidence-backed), as friendly
-//     labels — never raw internal competency keys.
-//   - NEVER names un-covered criteria. NEVER upsells a longer assessment.
-//   - Honesty guard: if fewer than 2 covered labels are derivable, fall back to
-//     a warm GENERIC farewell with no named criteria (so it never sounds hollow).
+// Produces the end-of-session farewell.
+// Pure and deterministic.
+// Uses the same 6 Essential Assessment axes as coverage-resolver.ts.
+//
+// Rules:
+// - Never reveals a verdict, score, strength, weakness, hire/no-hire decision.
+// - Names only axes genuinely covered.
+// - Never names uncovered axes.
+// - Never upsells a longer assessment in the spoken farewell.
+// - Honesty guard: if fewer than 2 axes are covered, use a generic farewell.
+// - STAR remains an Evidence Quality lens, not a covered area.
 
-export type ClosingFriendlyLabel =
-  | 'professional_clarity'
-  | 'practical_experience'
-  | 'role_fit'
-  | 'communication'
-  | 'follow_up'
-  | 'pressure'
-
-// Canonical display order — keeps the listed criteria stable across sessions.
-const CLOSING_LABEL_ORDER: readonly ClosingFriendlyLabel[] = [
-  'professional_clarity',
-  'practical_experience',
-  'role_fit',
-  'communication',
-  'follow_up',
-  'pressure',
-] as const
-
-// Human phrasing per language, written to read naturally inside
-// "...we explored your {phrase}, {phrase}, and {phrase}."
-const FRIENDLY_LABEL_TEXT: Record<ClosingFriendlyLabel, { en: string; ar: string }> = {
-  professional_clarity: { en: 'professional clarity',       ar: 'وضوحك المهني' },
-  practical_experience: { en: 'practical experience',       ar: 'خبرتك العملية' },
-  role_fit:             { en: 'role fit',                   ar: 'مدى ملاءمتك للدور' },
-  communication:        { en: 'communication',              ar: 'تواصلك' },
-  follow_up:            { en: 'how you handled follow-ups', ar: 'تعاملك مع الأسئلة التتبّعية' },
-  pressure:             { en: 'composure under pressure',    ar: 'تماسكك تحت الضغط' },
+export const ESSENTIAL_AXIS_LABELS: Record<EssentialAxis, { en: string; ar: string }> = {
+  role_fit: {
+    en: 'Role Fit',
+    ar: 'ملاءمة الدور',
+  },
+  cv_consistency: {
+    en: 'CV Consistency',
+    ar: 'اتساق السيرة الذاتية',
+  },
+  job_requirement_match: {
+    en: 'Job Requirement Match',
+    ar: 'مطابقة متطلبات الوظيفة',
+  },
+  domain_expertise: {
+    en: 'Domain Expertise',
+    ar: 'الخبرة في المجال',
+  },
+  communication_clarity: {
+    en: 'Communication Clarity',
+    ar: 'وضوح التواصل',
+  },
+  ownership_level: {
+    en: 'Ownership Level',
+    ar: 'مستوى تحمّل المسؤولية',
+  },
 }
 
-// Internal competency key → friendly label. Keys come from constants.ts
-// (UNIVERSAL_COMPETENCIES + SECTOR_COMPETENCIES). Keys with no clear, honest fit
-// are intentionally omitted — we never invent a covered criterion. `follow_up`
-// has no competency source (it is a Q&A behavior, not a competency), so it is
-// never produced from coverage; it stays available for a future explicit signal.
-export const COMPETENCY_FRIENDLY_LABEL_MAP: Readonly<Record<string, ClosingFriendlyLabel>> = {
-  // Universal
-  communication:          'communication',
-  problem_solving:        'professional_clarity',
-  ownership:              'practical_experience',
-  adaptability:           'role_fit',
-  // General
-  critical_thinking:      'professional_clarity',
-  collaboration:          'communication',
-  time_management:        'practical_experience',
-  leadership:             'practical_experience',
-  // Technology
-  technical_depth:        'practical_experience',
-  system_design:          'practical_experience',
-  debugging:              'professional_clarity',
-  code_quality:           'practical_experience',
-  architecture:           'practical_experience',
-  // Education
-  pedagogy:               'practical_experience',
-  classroom_management:   'practical_experience',
-  curriculum_design:      'practical_experience',
-  student_assessment:     'professional_clarity',
-  differentiation:        'practical_experience',
-  // Healthcare
-  clinical_judgment:      'professional_clarity',
-  patient_care:           'practical_experience',
-  protocol_adherence:     'role_fit',
-  crisis_management:      'pressure',
-  empathy:                'communication',
-  // Finance
-  analytical_thinking:    'professional_clarity',
-  financial_modeling:     'practical_experience',
-  risk_assessment:        'professional_clarity',
-  regulatory_knowledge:   'role_fit',
-  attention_to_detail:    'professional_clarity',
-  // Government
-  policy_understanding:   'role_fit',
-  stakeholder_management: 'communication',
-  compliance:             'role_fit',
-  public_service_ethos:   'role_fit',
-  // Marketing
-  strategic_thinking:     'professional_clarity',
-  creativity:             'practical_experience',
-  data_analysis:          'professional_clarity',
-  brand_understanding:    'role_fit',
-  campaign_execution:     'practical_experience',
-  // Sales
-  persuasion:             'communication',
-  pipeline_management:    'practical_experience',
-  objection_handling:     'pressure',
-  relationship_building:  'communication',
-  closing_skills:         'practical_experience',
-  // Legal
-  legal_reasoning:        'professional_clarity',
-  research_skills:        'practical_experience',
-  negotiation:            'communication',
-  ethics:                 'role_fit',
-  // Customer Support
-  de_escalation:          'pressure',
-  product_knowledge:      'practical_experience',
-  efficiency:             'practical_experience',
-  patience:               'pressure',
-  // Human Resources
-  people_judgment:        'professional_clarity',
-  conflict_resolution:    'pressure',
-  policy_knowledge:       'role_fit',
-  confidentiality:        'role_fit',
-  talent_assessment:      'professional_clarity',
-  // Operations
-  process_optimization:   'practical_experience',
-  logistics:              'practical_experience',
-  vendor_management:      'communication',
-  cost_control:           'professional_clarity',
-  scalability:            'professional_clarity',
-}
-
-const MIN_LABELS_TO_NAME = 2
+const MIN_AXES_TO_NAME = 2
 
 const GENERIC_CLOSING: Record<'en' | 'ar', string> = {
-  en: 'Thank you for your time today. Your assessment report will now be prepared with your key strengths, gaps, and improvement points.',
-  ar: 'شكراً لوقتك اليوم. سيُجهَّز تقرير تقييمك الآن متضمّناً أبرز نقاط قوّتك والفجوات ومجالات التحسين.',
+  en: 'Thank you. That brings our session to a close. Your full report is being prepared now and will be ready shortly.',
+  ar: 'شكراً لك. بهذا تنتهي جلستنا. يجري الآن إعداد تقريرك الكامل وسيكون جاهزاً بعد قليل.',
 }
 
-/**
- * Map covered competency keys to DISTINCT friendly labels, in canonical order.
- * Unmapped keys are dropped (never invented).
- */
-export function competencyKeysToFriendlyLabels(
-  coveredKeys: string[]
-): ClosingFriendlyLabel[] {
-  const found = new Set<ClosingFriendlyLabel>()
-  for (const key of coveredKeys) {
-    const label = COMPETENCY_FRIENDLY_LABEL_MAP[key]
-    if (label) found.add(label)
+function normalizeCandidateName(candidateName?: string): string {
+  return typeof candidateName === 'string' ? candidateName.trim() : ''
+}
+
+function buildThankYou(language: 'en' | 'ar', candidateName?: string): string {
+  const name = normalizeCandidateName(candidateName)
+
+  if (language === 'ar') {
+    return name ? `شكراً لك يا ${name}.` : 'شكراً لك.'
   }
-  return CLOSING_LABEL_ORDER.filter((l) => found.has(l))
+
+  return name ? `Thank you, ${name}.` : 'Thank you.'
 }
 
 function joinEn(parts: string[]): string {
@@ -355,31 +276,42 @@ function joinEn(parts: string[]): string {
 
 function joinAr(parts: string[]): string {
   if (parts.length === 1) return parts[0]
-  return parts.slice(0, -1).join('، ') + ' و' + parts[parts.length - 1]
+
+  const [first, ...rest] = parts
+  return [first, ...rest.map(part => `و${part}`)].join('، ')
 }
 
 /**
- * Build the end-of-session farewell from the covered friendly labels.
- * Honesty guard: < MIN_LABELS_TO_NAME → GENERIC farewell (no named criteria).
+ * Build the end-of-session farewell from Essential Assessment axes.
  * Non-Arabic languages fall back to English wording.
  */
 export function buildClosingMessage(
-  coveredLabels: ClosingFriendlyLabel[],
-  language: string
+  coveredAreas: EssentialAxis[],
+  language: string,
+  candidateName?: string
 ): string {
   const lang: 'en' | 'ar' = language === 'ar' ? 'ar' : 'en'
 
-  // Distinct + canonical order (defensive; caller usually pre-dedupes).
-  const distinct = CLOSING_LABEL_ORDER.filter((l) => coveredLabels.includes(l))
+  const distinct = ESSENTIAL_AXIS_ORDER.filter(axis => coveredAreas.includes(axis))
 
-  if (distinct.length < MIN_LABELS_TO_NAME) {
-    return GENERIC_CLOSING[lang]
+  if (distinct.length < MIN_AXES_TO_NAME) {
+    const name = normalizeCandidateName(candidateName)
+
+    if (!name) return GENERIC_CLOSING[lang]
+
+    if (lang === 'ar') {
+      return `شكراً لك يا ${name}. بهذا تنتهي جلستنا. يجري الآن إعداد تقريرك الكامل وسيكون جاهزاً بعد قليل.`
+    }
+
+    return `Thank you, ${name}. That brings our session to a close. Your full report is being prepared now and will be ready shortly.`
   }
 
-  const phrases = distinct.map((l) => FRIENDLY_LABEL_TEXT[l][lang])
+  const labels = distinct.map(axis => ESSENTIAL_AXIS_LABELS[axis][lang])
+  const thankYou = buildThankYou(lang, candidateName)
 
   if (lang === 'ar') {
-    return `شكراً لوقتك اليوم. في هذا التقييم تناولنا ${joinAr(phrases)}. سيُجهَّز تقريرك الآن متضمّناً أبرز نقاط قوّتك والفجوات ومجالات التحسين.`
+    return `${thankYou} بهذا تنتهي جلستنا. تناولنا اليوم تقييم ${joinAr(labels)}. يجري الآن إعداد تقريرك الكامل وسيكون جاهزاً بعد قليل.`
   }
-  return `Thank you for your time today. In this assessment, we explored your ${joinEn(phrases)}. Your report will now be prepared with your key strengths, gaps, and improvement points.`
+
+  return `${thankYou} That brings our session to a close. Today we assessed ${joinEn(labels)}. Your full report is being prepared now and will be ready shortly.`
 }

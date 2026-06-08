@@ -455,7 +455,7 @@ export function buildTimeLayer(
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function formatCvRole(role: NonNullable<InterviewConfig['parsedCv']>['roles'][number]): string {
+function formatCvRole(role: NonNullable<NonNullable<InterviewConfig['parsedCv']>['roles']>[number]): string {
   const title = role.title || 'Role'
   const company = role.company ? ` at ${role.company}` : ''
   const dates = [role.startDate, role.endDate || (role.isCurrent ? 'Present' : '')]

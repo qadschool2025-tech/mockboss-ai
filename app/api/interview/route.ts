@@ -6,9 +6,7 @@
 // Fix #2 — score field normalized: technical_depth → domain_expertise
 // Fix #5 — Content-Type: application/json; charset=utf-8 (Arabic correctness)
 // Fix #6 — stripScoreTag also removes an UNCLOSED/dangling <score> block.
-//          A truncated model response can emit "<score>{...}" with no closing
-//          tag; the old regex (closed-only) left it in cleanContent, so the raw
-//          JSON leaked onto the candidate's screen. Now stripped to end-of-text.
+// Fix #coverage — pass coveredAreas from engine to client/report handoff.
 
 import { NextRequest, NextResponse } from 'next/server'
 import {
@@ -38,15 +36,15 @@ interface SessionStore {
 
 const sessions = new Map<string, SessionStore>()
 
-// ─── Score Extraction (with legacy field normalization) ───────────────────────
+// ─── Score Extraction, with legacy field normalization ────────────────────────
 
 function extractScore(content: string): Record<string, unknown> | null {
   const match = content.match(/<score>([\s\S]*?)<\/score>/)
   if (!match) return null
+
   try {
     const raw = JSON.parse(match[1].trim()) as Record<string, unknown>
 
-    // Fix #2: normalize legacy field name if model outputs technical_depth
     if ('technical_depth' in raw && !('domain_expertise' in raw)) {
       raw.domain_expertise = raw.technical_depth
       delete raw.technical_depth
@@ -58,10 +56,7 @@ function extractScore(content: string): Record<string, unknown> | null {
   }
 }
 
-// Fix #6: remove score markers in BOTH forms so they never reach the candidate:
-//   1. well-formed <score>...</score> blocks
-//   2. a dangling/unclosed <score>... (truncated response) — strip to end of text
-//   3. any stray closing tag left behind
+// Fix #6: remove score markers in BOTH forms so they never reach the candidate.
 function stripScoreTag(content: string): string {
   return content
     .replace(/<score>[\s\S]*?<\/score>/g, '')
@@ -74,7 +69,9 @@ function stripScoreTag(content: string): string {
 
 function validateConfig(config: unknown): config is InterviewConfig {
   if (!config || typeof config !== 'object') return false
+
   const c = config as Record<string, unknown>
+
   return (
     typeof c.candidateName   === 'string' &&
     typeof c.jobTitle        === 'string' &&
@@ -114,6 +111,7 @@ export async function POST(req: NextRequest) {
     const now = Date.now()
 
     let store = sessions.get(sessionId)
+
     if (!store) {
       store = {
         state:            createInitialSessionState(sessionId, now),
@@ -122,6 +120,7 @@ export async function POST(req: NextRequest) {
         previousSnapshot: null,
         sessionStartTime: now,
       }
+
       sessions.set(sessionId, store)
     }
 
@@ -151,7 +150,6 @@ export async function POST(req: NextRequest) {
       sessions.delete(sessionId)
     }
 
-    // Fix #5: explicit charset=utf-8 ensures Arabic characters serialize correctly
     return new NextResponse(
       JSON.stringify({
         success:        true,
@@ -160,6 +158,7 @@ export async function POST(req: NextRequest) {
         score,
         isEndOfSession: output.isEndOfSession,
         phaseChanged:   output.phaseChanged,
+        coveredAreas:   output.coveredAreas,
         _debug: process.env.NODE_ENV === 'development' ? {
           promptCharCount: output.promptCharCount,
           truncated:       output.truncated,
@@ -177,6 +176,7 @@ export async function POST(req: NextRequest) {
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error'
     console.error('[route] Engine error:', message)
+
     return NextResponse.json(
       { success: false, error: message },
       { status: 500 }

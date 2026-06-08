@@ -290,7 +290,7 @@ function InterviewRoom() {
 
     if (closingTimerRef.current) clearTimeout(closingTimerRef.current)
 
-    const fallbackMs = audioBase64 && !isMutedRef.current && audioReadyRef.current ? 12000 : 6000
+   const fallbackMs = audioBase64 && !isMutedRef.current && audioReadyRef.current ? 15000 : 6000
     closingTimerRef.current = setTimeout(done, fallbackMs)
 
     if (audioBase64 && !isMutedRef.current && audioReadyRef.current) {

@@ -57,6 +57,11 @@
 //   scoring INPUT all see the augmented set. NOTE: scoring LOGIC is untouched —
 //   buildRawScoreInput simply receives a more complete contradiction array.
 //
+// SCORE-TAG STRIP (Fix #6):
+//   stripScoreTag now also removes an UNCLOSED/dangling <score> block (a
+//   truncated model response can emit "<score>{...}" with no closing tag). The
+//   old closed-only regex left it in, so the raw JSON could be spoken by TTS.
+//
 // END-OF-SESSION HARDENING:
 //   buildSessionSnapshot → toScoreSnapshot dereferences
 //   scoreBreakdown.dimensions.engagement, but this end path passes an EMPTY
@@ -160,8 +165,15 @@ const NEUTRAL_CANDIDATE_PROFILE = {
 
 // ─── Score Tag Helper ─────────────────────────────────────────────────────────
 
+// Fix #6: remove score markers in BOTH forms so they never reach TTS or the
+// candidate: (1) well-formed <score>...</score>, (2) a dangling/unclosed
+// <score>... from a truncated response (strip to end), (3) any stray closing tag.
 function stripScoreTag(content: string): string {
-  return content.replace(/<score>[\s\S]*?<\/score>/g, '').trim()
+  return content
+    .replace(/<score>[\s\S]*?<\/score>/g, '')
+    .replace(/<score>[\s\S]*$/g, '')
+    .replace(/<\/score>/g, '')
+    .trim()
 }
 
 // ─── Main Engine Function ─────────────────────────────────────────────────────
@@ -185,7 +197,7 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
 
   // ── 1. Session end check ────────────────────────────────────────────────────
 
- if (elapsedSeconds >= totalSeconds || isSessionComplete({ ...state, config })) {
+  if (elapsedSeconds >= totalSeconds || isSessionComplete({ ...state, config })) {
     return buildEndOfSessionOutput(input, elapsedMinutes, totalMinutes, now)
   }
 

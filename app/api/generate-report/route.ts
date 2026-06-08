@@ -1,7 +1,7 @@
 // app/api/generate-report/route.ts
-// Barbaros — AI-powered interview report generator.
-// Takes the full transcript + config + coveredAreas, then asks Claude to produce
-// a structured, candidate-specific hiring evaluation as strict JSON.
+// Barbaros, AI-powered interview report generator.
+// Takes the full transcript, config, and coveredAreas.
+// Produces a structured JSON report with Assessment Coverage locked to engine output.
 
 import Anthropic from '@anthropic-ai/sdk'
 import { NextRequest, NextResponse } from 'next/server'
@@ -34,12 +34,19 @@ interface ReportConfig {
   plan: string
 }
 
+interface GenerateReportBody {
+  messages: IncomingMessage[]
+  config: ReportConfig
+  coveredAreas?: unknown
+}
+
 interface AssessmentCoverage {
   title: string
   summary: string
   coveredAreaKeys: EssentialAxis[]
   coveredAreas: string[]
   recommendedForDeeperAssessment: string[]
+  upgradeNote: string
 }
 
 // ─── Assessment Coverage ─────────────────────────────────────────────────────
@@ -70,17 +77,34 @@ function reportLang(language: string): 'en' | 'ar' {
 function normalizeCoveredAreas(value: unknown): EssentialAxis[] {
   if (!Array.isArray(value)) return []
 
-  const allowed = new Set<EssentialAxis>(ESSENTIAL_AXIS_ORDER as readonly EssentialAxis[])
+  const allowed = new Set<EssentialAxis>(ESSENTIAL_AXIS_ORDER)
   const received = new Set<EssentialAxis>()
 
   for (const item of value) {
     if (typeof item !== 'string') continue
-    if (allowed.has(item as EssentialAxis)) {
-      received.add(item as EssentialAxis)
+
+    const axis = item as EssentialAxis
+    if (allowed.has(axis)) {
+      received.add(axis)
     }
   }
 
   return ESSENTIAL_AXIS_ORDER.filter(axis => received.has(axis))
+}
+
+function joinEn(parts: string[]): string {
+  if (parts.length === 0) return 'the core readiness areas covered in this session'
+  if (parts.length === 1) return parts[0]
+  if (parts.length === 2) return `${parts[0]} and ${parts[1]}`
+  return `${parts.slice(0, -1).join(', ')}, and ${parts[parts.length - 1]}`
+}
+
+function joinAr(parts: string[]): string {
+  if (parts.length === 0) return 'المحاور الأساسية التي تم تناولها في هذه الجلسة'
+  if (parts.length === 1) return parts[0]
+
+  const [first, ...rest] = parts
+  return [first, ...rest.map(part => `و${part}`)].join('، ')
 }
 
 function buildAssessmentCoverage(
@@ -88,8 +112,12 @@ function buildAssessmentCoverage(
   language: string
 ): AssessmentCoverage {
   const lang = reportLang(language)
-
   const coveredLabels = coveredAreas.map(axis => ESSENTIAL_AXIS_LABELS[axis][lang])
+
+  const upgradeNote =
+    lang === 'ar'
+      ? `ركّز تقييمك الحالي ضمن باقة Essential على المحاور الأساسية الأكثر تأثيراً في الجاهزية المبدئية للمقابلة: ${joinAr(coveredLabels)}. للحصول على تقييم أعمق، تمنحك الباقات الأعلى تغطية أوسع تشمل العمق التقني المتقدم، الحكم القيادي، الضغط القائم على السيناريوهات، التفكير الاستراتيجي، التحليل السلوكي المطوّل، ومحاكاة أدوار متعددة.`
+      : `Your current Essential Assessment focused on the core areas most important for baseline interview readiness: ${joinEn(coveredLabels)}. For a deeper evaluation, higher packages expand the assessment into advanced technical depth, leadership judgment, scenario-based pressure, strategic thinking, long-form behavioral analysis, and multiple role simulations.`
 
   return {
     title: lang === 'ar' ? 'نطاق التقييم' : 'Assessment Coverage',
@@ -100,6 +128,7 @@ function buildAssessmentCoverage(
     coveredAreaKeys: coveredAreas,
     coveredAreas: coveredLabels,
     recommendedForDeeperAssessment: DEEPER_ASSESSMENT_LABELS[lang],
+    upgradeNote,
   }
 }
 
@@ -107,13 +136,16 @@ function buildAssessmentCoverage(
 
 function buildTranscript(messages: IncomingMessage[]): string {
   const clean = messages.filter(
-    (m) => m.content && !m.content.trim().startsWith('[')
+    message => message.content && !message.content.trim().startsWith('[')
   )
 
   return clean
-    .map((m) => {
-      const speaker = m.role === 'assistant' ? 'INTERVIEWER (Barbaros)' : 'CANDIDATE'
-      return `${speaker}: ${m.content.trim()}`
+    .map(message => {
+      const speaker = message.role === 'assistant'
+        ? 'INTERVIEWER (Barbaros)'
+        : 'CANDIDATE'
+
+      return `${speaker}: ${message.content.trim()}`
     })
     .join('\n\n')
 }
@@ -127,12 +159,12 @@ function buildReportPrompt(
   const isArabic = config.language === 'ar'
 
   const languageRule = isArabic
-    ? 'Write ALL human-readable text fields (verdict, why, hiddenWeakness, behavioralPatterns, analysis, weakened, stronger, recommendation) in clear, professional Modern Standard Arabic. Keep JSON keys in English exactly as specified.'
+    ? 'Write ALL human-readable text fields in clear, professional Modern Standard Arabic. Keep JSON keys in English exactly as specified.'
     : 'Write ALL human-readable text fields in clear, professional English. Keep JSON keys in English exactly as specified.'
 
   const coverageRule = isArabic
-    ? `Assessment Coverage is already resolved by the interview engine. Do NOT add, remove, rename, or reinterpret covered areas. Use this exact coverage object:\n${JSON.stringify(assessmentCoverage, null, 2)}`
-    : `Assessment Coverage has already been resolved by the interview engine. Do NOT add, remove, rename, or reinterpret covered areas. Use this exact coverage object:\n${JSON.stringify(assessmentCoverage, null, 2)}`
+    ? `Assessment Coverage تم تحديده مسبقاً من محرك المقابلة. لا تضف محاور، لا تحذف محاور، لا تغيّر الأسماء، ولا تعيد تفسيرها. استخدم هذا الكائن كما هو:\n${JSON.stringify(assessmentCoverage, null, 2)}`
+    : `Assessment Coverage has already been resolved by the interview engine. Do not add, remove, rename, or reinterpret covered areas. Use this exact object:\n${JSON.stringify(assessmentCoverage, null, 2)}`
 
   return `You are Barbaros, an elite AI hiring evaluator who has just finished conducting a real, live job interview. You are now writing a private, serious hiring review.
 
@@ -142,35 +174,65 @@ CANDIDATE CONTEXT:
 - Organization: ${config.institution}
 - Sector: ${config.sector}
 - Experience: ${config.yearsExperience}
+- Package: ${config.plan}
 
 ═══════════════════════════════
 CORE RULES
 ═══════════════════════════════
 - Every observation MUST be based on evidence from the candidate's actual answers.
-- If a sentence could apply to any other candidate, it is INVALID — rewrite it to be specific to THIS interview.
+- If a sentence could apply to any other candidate, it is INVALID. Rewrite it to be specific to THIS interview.
 - Reference real moments and the actual content of the candidate's answers.
-- Do NOT use generic HR filler: "strong candidate", "good communication", "solid understanding", "well-rounded", "demonstrates potential", etc. are BANNED.
-- Be honest and realistic. Do not protect the candidate emotionally. If an answer was weak, explain precisely why.
-- Sound like a senior interviewer making a real hiring decision — NOT like a supportive AI assistant.
+- Do NOT use generic HR filler: "strong candidate", "good communication", "solid understanding", "well-rounded", or "demonstrates potential".
+- Be honest and realistic. If an answer was weak, explain precisely why.
+- Sound like a senior interviewer making a real hiring decision, not like a supportive AI assistant.
+- Do not invent experience, licensing, achievements, or qualifications that the candidate did not prove.
+
+═══════════════════════════════
+HUMAN CALIBRATION
+═══════════════════════════════
+- The candidate is a real human under interview pressure, not an AI model.
+- Do NOT expect perfect, long, polished, textbook answers.
+- Do NOT penalize a candidate just because an answer is short, imperfect, or not fully structured.
+- Minor hesitation, natural stress, simple wording, and partial structure are normal in a live interview.
+- Evaluate whether the answer gives enough real evidence for hiring judgment, not whether it sounds like an ideal AI-generated answer.
+- A concise honest answer with a real example can score higher than a long polished answer with no evidence.
+- STAR structure is useful, but do not require a perfect STAR response every time.
+- Scores should reflect real-world interview performance, not perfection.
+- A human, practical, partially structured answer can still be acceptable or strong if it contains real evidence.
+- Penalize when the answer lacks evidence, avoids the question, contradicts prior claims, exaggerates ownership, or fails to show baseline role readiness.
+- Do not compare the candidate to an ideal AI-generated response.
 
 ═══════════════════════════════
 ASSESSMENT COVERAGE
 ═══════════════════════════════
 ${coverageRule}
 
+The assessmentCoverage object must appear in the final JSON exactly with the same values.
+The upgradeNote is intentional. Keep it professional, not pushy.
+
 ═══════════════════════════════
 SCORING RULES
 ═══════════════════════════════
 - Scores are 0–100 and must feel earned and evidence-based.
-- 90+ is extremely rare. 75–89 = strong. 55–74 = acceptable. 35–54 = weak. Below 35 = poor.
+- 90+ is extremely rare.
+- 75–89 means strong.
+- 55–74 means acceptable.
+- 35–54 means weak.
+- Below 35 means poor.
 - For every competency, the "why" must explain what behavior raised or lowered the score, referencing the actual interview.
+- Strong scoring requires real evidence, not perfect language.
+- Weak scoring requires a real problem in evidence, consistency, ownership, role readiness, or domain understanding.
 
 ═══════════════════════════════
 REPLAY REVIEW RULES
 ═══════════════════════════════
-- Select only the 3–5 MOST important questions (strongest, weakest, or most revealing). Do NOT review every question.
-- For each, never label answers "correct" or "wrong". Use interviewer framing.
-- "stronger" must sound realistic and human — better structure/depth/clarity, NOT a perfect textbook answer.
+- Select only the 3–5 MOST important questions.
+- Choose the questions that reveal strength, weakness, contradiction, role fit, or readiness risk.
+- Do NOT review every question.
+- Never label answers "correct" or "wrong".
+- Use interviewer framing.
+- "stronger" must sound realistic and human, not like a perfect textbook answer.
+- When suggesting a stronger answer, improve structure and evidence without making the candidate sound artificial.
 
 ═══════════════════════════════
 LANGUAGE
@@ -178,9 +240,13 @@ LANGUAGE
 ${languageRule}
 
 ═══════════════════════════════
-OUTPUT FORMAT — CRITICAL
+OUTPUT FORMAT
 ═══════════════════════════════
-Respond with ONLY a single valid JSON object. No markdown, no backticks, no preamble, no text before or after.
+Respond with ONLY a single valid JSON object.
+No markdown.
+No backticks.
+No preamble.
+No text before or after.
 
 The JSON must match this exact shape:
 
@@ -188,16 +254,16 @@ The JSON must match this exact shape:
   "finalScore": <number 0-100>,
   "readinessLevel": "<one of: Strong Hire | Maybe Hire | Risky Candidate | Not Recommended>",
   "hireProbability": <number 0-100>,
-  "verdict": "<2-3 sentence hiring verdict, specific to this candidate, the kind of sentence worth repeating>",
+  "verdict": "<2-3 sentence hiring verdict, specific to this candidate>",
   "barbarosAssessment": "<2-3 sentence first-person assessment in Barbaros's voice>",
   "assessmentCoverage": ${JSON.stringify(assessmentCoverage, null, 2)},
   "competencies": [
-    { "name": "Communication",     "score": <0-100>, "why": "<evidence-based reason>" },
-    { "name": "Confidence",        "score": <0-100>, "why": "<evidence-based reason>" },
-    { "name": "Domain Expertise",  "score": <0-100>, "why": "<evidence-based reason>" },
-    { "name": "Structure",         "score": <0-100>, "why": "<evidence-based reason>" },
-    { "name": "Problem Solving",   "score": <0-100>, "why": "<evidence-based reason>" },
-    { "name": "Clarity",           "score": <0-100>, "why": "<evidence-based reason>" }
+    { "name": "Communication", "score": <0-100>, "why": "<evidence-based reason>" },
+    { "name": "Confidence", "score": <0-100>, "why": "<evidence-based reason>" },
+    { "name": "Domain Expertise", "score": <0-100>, "why": "<evidence-based reason>" },
+    { "name": "Structure", "score": <0-100>, "why": "<evidence-based reason>" },
+    { "name": "Problem Solving", "score": <0-100>, "why": "<evidence-based reason>" },
+    { "name": "Clarity", "score": <0-100>, "why": "<evidence-based reason>" }
   ],
   "hiddenWeakness": "<the single most important recurring weakness, described specifically>",
   "behavioralPatterns": "<2-4 sentences on recurring behavioral patterns observed across the interview>",
@@ -214,7 +280,7 @@ The JSON must match this exact shape:
   "recommendation": "<2-3 sentences on what the candidate should do next>"
 }
 
-Remember: if the report feels reusable or generic, it is wrong. Make it psychologically specific to THIS candidate.`
+Remember: if the report feels reusable or generic, it is wrong. Make it specific to THIS candidate.`
 }
 
 // ─── JSON extraction ─────────────────────────────────────────────────────────
@@ -240,16 +306,13 @@ function extractJson(text: string): Record<string, unknown> | null {
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json()
-    const { messages, config } = body as {
-      messages: IncomingMessage[]
-      config: ReportConfig
-      coveredAreas?: EssentialAxis[]
-    }
+    const body = await req.json() as GenerateReportBody
+
+    const { messages, config } = body
 
     const rawCoveredAreas =
-      (body as { coveredAreas?: unknown }).coveredAreas ??
-      (config as ReportConfig & { coveredAreas?: unknown }).coveredAreas
+      body.coveredAreas ??
+      (config as ReportConfig & { coveredAreas?: unknown })?.coveredAreas
 
     if (!Array.isArray(messages) || messages.length === 0) {
       return NextResponse.json(
@@ -312,10 +375,15 @@ export async function POST(req: NextRequest) {
     }
 
     return new NextResponse(
-      JSON.stringify({ success: true, report: reportWithCoverage }),
+      JSON.stringify({
+        success: true,
+        report: reportWithCoverage,
+      }),
       {
         status: 200,
-        headers: { 'Content-Type': 'application/json; charset=utf-8' },
+        headers: {
+          'Content-Type': 'application/json; charset=utf-8',
+        },
       }
     )
   } catch (err: unknown) {

@@ -355,11 +355,16 @@ export const TIME_LIMITS: Record<Plan, number> = {
 /**
  * Model and generation parameters for Claude calls.
  * Centralized so a single switch can swap models project-wide.
+ *
+ * MAX_TOKENS_STANDARD raised 250 → 768: an Arabic 2–3 sentence answer plus the
+ * appended <score> JSON block could exceed 250 tokens and get cut mid-block,
+ * leaking an unclosed <score> tag. This is a ceiling, not a target — brevity is
+ * still enforced by the prompt; the higher value only prevents truncation.
  */
 export const LLM_CONFIG = {
   MODEL: 'claude-sonnet-4-5',
   MAX_TOKENS_OPENING: 80,
-  MAX_TOKENS_STANDARD: 250,
+  MAX_TOKENS_STANDARD: 768,
   MAX_TOKENS_CLOSING: 120,
 } as const
 

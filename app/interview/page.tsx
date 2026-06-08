@@ -57,6 +57,10 @@ const FINAL_QUESTION_WINDOW_SECONDS = 180
 const CLOSING_REQUEST_SECONDS = 90
 const CLOSING_FORCE_SECONDS = 0
 
+// INTERVIEW CALL RESILIENCE
+// One automatic silent retry before any error surfaces to the candidate.
+const SILENT_RETRY_DELAY_MS = 800
+
 function buildConfig() {
   let raw: any = {}
   if (typeof window !== 'undefined') {
@@ -154,6 +158,11 @@ function t(lang: string) {
 
     retry:           ar ? 'إعادة المحاولة'              : 'Retry',
     newInterview:    ar ? 'مقابلة جديدة'                : 'Start New Interview',
+
+    // INTERVIEW CALL RESILIENCE
+    // Shown only after one silent automatic retry has already failed.
+    connIssueTitle:  ar ? 'تعذّر الوصول إلى المُقيّم'    : 'Could not reach the interviewer',
+    connIssueBody:   ar ? 'حدث انقطاع مؤقت. إجابتك محفوظة. أعد المحاولة للمتابعة.' : 'A temporary connection issue occurred. Your answer is saved. Retry to continue.',
   }
 }
 
@@ -186,6 +195,10 @@ function InterviewRoom() {
   const [genStep, setGenStep]               = useState(0)
   const [genError, setGenError]             = useState<string | null>(null)
   const [mounted, setMounted]               = useState(false)
+
+  // INTERVIEW CALL RESILIENCE
+  // callError surfaces ONLY after the silent retry also fails. It never enters messages.
+  const [callError, setCallError]           = useState<string | null>(null)
 
   // Executive Room additions
   const [isPaused, setIsPaused]             = useState(false)
@@ -230,6 +243,11 @@ function InterviewRoom() {
   // Captured from the backend at end-of-session and passed unchanged to the
   // report so the farewell and report use the same covered criteria.
   const coveredAreasRef = useRef<EssentialAxis[]>([])
+
+  // INTERVIEW CALL RESILIENCE
+  // Holds the exact messages of the last /api/interview attempt so Retry can
+  // re-send them without asking the candidate to re-type or re-record.
+  const lastAttemptedMessagesRef = useRef<Message[] | null>(null)
 
   useEffect(() => { messagesRef.current       = messages       }, [messages])
   useEffect(() => { isLoadingRef.current      = isLoading      }, [isLoading])
@@ -669,7 +687,91 @@ function InterviewRoom() {
     }
   }
 
+  // INTERVIEW CALL RESILIENCE
+  // Single network attempt against /api/interview. Returns parsed data on
+  // success, or throws. No state mutation here — the caller owns the flow.
+  const attemptInterviewCall = async (msgs: Message[]) => {
+    const res = await fetch('/api/interview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sessionId: CONFIG.sessionId,
+        config: CONFIG,
+        messages: msgs,
+        sessionStartTime
+      })
+    })
+
+    const data = await res.json()
+
+    if (!data.success) {
+      throw new Error(typeof data.error === 'string' ? data.error : 'interview_call_failed')
+    }
+
+    return data
+  }
+
+  // INTERVIEW CALL RESILIENCE
+  // Applies a successful backend response to the room. Pure success path.
+  const applyInterviewResponse = (data: any) => {
+    const responseCoveredAreas = normalizeCoveredAreas(data.coveredAreas)
+    if (data.isEndOfSession) {
+      coveredAreasRef.current = responseCoveredAreas
+    }
+
+    const newMsg: Message = {
+      role: 'assistant',
+      content: data.content,
+      score: data.score
+    }
+
+    setMessages(prev => [...prev, newMsg])
+
+    if (
+      !data.isEndOfSession &&
+      !finalQuestionAskedRef.current &&
+      timeLeft <= FINAL_QUESTION_WINDOW_SECONDS &&
+      isQuestionLike(data.content)
+    ) {
+      markFinalQuestionAsked()
+    }
+
+    // Assessment focus: shown ONLY when the backend actually provides it.
+    if (data.focus) setCurrentFocus(data.focus)
+
+    if (data.score) setQuestionCount(prev => prev + 1)
+
+    // CLOSING FLOW FIX
+    // End-of-session response enters the farewell screen first.
+    if (data.isEndOfSession) {
+      requestClosing(data.content, data.audioBase64, false)
+      return
+    }
+
+    // FINAL ANSWER FLOW
+    // In the final window, keep the last question visible and wait for the
+    // candidate's answer. Do not jump to the report before the answer.
+    if (
+      timeLeft <= CLOSING_REQUEST_SECONDS &&
+      isQuestionLike(data.content) &&
+      !data.isEndOfSession
+    ) {
+      markFinalQuestionAsked()
+    }
+
+    if (data.audioBase64) playAudio(data.audioBase64)
+
+    resetSilenceTimer()
+  }
+
+  // INTERVIEW CALL RESILIENCE
+  // One silent automatic retry before any error reaches the candidate.
+  // On total failure: no message is injected, the last user answer stays
+  // visible, the report is NOT triggered, and a small retry panel appears.
   const callAdam = async (msgs: Message[]) => {
+    lastAttemptedMessagesRef.current = msgs
+
+    setCallError(null)
     setIsLoading(true)
     setIsPaused(false)
     isPausedRef.current = false
@@ -679,75 +781,37 @@ function InterviewRoom() {
     if (silenceTimer.current) clearTimeout(silenceTimer.current)
 
     try {
-      const res = await fetch('/api/interview', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sessionId: CONFIG.sessionId,
-          config: CONFIG,
-          messages: msgs,
-          sessionStartTime
-        })
-      })
-
-      const data = await res.json()
-
-      if (!data.success) throw new Error(data.error)
-
-      const responseCoveredAreas = normalizeCoveredAreas(data.coveredAreas)
-      if (data.isEndOfSession) {
-        coveredAreasRef.current = responseCoveredAreas
+      let data
+      try {
+        // First attempt.
+        data = await attemptInterviewCall(msgs)
+      } catch (firstErr) {
+        // Silent automatic retry — the candidate never sees this failure.
+        console.warn('[interview] first attempt failed, retrying silently:', firstErr)
+        await new Promise(resolve => setTimeout(resolve, SILENT_RETRY_DELAY_MS))
+        data = await attemptInterviewCall(msgs)
       }
 
-      const newMsg: Message = {
-        role: 'assistant',
-        content: data.content,
-        score: data.score
-      }
-
-      setMessages(prev => [...prev, newMsg])
-
-      if (
-        !data.isEndOfSession &&
-        !finalQuestionAskedRef.current &&
-        timeLeft <= FINAL_QUESTION_WINDOW_SECONDS &&
-        isQuestionLike(data.content)
-      ) {
-        markFinalQuestionAsked()
-      }
-
-      // Assessment focus: shown ONLY when the backend actually provides it.
-      if (data.focus) setCurrentFocus(data.focus)
-
-      if (data.score) setQuestionCount(prev => prev + 1)
-
-      // CLOSING FLOW FIX
-      // End-of-session response enters the farewell screen first.
-      if (data.isEndOfSession) {
-        requestClosing(data.content, data.audioBase64, false)
-        return
-      }
-
-      // FINAL ANSWER FLOW
-      // In the final window, keep the last question visible and wait for the
-      // candidate's answer. Do not jump to the report before the answer.
-      if (
-        timeLeft <= CLOSING_REQUEST_SECONDS &&
-        isQuestionLike(data.content) &&
-        !data.isEndOfSession
-      ) {
-        markFinalQuestionAsked()
-      }
-
-      if (data.audioBase64) playAudio(data.audioBase64)
-
-      resetSilenceTimer()
-    } catch (err: any) {
-      setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${err.message}` }])
+      applyInterviewResponse(data)
+    } catch (err) {
+      // Both attempts failed. Surface a professional, non-Barbaros panel.
+      // Nothing is added to messages; the last user answer remains intact.
+      console.error('[interview] call failed after silent retry:', err)
+      setCallError(L.connIssueBody)
     } finally {
       setIsLoading(false)
     }
   }
+
+  // INTERVIEW CALL RESILIENCE
+  // Retry re-sends the exact last attempted messages — no re-typing, no re-recording.
+  const retryLastCall = useCallback(() => {
+    const msgs = lastAttemptedMessagesRef.current
+    if (!msgs) return
+    setCallError(null)
+    callAdam(msgs)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const sendMessage = async () => {
     if (!input.trim() || isLoading || isEnded || isClosing) return
@@ -1090,6 +1154,22 @@ function InterviewRoom() {
             {lastQuestion && (
               <div style={{ textAlign: 'center', maxWidth: 470, maxHeight: 170, overflowY: 'auto', fontSize: 17, lineHeight: 1.6, fontWeight: 500, color: '#F0EDE8', padding: '0 8px' }}>
                 {lastQuestion}
+              </div>
+            )}
+
+            {/* INTERVIEW CALL RESILIENCE — retry panel (not a Barbaros message) */}
+            {callError && (
+              <div style={{ maxWidth: 420, width: '100%', textAlign: 'center', padding: '14px 16px', background: 'rgba(239,68,68,0.06)', border: '0.5px solid rgba(239,68,68,0.28)', borderRadius: 14 }}>
+                <div style={{ fontSize: 12, fontWeight: 800, color: '#F87171', marginBottom: 6 }}>
+                  {L.connIssueTitle}
+                </div>
+                <div style={{ fontSize: 11.5, color: 'rgba(240,237,232,0.6)', lineHeight: 1.6, marginBottom: 12 }}>
+                  {callError}
+                </div>
+                <button type="button" onClick={retryLastCall} disabled={isLoading}
+                  style={{ padding: '9px 26px', background: isLoading ? '#1a1a22' : '#CC785C', border: 'none', borderRadius: 10, color: '#fff', fontSize: 13, fontWeight: 800, cursor: isLoading ? 'not-allowed' : 'pointer', fontFamily: 'inherit' }}>
+                  {L.retry}
+                </button>
               </div>
             )}
 

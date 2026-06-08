@@ -116,7 +116,7 @@ function buildAssessmentCoverage(
 
   const upgradeNote =
     lang === 'ar'
-      ? `ركّز تقييمك الحالي ضمن باقة Essential على المحاور الأساسية الأكثر تأثيراً في الجاهزية المبدئية للمقابلة: ${joinAr(coveredLabels)}. للحصول على تقييم أعمق، تمنحك الباقات الأعلى تغطية أوسع تشمل العمق التقني المتقدم، الحكم القيادي، الضغط القائم على السيناريوهات، التفكير الاستراتيجي، التحليل السلوكي المطوّل، ومحاكاة أدوار متعددة.`
+      ? `ركّز تقييمك الحالي ضمن باقة Essential على المحاور الأساسية الأكثر تأثيراً في الجاهزية المبدئية للمقابلة: ${joinAr(coveredLabels)}. للحصول على تقييم أعمق, تمنحك الباقات الأعلى تغطية أوسع تشمل العمق التقني المتقدم، الحكم القيادي، الضغط القائم على السيناريوهات، التفكير الاستراتيجي، التحليل السلوكي المطوّل، ومحاكاة أدوار متعددة.`
       : `Your current Essential Assessment focused on the core areas most important for baseline interview readiness: ${joinEn(coveredLabels)}. For a deeper evaluation, higher packages expand the assessment into advanced technical depth, leadership judgment, scenario-based pressure, strategic thinking, long-form behavioral analysis, and multiple role simulations.`
 
   return {
@@ -186,6 +186,28 @@ CORE RULES
 - Be honest and realistic. If an answer was weak, explain precisely why.
 - Sound like a senior interviewer making a real hiring decision, not like a supportive AI assistant.
 - Do not invent experience, licensing, achievements, or qualifications that the candidate did not prove.
+
+═══════════════════════════════
+EVIDENCE ANCHORING
+═══════════════════════════════
+- Every evaluative field MUST be anchored to specific evidence from THIS interview.
+- This applies to: verdict, barbarosAssessment, each competencies[].why,
+  hiddenWeakness, behavioralPatterns, each replay[].analysis,
+  each replay[].weakened, and recommendation.
+- Acceptable evidence is ONE of:
+  (a) a short quoted fragment from the candidate's actual answer,
+  (b) a clear reference to a specific question that was asked, or
+  (c) a specific behavior observed during the interview
+      (e.g. avoided the question, shifted ownership, contradicted an earlier claim).
+- Do NOT quote in every sentence. Heavy quoting makes the report unreadable.
+  Anchor each evaluative passage to at least one concrete piece of evidence;
+  the surrounding analysis can then be in your own words.
+- If a sentence carries no anchor to this specific interview, it is INVALID.
+  Rewrite it until it could only have been written about THIS candidate.
+- Never fabricate a quote, a question, or a behavior. If the evidence does not
+  exist in the transcript, do not assert the claim.
+- The static product text (assessmentCoverage, upgradeNote) is exempt from this
+  rule. It is intentionally identical for every candidate and must NOT be altered.
 
 ═══════════════════════════════
 HUMAN CALIBRATION

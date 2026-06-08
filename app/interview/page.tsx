@@ -34,6 +34,19 @@ function buildConfig() {
     } catch {}
   }
 
+  const parsedCv =
+    raw.parsedCv && typeof raw.parsedCv === 'object'
+      ? raw.parsedCv
+      : undefined
+
+  const hasCv = Boolean(
+    raw.hasCv ||
+    raw.cvFileName ||
+    raw.cvText ||
+    raw.cvSummary ||
+    parsedCv
+  )
+
   return {
     sessionId:       raw.sessionId       ?? `session_${Date.now()}`,
     candidateName:   raw.candidateName   ?? 'Candidate',
@@ -44,10 +57,12 @@ function buildConfig() {
     language:        raw.language         ?? 'en',
     plan:            raw.plan             ?? 'go',
     jobRequirements: raw.jobRequirements  ?? '',
-    hasCv:           Boolean(raw.hasCv),
+    hasCv,
     cvFileName:      raw.cvFileName       ?? '',
     cvMimeType:      raw.cvMimeType       ?? '',
-    cvBase64:        raw.cvBase64         ?? '',
+    cvText:          typeof raw.cvText === 'string' ? raw.cvText : '',
+    cvSummary:       typeof raw.cvSummary === 'string' ? raw.cvSummary : '',
+    parsedCv,
     difficulty:      'standard',
   }
 }
@@ -1139,4 +1154,3 @@ function InterviewRoom() {
 export default function InterviewPage() {
   return <InterviewRoom />
 }
-

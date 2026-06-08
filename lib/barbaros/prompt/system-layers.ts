@@ -1,15 +1,17 @@
 // lib/barbaros/prompt/system-layers.ts
-// Dynamic system prompt layers — what changes per session/candidate.
+// Dynamic system prompt layers. What changes per session/candidate.
 // Consumed by: prompt-builder.ts
 //
 // FIXES APPLIED:
-// Fix #1 — Time is the ONLY authority. AI forbidden from ending early.
-// Fix #2 — domain_expertise everywhere (replaces technical_depth)
-// Fix #5 — Arabic: complete response required, never truncate
-// Fix #6 — Mixed: Arabic structure, English terminology only
-// Fix #scoring — Human-realistic scoring philosophy with anchors
-// Fix #contract — buildPressureLayer uses real InterviewState fields
-//                 (pressureMode enum + metrics.contradictionCount)
+// Fix #1: Time is the ONLY authority. AI forbidden from ending early.
+// Fix #2: domain_expertise everywhere, replaces technical_depth.
+// Fix #5: Arabic, complete response required, never truncate.
+// Fix #6: Mixed, Arabic structure, English terminology only.
+// Fix #scoring: Human-realistic scoring philosophy with anchors.
+// Fix #contract: buildPressureLayer uses real InterviewState fields
+//                pressureMode enum + metrics.contradictionCount.
+// Fix #cv_source: Adds CV + job requirements as interview source context only.
+//                 Does NOT change Barbaros identity, tone, or pressure style.
 
 import type { InterviewConfig } from '../types'
 import type { SessionState }    from '../state/session-state'
@@ -91,6 +93,126 @@ export function buildSessionContextLayer(config: InterviewConfig): SystemLayer {
   }
 }
 
+// ─── Layer 3b: CV + Job Source Context ────────────────────────────────────────
+
+export function buildCvJobContextLayer(config: InterviewConfig): SystemLayer {
+  const parsedCv = config.parsedCv
+  const hasCvSource =
+    Boolean(config.cvSummary?.trim()) ||
+    Boolean(config.cvText?.trim()) ||
+    Boolean(parsedCv)
+
+  const hasJobRequirements = Boolean(config.jobRequirements?.trim())
+
+  if (!hasCvSource && !hasJobRequirements) {
+    return { label: 'cv_job_context', weight: 3.5, content: '' }
+  }
+
+  const lines: string[] = [
+    'CV + JOB SOURCE CONTEXT:',
+    'Use the CV and job requirements as professional interview sources only.',
+    'Do NOT change Barbaros identity, tone, pressure style, or interview personality.',
+  ]
+
+  if (config.cvSummary?.trim()) {
+    lines.push(`CV SUMMARY:\n${limitText(config.cvSummary, 900)}`)
+  }
+
+  if (parsedCv) {
+    const cvFacts: string[] = []
+
+    if (parsedCv.candidateName) {
+      cvFacts.push(`CV name: ${parsedCv.candidateName}`)
+    }
+
+    if (parsedCv.currentTitle || parsedCv.currentCompany) {
+      cvFacts.push(
+        `Current or most recent role: ${[parsedCv.currentTitle, parsedCv.currentCompany]
+          .filter(Boolean)
+          .join(' at ')}`
+      )
+    }
+
+    if (parsedCv.totalYearsExperience) {
+      cvFacts.push(`CV stated experience: ${parsedCv.totalYearsExperience}`)
+    }
+
+    if (parsedCv.roles && parsedCv.roles.length > 0) {
+      const roleLines = parsedCv.roles
+        .slice(0, 4)
+        .map(role => formatCvRole(role))
+        .filter(Boolean)
+
+      if (roleLines.length > 0) {
+        cvFacts.push(`Recent CV roles:\n${roleLines.map(r => `- ${r}`).join('\n')}`)
+      }
+    }
+
+    if (parsedCv.skills && parsedCv.skills.length > 0) {
+      cvFacts.push(`CV skills: ${parsedCv.skills.slice(0, 18).join(', ')}`)
+    }
+
+    if (parsedCv.certifications && parsedCv.certifications.length > 0) {
+      cvFacts.push(`CV certifications: ${parsedCv.certifications.slice(0, 8).join(', ')}`)
+    }
+
+    if (parsedCv.achievements && parsedCv.achievements.length > 0) {
+      cvFacts.push(`CV achievements:\n${parsedCv.achievements.slice(0, 4).map(a => `- ${a}`).join('\n')}`)
+    }
+
+    if (parsedCv.projects && parsedCv.projects.length > 0) {
+      const projectLines = parsedCv.projects
+        .slice(0, 3)
+        .map(project => {
+          const name = project.name || 'Unnamed project'
+          const role = project.role ? `, role: ${project.role}` : ''
+          const description = project.description ? `, ${project.description}` : ''
+          return `${name}${role}${description}`
+        })
+
+      cvFacts.push(`CV projects:\n${projectLines.map(p => `- ${limitText(p, 220)}`).join('\n')}`)
+    }
+
+    if (cvFacts.length > 0) {
+      lines.push(cvFacts.join('\n'))
+    }
+  }
+
+  if (hasJobRequirements) {
+    lines.push(
+      [
+        'JOB REQUIREMENT LINKAGE:',
+        'Use the job requirements as the standard for fit.',
+        'When asking from the CV, connect the question to ONE relevant role requirement or competency.',
+        'Do not read requirements back mechanically. Convert them into natural interview questions.',
+      ].join('\n')
+    )
+  }
+
+  lines.push(
+    [
+      'SOURCE USE RULES:',
+      '- Treat the CV as an interview source, not as a weapon.',
+      '- Ask from the CV naturally, as a professional HR interviewer with the CV open.',
+      '- Do NOT say "parsed CV", "structured data", "JSON", or expose internal fields.',
+      '- Do NOT accuse the candidate unless there is a clear, material conflict.',
+      '- Prefer neutral phrases such as "help me understand", "walk me through", or "I want to clarify the level of ownership".',
+      '- Ask ONE question at a time.',
+      '- Use CV facts to test role fit, job requirement match, ownership, domain depth, communication, problem solving, consistency, and growth potential.',
+      '- If the CV shows execution-level work but the candidate claims ownership, ask about the real level of responsibility without attacking.',
+      '- If the CV background is far from the target role, ask for evidence of transferability.',
+      '- If there is a clear timeline gap, ask about it once in a neutral professional way.',
+      '- If there is no useful CV evidence, continue the normal interview flow unchanged.',
+    ].join('\n')
+  )
+
+  return {
+    label:   'cv_job_context',
+    weight:  3.5,
+    content: lines.join('\n\n'),
+  }
+}
+
 // ─── Layer 4: Language ────────────────────────────────────────────────────────
 // Fix #5 + #6
 
@@ -149,8 +271,8 @@ export function buildStructureLayer(currentPhase: string): SystemLayer {
 }
 
 // ─── Layer 6: Behavioral Pressure ─────────────────────────────────────────────
-// CONTRACT FIX: InterviewState exposes `pressureMode` (enum) and
-// `metrics.contradictionCount` — NOT pressureLevel / silenceRisk.
+// CONTRACT FIX: InterviewState exposes `pressureMode` enum and
+// `metrics.contradictionCount`, not pressureLevel / silenceRisk.
 // Pressure intensity is derived from the pressureMode enum.
 
 export function buildPressureLayer(state: SessionState): SystemLayer {
@@ -246,9 +368,9 @@ export function buildGrowthLayer(
   }
 }
 
-// ─── Layer 9: Scoring (philosophy + anchors + format) ─────────────────────────
-// Fix #2: domain_expertise (not technical_depth)
-// Fix #scoring: human-realistic philosophy with anchored examples
+// ─── Layer 9: Scoring, philosophy + anchors + format ─────────────────────────
+// Fix #2: domain_expertise, not technical_depth.
+// Fix #scoring: human-realistic philosophy with anchored examples.
 
 export function buildScoringLayer(): SystemLayer {
   return {
@@ -268,7 +390,7 @@ export function buildScoringLayer(): SystemLayer {
 }
 
 // ─── Layer 10: Time Control ───────────────────────────────────────────────────
-// Fix #1: AI forbidden from ending early. Integer math — no decimals to LLM.
+// Fix #1: AI forbidden from ending early. Integer math, no decimals to LLM.
 
 export function buildTimeLayer(
   elapsedMinutes: number,
@@ -329,4 +451,29 @@ export function buildTimeLayer(
     weight:  10,
     content,
   }
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function formatCvRole(role: NonNullable<InterviewConfig['parsedCv']>['roles'][number]): string {
+  const title = role.title || 'Role'
+  const company = role.company ? ` at ${role.company}` : ''
+  const dates = [role.startDate, role.endDate || (role.isCurrent ? 'Present' : '')]
+    .filter(Boolean)
+    .join(' to ')
+  const dateText = dates ? ` (${dates})` : ''
+  const responsibilities = role.responsibilities?.length
+    ? ` Responsibilities: ${role.responsibilities.slice(0, 2).join('; ')}.`
+    : ''
+  const achievements = role.achievements?.length
+    ? ` Achievements: ${role.achievements.slice(0, 2).join('; ')}.`
+    : ''
+
+  return limitText(`${title}${company}${dateText}.${responsibilities}${achievements}`, 320)
+}
+
+function limitText(text: string, maxChars: number): string {
+  const clean = text.replace(/\s+/g, ' ').trim()
+  if (clean.length <= maxChars) return clean
+  return `${clean.slice(0, Math.max(0, maxChars - 15)).trim()} [truncated]`
 }

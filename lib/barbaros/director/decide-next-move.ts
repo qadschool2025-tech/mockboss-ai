@@ -112,7 +112,7 @@ export function decideNextMove(ctx: DirectorContext): DirectorDecision {
     return makeDecision(
       'INVITE_QUESTIONS',
       null,
-      ['prepare_closing_window'],
+    ['invite_questions_window'],
       budget,
       null,
       now,

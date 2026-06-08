@@ -2,42 +2,40 @@
 // Barbaros V4 — Director (Tactical Decision Layer).
 //
 // CONTRACT: Decision layer only. No analysis. No execution. No memory. No LLM.
-//   - Sole authority for "what should Barbaros DO next?".
+//   - Sole authority for "what should Barbaros DO next?"
 //   - Reads a DirectorContext slice, returns ONE DirectorDecision.
-//   - Pure & deterministic: same context → same decision. `now` is injected.
-//   - Thresholds and per-plan budgets are centralized here — change once.
+//   - Pure and deterministic: same context -> same decision. `now` is injected.
+//   - Thresholds and per-plan budgets are centralized here. Change once.
 //
-// DISCIPLINE (the anti-interrogator rule):
+// DISCIPLINE, anti-interrogator rule:
 //   Hard intents (CHALLENGE, RAISE_DIFFICULTY, RETURN_TO_PREVIOUS) each cost
 //   budget. When a counter hits zero, the decider softens to a no-cost intent
 //   instead of repeating the hard move. This rations authority across the
 //   session the way a real interviewer picks their battles.
 //
-// CLOSING WINDOW (layer 3 — graceful wind-down):
-//   The final window winds the interview DOWN instead of opening new threads.
-//   The two windows now emit DISTINCT, session-level intents (not CLOSE_TOPIC,
-//   which the LLM reads as "switch topic" → a fresh question at the last second):
-//   - >120s: normal assessment behavior.
-//   - 120–75s: FINAL_QUESTION    — one last consolidating question, no new topic.
-//   - ≤75s (or closing phase): INVITE_QUESTIONS — invite the candidate's
-//     questions / signal the close. No new evaluation question.
-//   - 30–0s: the engine (buildEndOfSessionOutput) + page.tsx own the actual
-//     farewell + report handoff.
+// CLOSING WINDOW, graceful wind-down:
+//   The final window winds the interview down instead of opening new threads.
+//   Desired flow:
+//   - >180s: normal assessment behavior.
+//   - 180-90s: FINAL_QUESTION, one last consolidating question. No new topic.
+//   - <=90s: INVITE_QUESTIONS, no new evaluation question. Prepare to close.
+//   - The actual farewell + report handoff is owned by engine + page.tsx.
+//   - This file does not generate the farewell. It only prevents late new topics.
 //
-// PRIORITY ORDER (first match wins):
-//   1. Closing window (≤75 → INVITE_QUESTIONS, ≤120 → FINAL_QUESTION)
-//   2. Major unresolved contradiction (+budget) → RETURN_TO_PREVIOUS
-//   3. Closing phase                            → INVITE_QUESTIONS
-//   4. Opening phase                            → OPEN_NEW_TOPIC
-//   5. Lesser unresolved contradiction (+budget)→ RETURN_TO_PREVIOUS
-//   6. Strong but shallow                       → RAISE_DIFFICULTY / soften
-//   7. Vague or evasive                         → CHALLENGE / soften
-//   8. No concrete example                      → REQUEST_EXAMPLE
-//   9. Topic sufficiently covered (plan-aware)  → OPEN_NEW_TOPIC / CLOSE_TOPIC
-//  10. Topic saturated + gaps remain            → OPEN_NEW_TOPIC
-//  11. Default                                  → GO_DEEPER
+// PRIORITY ORDER, first match wins:
+//   1. Closing window, <=90 -> INVITE_QUESTIONS, <=180 -> FINAL_QUESTION
+//   2. Major unresolved contradiction with budget -> RETURN_TO_PREVIOUS
+//   3. Closing phase -> INVITE_QUESTIONS
+//   4. Opening phase -> OPEN_NEW_TOPIC
+//   5. Lesser unresolved contradiction with budget -> RETURN_TO_PREVIOUS
+//   6. Strong but shallow -> RAISE_DIFFICULTY or soften
+//   7. Vague or evasive -> CHALLENGE or soften
+//   8. No concrete example -> REQUEST_EXAMPLE
+//   9. Topic sufficiently covered, plan-aware -> OPEN_NEW_TOPIC or CLOSE_TOPIC
+//  10. Topic saturated + gaps remain -> OPEN_NEW_TOPIC
+//  11. Default -> GO_DEEPER
 
-import type { Plan } from '../types';
+import type { Plan } from '../types'
 import type {
   BudgetKey,
   DirectorContext,
@@ -45,17 +43,23 @@ import type {
   DirectorIntent,
   DirectorReason,
   InterventionBudget,
-} from './director-types';
+} from './director-types'
 
 // ─── Thresholds ───────────────────────────────────────────────────────────────
 
 const THRESHOLDS = {
   highConfidence: 70,
   lowDepth: 50,
-  finalQuestionSeconds: 120,
-  prepareClosingSeconds: 75,
+
+  // Ask the last assessment question earlier so the candidate has time to answer.
+  finalQuestionSeconds: 180,
+
+  // After this point, do not open any new evaluation line.
+  // The system should prepare the farewell and report handoff.
+  prepareClosingSeconds: 90,
+
   maxTopicVisits: 3,
-} as const;
+} as const
 
 // ─── Per-plan starting budgets ────────────────────────────────────────────────
 
@@ -64,7 +68,7 @@ const BUDGET_BY_PLAN: Record<Plan, InterventionBudget> = {
   go:     { challenge: 2, interruption: 1, contradictionEscalation: 1 },
   pro:    { challenge: 3, interruption: 2, contradictionEscalation: 2 },
   expert: { challenge: 4, interruption: 2, contradictionEscalation: 2 },
-};
+}
 
 // ─── Per-plan coverage threshold ──────────────────────────────────────────────
 
@@ -73,46 +77,46 @@ const COVERAGE_SUFFICIENT_VISITS_BY_PLAN: Record<Plan, number> = {
   go:     2,
   pro:    3,
   expert: 3,
-};
+}
 
 /**
  * Initialize the intervention budget for a session.
  */
 export function createInterventionBudget(plan: Plan): InterventionBudget {
-  const base = BUDGET_BY_PLAN[plan] ?? BUDGET_BY_PLAN.free;
-  return { ...base };
+  const base = BUDGET_BY_PLAN[plan] ?? BUDGET_BY_PLAN.free
+  return { ...base }
 }
 
 // ─── Main Decision Function ──────────────────────────────────────────────────
 
 /**
- * Sole entry point. Reads the decision-relevant slice of state and returns a
- * single tactical decision. Pure. Never mutates ctx.
+ * Sole entry point.
+ * Reads the decision-relevant slice of state and returns a single tactical
+ * decision. Pure. Never mutates ctx.
  */
 export function decideNextMove(ctx: DirectorContext): DirectorDecision {
-  const { now, budget } = ctx;
+  const { now, budget } = ctx
 
-  // Prefer the engine-supplied absolute seconds (layer 3). Fall back to deriving
-  // from minutes so this stays correct before engine.ts populates the field.
+  // Prefer the engine-supplied absolute seconds.
+  // Fall back to deriving from minutes so this stays correct before engine.ts
+  // populates the field.
   const secondsRemaining =
     typeof ctx.secondsRemaining === 'number'
       ? Math.max(0, ctx.secondsRemaining)
-      : Math.max(0, (ctx.totalMinutes - ctx.elapsedMinutes) * 60);
+      : Math.max(0, (ctx.totalMinutes - ctx.elapsedMinutes) * 60)
 
-  // 1. Closing window (graceful wind-down).
-  // Tighter window first: ≤75s invites the candidate's questions / signals the
-  // close; otherwise ≤120s asks one last consolidating question. Both emit
-  // distinct, session-level intents so the LLM winds DOWN instead of opening a
-  // new topic in the last visible seconds.
+  // 1. Closing window.
+  // Tighter window first. At <=90s, stop new evaluation questions entirely.
+  // At <=180s, ask exactly one final consolidating question.
   if (secondsRemaining <= THRESHOLDS.prepareClosingSeconds) {
     return makeDecision(
       'INVITE_QUESTIONS',
       null,
-      ['invite_questions_window'],
+      ['prepare_closing_window'],
       budget,
       null,
       now,
-    );
+    )
   }
 
   if (secondsRemaining <= THRESHOLDS.finalQuestionSeconds) {
@@ -123,11 +127,11 @@ export function decideNextMove(ctx: DirectorContext): DirectorDecision {
       budget,
       null,
       now,
-    );
+    )
   }
 
   // 2. Major unresolved contradiction.
-  const major = ctx.unaddressedContradictions.find((c) => c.severity === 'major');
+  const major = ctx.unaddressedContradictions.find((c) => c.severity === 'major')
   if (major && budget.contradictionEscalation > 0) {
     return makeDecision(
       'RETURN_TO_PREVIOUS',
@@ -136,7 +140,7 @@ export function decideNextMove(ctx: DirectorContext): DirectorDecision {
       budget,
       'contradictionEscalation',
       now,
-    );
+    )
   }
 
   // 3. Closing phase.
@@ -148,7 +152,7 @@ export function decideNextMove(ctx: DirectorContext): DirectorDecision {
       budget,
       null,
       now,
-    );
+    )
   }
 
   // 4. Opening phase.
@@ -160,11 +164,11 @@ export function decideNextMove(ctx: DirectorContext): DirectorDecision {
       budget,
       null,
       now,
-    );
+    )
   }
 
   // 5. Lesser unresolved contradiction.
-  const lesser = ctx.unaddressedContradictions[0];
+  const lesser = ctx.unaddressedContradictions[0]
   if (lesser && budget.contradictionEscalation > 0) {
     return makeDecision(
       'RETURN_TO_PREVIOUS',
@@ -173,7 +177,7 @@ export function decideNextMove(ctx: DirectorContext): DirectorDecision {
       budget,
       'contradictionEscalation',
       now,
-    );
+    )
   }
 
   // 6. Strong but shallow.
@@ -189,7 +193,7 @@ export function decideNextMove(ctx: DirectorContext): DirectorDecision {
         budget,
         'interruption',
         now,
-      );
+      )
     }
 
     return makeDecision(
@@ -199,14 +203,14 @@ export function decideNextMove(ctx: DirectorContext): DirectorDecision {
       budget,
       null,
       now,
-    );
+    )
   }
 
   // 7. Vague or evasive answer.
   if (ctx.lastAnswerVagueness === 'high') {
     const reasons: DirectorReason[] = ctx.lastAnswerHasExamples
       ? ['vague_answer']
-      : ['evasive_answer'];
+      : ['evasive_answer']
 
     if (budget.challenge > 0) {
       return makeDecision(
@@ -216,7 +220,7 @@ export function decideNextMove(ctx: DirectorContext): DirectorDecision {
         budget,
         'challenge',
         now,
-      );
+      )
     }
 
     return makeDecision(
@@ -226,7 +230,7 @@ export function decideNextMove(ctx: DirectorContext): DirectorDecision {
       budget,
       null,
       now,
-    );
+    )
   }
 
   // 8. No concrete example.
@@ -238,13 +242,13 @@ export function decideNextMove(ctx: DirectorContext): DirectorDecision {
       budget,
       null,
       now,
-    );
+    )
   }
 
   // 9. Current topic sufficiently covered for this plan.
   const coverageVisitsThreshold =
     COVERAGE_SUFFICIENT_VISITS_BY_PLAN[ctx.plan] ??
-    COVERAGE_SUFFICIENT_VISITS_BY_PLAN.free;
+    COVERAGE_SUFFICIENT_VISITS_BY_PLAN.free
 
   if (currentTopicVisits(ctx) >= coverageVisitsThreshold) {
     if (ctx.missingCompetencies.length > 0) {
@@ -255,7 +259,7 @@ export function decideNextMove(ctx: DirectorContext): DirectorDecision {
         budget,
         null,
         now,
-      );
+      )
     }
 
     return makeDecision(
@@ -265,7 +269,7 @@ export function decideNextMove(ctx: DirectorContext): DirectorDecision {
       budget,
       null,
       now,
-    );
+    )
   }
 
   // 10. Current topic saturated and gaps remain.
@@ -277,7 +281,7 @@ export function decideNextMove(ctx: DirectorContext): DirectorDecision {
       budget,
       null,
       now,
-    );
+    )
   }
 
   // 11. Default.
@@ -288,20 +292,20 @@ export function decideNextMove(ctx: DirectorContext): DirectorDecision {
     budget,
     null,
     now,
-  );
+  )
 }
 
 // ─── Inspection helper ────────────────────────────────────────────────────────
 
 export function summarizeDecision(decision: DirectorDecision): string {
-  const target = decision.targetRef ? ` → ${decision.targetRef}` : '';
+  const target = decision.targetRef ? ` -> ${decision.targetRef}` : ''
   const spent = Object.keys(decision.budgetSpent).length
     ? ` [spent: ${Object.entries(decision.budgetSpent)
         .map(([k, v]) => `${k}×${v}`)
         .join(', ')}]`
-    : '';
+    : ''
 
-  return `${decision.intent}${target} — ${decision.reasons.join(', ')}${spent}`;
+  return `${decision.intent}${target} - ${decision.reasons.join(', ')}${spent}`
 }
 
 // ─── Internal Helpers ─────────────────────────────────────────────────────────
@@ -314,12 +318,12 @@ function makeDecision(
   spendKey: BudgetKey | null,
   now: number,
 ): DirectorDecision {
-  let budgetAfter: InterventionBudget = budget;
-  const budgetSpent: Partial<Record<BudgetKey, number>> = {};
+  let budgetAfter: InterventionBudget = budget
+  const budgetSpent: Partial<Record<BudgetKey, number>> = {}
 
   if (spendKey) {
-    budgetAfter = { ...budget, [spendKey]: Math.max(0, budget[spendKey] - 1) };
-    budgetSpent[spendKey] = 1;
+    budgetAfter = { ...budget, [spendKey]: Math.max(0, budget[spendKey] - 1) }
+    budgetSpent[spendKey] = 1
   }
 
   return {
@@ -329,37 +333,37 @@ function makeDecision(
     budgetSpent,
     budgetAfter,
     decidedAt: now,
-  };
+  }
 }
 
 function currentTopic(ctx: DirectorContext): string | null {
-  if (ctx.recentTopics.length === 0) return null;
+  if (ctx.recentTopics.length === 0) return null
 
-  let latest = ctx.recentTopics[0];
+  let latest = ctx.recentTopics[0]
 
   for (const t of ctx.recentTopics) {
-    if (t.lastVisitedAt > latest.lastVisitedAt) latest = t;
+    if (t.lastVisitedAt > latest.lastVisitedAt) latest = t
   }
 
-  return latest.topic;
+  return latest.topic
 }
 
 function currentTopicVisits(ctx: DirectorContext): number {
-  const topic = currentTopic(ctx);
-  if (!topic) return 0;
+  const topic = currentTopic(ctx)
+  if (!topic) return 0
 
-  const record = ctx.recentTopics.find((t) => t.topic === topic);
-  return record ? record.timesVisited : 0;
+  const record = ctx.recentTopics.find((t) => t.topic === topic)
+  return record ? record.timesVisited : 0
 }
 
 function pickMissingCompetency(ctx: DirectorContext): string | null {
-  return ctx.missingCompetencies.length > 0 ? ctx.missingCompetencies[0] : null;
+  return ctx.missingCompetencies.length > 0 ? ctx.missingCompetencies[0] : null
 }
 
 function isCurrentTopicSaturated(ctx: DirectorContext): boolean {
-  const topic = currentTopic(ctx);
-  if (!topic) return false;
+  const topic = currentTopic(ctx)
+  if (!topic) return false
 
-  const record = ctx.recentTopics.find((t) => t.topic === topic);
-  return !!record && record.timesVisited >= THRESHOLDS.maxTopicVisits;
+  const record = ctx.recentTopics.find((t) => t.topic === topic)
+  return !!record && record.timesVisited >= THRESHOLDS.maxTopicVisits
 }

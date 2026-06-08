@@ -1,29 +1,28 @@
 // lib/barbaros/prompt/prompt-builder.ts
 // Assembles the final system prompt from ordered layers.
-// Consumed by: engine.ts (passes result to claude-client.ts)
+// Consumed by: engine.ts, passes result to claude-client.ts.
 //
 // Rules:
-// - Orchestrator only — zero business logic
-// - Skips empty layers (content === '')
-// - Sorts by weight before assembly
-// - Token budget enforced: logs warning if over limit, truncates gracefully
-// - Opening message built separately — injected as first user turn, not system prompt
+// - Orchestrator only. Zero business logic.
+// - Skips empty layers, content === ''.
+// - Sorts by weight before assembly.
+// - Token budget enforced. Logs warning if over limit, truncates gracefully.
+// - Opening message built separately. Injected as first user turn, not system prompt.
 //
 // DIRECTOR INTEGRATION:
 // - Accepts an OPTIONAL `directorDecision`. When present, a protected
 //   "director" directive layer is injected instructing the LLM to EXECUTE the
-//   chosen tactical move rather than pick its own. The intent→instruction
-//   mapping below is the Language Layer (presentation of an already-made
-//   decision — not decision-making). It can later move to system-layers.ts.
+//   chosen tactical move rather than pick its own. The intent to instruction
+//   mapping below is the Language Layer, presentation of an already-made
+//   decision, not decision-making. It can later move to system-layers.ts.
 //
-// CLOSING WINDOW (layer 3 — graceful wind-down):
-// - The Director now signals the close with two dedicated, session-level intents
-//   (not CLOSE_TOPIC, which the LLM reads as "switch topic" → a new question):
-//     FINAL_QUESTION   → one last consolidating question; do NOT open a new topic.
-//     INVITE_QUESTIONS → no new evaluation question; invite the candidate's own
-//                        final question and prepare to close (≤75s / closing phase).
+// CLOSING WINDOW, layer 3, graceful wind-down:
+// - The Director now signals the close with two dedicated session-level intents:
+//     FINAL_QUESTION   -> one last consolidating question. Do NOT open a new topic.
+//     INVITE_QUESTIONS -> no new evaluation question. Invite the candidate's own
+//                         final question and prepare to close.
 //   The actual farewell + report handoff is owned by the engine
-//   (buildEndOfSessionOutput) and page.tsx.
+//   buildEndOfSessionOutput and page.tsx.
 
 import type { InterviewConfig }        from '../types'
 import type { SessionState }           from '../state/session-state'
@@ -34,6 +33,7 @@ import {
   buildIdentityLayer,
   buildResponseStyleLayer,
   buildSessionContextLayer,
+  buildCvJobContextLayer,
   buildLanguageLayer,
   buildStructureLayer,
   buildPressureLayer,
@@ -49,10 +49,10 @@ import { BARBAROS_OPENING_TEMPLATE } from './personality'
 
 // Approximate token budget for system prompt.
 // claude-sonnet context is large, but we want the system prompt lean.
-// 1 token ≈ 4 chars — 3000 tokens ≈ 12000 chars
+// 1 token ≈ 4 chars. 3000 tokens ≈ 12000 chars.
 const SYSTEM_PROMPT_CHAR_LIMIT = 12_000
 
-// Layers that must never be truncated even if over budget
+// Layers that must never be truncated even if over budget.
 const PROTECTED_LAYER_LABELS = new Set([
   'identity',
   'response_style',
@@ -66,21 +66,21 @@ const PROTECTED_LAYER_LABELS = new Set([
 export interface PromptBuilderInput {
   config:         InterviewConfig
   state:          SessionState
-  weaknesses:     TrackedWeakness[]   // active weaknesses from weakness-tracker
-  growthSignals:  TrackedGrowth[]     // confirmed growth from growth-tracker
+  weaknesses:     TrackedWeakness[]
+  growthSignals:  TrackedGrowth[]
   elapsedMinutes: number
   totalMinutes:   number
   isFirstSession: boolean
-  directorDecision?: DirectorDecision // optional — when present, the Director directs the next move
+  directorDecision?: DirectorDecision
 }
 
 export interface BuiltPrompt {
   systemPrompt:   string
-  openingMessage: string | null   // null if not first message
+  openingMessage: string | null
   layerCount:     number
   charCount:      number
   truncated:      boolean
-  skippedLayers:  string[]        // labels of empty/skipped layers (for debugging)
+  skippedLayers:  string[]
 }
 
 // ─── Main Builder ─────────────────────────────────────────────────────────────
@@ -89,7 +89,7 @@ export interface BuiltPrompt {
  * buildPrompt
  *
  * Assembles all layers into a final system prompt.
- * Pure function — no side effects, no LLM calls.
+ * Pure function. No side effects, no LLM calls.
  *
  * @param input - all context needed to build the prompt
  * @param isFirstMessage - true only on the very first message of the session
@@ -109,11 +109,17 @@ export function buildPrompt(
     directorDecision,
   } = input
 
-  // Build all layers
+  // Build all layers.
   const allLayers: SystemLayer[] = [
     buildIdentityLayer(),
     buildResponseStyleLayer(),
     buildSessionContextLayer(config),
+
+    // CV source context only.
+    // This gives Barbaros access to CV facts and job requirements,
+    // without changing his identity, tone, pressure style, voice, or closing flow.
+    buildCvJobContextLayer(config),
+
     buildLanguageLayer(config.language),
     buildStructureLayer(state.phase),
     buildPressureLayer(state),
@@ -123,15 +129,15 @@ export function buildPrompt(
     buildTimeLayer(elapsedMinutes, totalMinutes),
   ]
 
-  // Director directive — only when a decision is supplied (never on first turn).
+  // Director directive. Only when a decision is supplied, never on first turn.
   if (directorDecision) {
     allLayers.push(buildDirectorLayer(directorDecision))
   }
 
-  // Sort by weight (ascending)
+  // Sort by weight, ascending.
   const sorted = [...allLayers].sort((a, b) => a.weight - b.weight)
 
-  // Separate empty layers
+  // Separate empty layers.
   const skippedLayers: string[] = []
   const activeLayers = sorted.filter(layer => {
     if (layer.content.trim() === '') {
@@ -141,18 +147,18 @@ export function buildPrompt(
     return true
   })
 
-  // Enforce token budget — truncate non-protected layers if over limit
+  // Enforce token budget. Truncate non-protected layers if over limit.
   const { layers: budgetedLayers, truncated } = enforceBudget(
     activeLayers,
     SYSTEM_PROMPT_CHAR_LIMIT
   )
 
-  // Assemble: layers separated by double newline for LLM readability
+  // Assemble layers with double newlines for readability.
   const systemPrompt = budgetedLayers
     .map(l => l.content.trim())
     .join('\n\n')
 
-  // Opening message — injected only on first message of session
+  // Opening message. Injected only on first message of session.
   const openingMessage = isFirstMessage
     ? buildOpeningMessage(config)
     : null
@@ -167,19 +173,17 @@ export function buildPrompt(
   }
 }
 
-// ─── Director Layer (Language Layer) ────────────────────────────────────────────
+// ─── Director Layer, Language Layer ───────────────────────────────────────────
 
 /**
  * buildDirectorLayer
  * Translates an already-made DirectorDecision into a mandatory instruction for
- * the LLM. This is presentation of a decision, not decision-making — the choice
+ * the LLM. This is presentation of a decision, not decision-making. The choice
  * was made by decide-next-move.ts. High weight so it reads as the final, most
- * salient instruction; protected so it is never truncated.
+ * salient instruction. Protected so it is never truncated.
  */
 function buildDirectorLayer(decision: DirectorDecision): SystemLayer {
-  // CLOSING WINDOW — FINAL CONSOLIDATING QUESTION (≈120–75s remaining).
-  // Prevents the LLM from opening a new assessment line near the end: it gets
-  // exactly one last question and is forbidden from starting a new topic.
+  // CLOSING WINDOW, FINAL CONSOLIDATING QUESTION.
   if (decision.intent === 'FINAL_QUESTION') {
     return {
       label:  'director',
@@ -192,9 +196,7 @@ function buildDirectorLayer(decision: DirectorDecision): SystemLayer {
     }
   }
 
-  // CLOSING WINDOW — INVITE CANDIDATE QUESTIONS / PREPARE TO CLOSE
-  // (≤75s remaining, or already in the closing phase).
-  // No new evaluation question at all — wind the interview down.
+  // CLOSING WINDOW, INVITE CANDIDATE QUESTIONS / PREPARE TO CLOSE.
   if (decision.intent === 'INVITE_QUESTIONS') {
     return {
       label:  'director',
@@ -214,7 +216,7 @@ function buildDirectorLayer(decision: DirectorDecision): SystemLayer {
     GO_DEEPER:
       'Stay on the current topic and probe one level deeper. Ask a sharper follow-up that forces more specificity than the candidate has given so far.',
     REQUEST_EXAMPLE:
-      'Ask for one concrete, specific example. Reject generalities — require an actual situation, the action taken, and the result.',
+      'Ask for one concrete, specific example. Reject generalities. Require an actual situation, the action taken, and the result.',
     CHALLENGE:
       "Push back on the candidate's last answer. Name the weakness, vagueness, or gap directly and require them to defend or sharpen it. Stay professional, never hostile.",
     RAISE_DIFFICULTY:
@@ -248,7 +250,7 @@ function buildDirectorLayer(decision: DirectorDecision): SystemLayer {
 /**
  * buildOpeningMessage
  * Fills the opening template with candidate-specific data.
- * Injected as the assistant's first turn — not part of system prompt.
+ * Injected as the assistant's first turn, not part of system prompt.
  */
 function buildOpeningMessage(config: InterviewConfig): string {
   return BARBAROS_OPENING_TEMPLATE
@@ -263,11 +265,11 @@ function buildOpeningMessage(config: InterviewConfig): string {
  * enforceBudget
  *
  * If total char count exceeds limit:
- * 1. Protected layers are never touched
- * 2. Largest non-protected layer is truncated first
- * 3. Truncation appends '[truncated]' marker for debugging
+ * 1. Protected layers are never touched.
+ * 2. Largest non-protected layer is truncated first.
+ * 3. Truncation appends [truncated] marker for debugging.
  *
- * This is a last-resort safeguard — in practice the prompt should stay well
+ * This is a last-resort safeguard. In practice the prompt should stay well
  * under limit. If this fires frequently, session_context or weakness layers
  * need their own internal truncation.
  */
@@ -281,7 +283,6 @@ function enforceBudget(
     return { layers, truncated: false }
   }
 
-  // Log warning — visible in Vercel logs
   console.warn(
     `[prompt-builder] System prompt over budget: ${total} chars > ${limit} limit. Truncating.`
   )
@@ -290,7 +291,7 @@ function enforceBudget(
   const result: SystemLayer[] = []
   let truncated = false
 
-  // Protected layers first — guaranteed full
+  // Protected layers first. Guaranteed full.
   const protected_  = layers.filter(l => PROTECTED_LAYER_LABELS.has(l.label))
   const unprotected = layers.filter(l => !PROTECTED_LAYER_LABELS.has(l.label))
 
@@ -298,9 +299,6 @@ function enforceBudget(
     result.push(l)
     remaining -= l.content.length
   }
-
-  // Distribute remaining budget across unprotected layers proportionally
-  const unprotectedTotal = unprotected.reduce((s, l) => s + l.content.length, 0)
 
   for (const l of unprotected) {
     if (remaining <= 0) {
@@ -313,7 +311,6 @@ function enforceBudget(
       result.push(l)
       remaining -= l.content.length
     } else {
-      // Truncate this layer
       const allowedChars = Math.max(remaining - 20, 0)
       result.push({
         ...l,
@@ -324,7 +321,7 @@ function enforceBudget(
     }
   }
 
-  // Restore original weight order after budget pass
+  // Restore original weight order after budget pass.
   result.sort((a, b) => a.weight - b.weight)
 
   return { layers: result, truncated }
@@ -339,7 +336,7 @@ function skippedInTruncation(label: string): void {
 /**
  * describePrompt
  * Returns a human-readable summary of what was built.
- * Used in development/logging — never injected into LLM.
+ * Used in development/logging. Never injected into LLM.
  */
 export function describePrompt(built: BuiltPrompt): string {
   const lines = [

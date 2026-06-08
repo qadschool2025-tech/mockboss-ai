@@ -5,6 +5,10 @@
 // FIXES APPLIED:
 // Fix #2 — score field normalized: technical_depth → domain_expertise
 // Fix #5 — Content-Type: application/json; charset=utf-8 (Arabic correctness)
+// Fix #6 — stripScoreTag also removes an UNCLOSED/dangling <score> block.
+//          A truncated model response can emit "<score>{...}" with no closing
+//          tag; the old regex (closed-only) left it in cleanContent, so the raw
+//          JSON leaked onto the candidate's screen. Now stripped to end-of-text.
 
 import { NextRequest, NextResponse } from 'next/server'
 import {
@@ -54,8 +58,16 @@ function extractScore(content: string): Record<string, unknown> | null {
   }
 }
 
+// Fix #6: remove score markers in BOTH forms so they never reach the candidate:
+//   1. well-formed <score>...</score> blocks
+//   2. a dangling/unclosed <score>... (truncated response) — strip to end of text
+//   3. any stray closing tag left behind
 function stripScoreTag(content: string): string {
-  return content.replace(/<score>[\s\S]*?<\/score>/g, '').trim()
+  return content
+    .replace(/<score>[\s\S]*?<\/score>/g, '')
+    .replace(/<score>[\s\S]*$/g, '')
+    .replace(/<\/score>/g, '')
+    .trim()
 }
 
 // ─── Request Validation ───────────────────────────────────────────────────────

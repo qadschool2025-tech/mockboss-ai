@@ -15,7 +15,6 @@ interface OnboardingData {
   jobRequirements: string
   cvFileName: string
   cvMimeType: string
-  cvBase64: string
   cvSize: number
   cvText: string
   cvSummary: string
@@ -438,9 +437,7 @@ function Step1({
             ? <div style={S.fieldError}>{errors.jobTitle}</div>
             : roleStatus === 'checking'
               ? <div style={S.fieldChecking}>Checking…</div>
-              : roleStatus === 'valid'
-                ? <div style={S.fieldOk}>✓ Looks good</div>
-                : null}
+              : null}
         </div>
       </div>
 
@@ -536,7 +533,7 @@ function Step2({
         <input
           ref={inputRef}
           type="file"
-          accept=".pdf,.doc,.docx"
+          accept=".pdf,.docx"
           style={{ display: 'none' }}
           onChange={e => {
             const f = e.target.files?.[0]
@@ -648,7 +645,6 @@ export default function OnboardingPage() {
     jobRequirements: '',
     cvFileName:      '',
     cvMimeType:      '',
-    cvBase64:        '',
     cvSize:          0,
     cvText:          '',
     cvSummary:       '',
@@ -728,10 +724,10 @@ export default function OnboardingPage() {
     setStep(1)
   }
 
-  const handleCvSelect = (file: File) => {
+  const handleCvSelect = async (file: File) => {
     setCvError('')
     const name = file.name.toLowerCase()
-    const allowed = name.endsWith('.pdf') || name.endsWith('.doc') || name.endsWith('.docx')
+    const allowed = name.endsWith('.pdf') || name.endsWith('.docx')
     if (!allowed) {
       setCvError('Unsupported file. Please upload a PDF or DOCX.')
       return
@@ -741,45 +737,37 @@ export default function OnboardingPage() {
       return
     }
 
-    const reader = new FileReader()
-    reader.onload = async () => {
-      const result = reader.result as string
-      const base64 = result.includes(',') ? result.split(',')[1] : result
+    setData(prev => ({
+      ...prev,
+      cvFileName: file.name,
+      cvMimeType: file.type || (name.endsWith('.pdf') ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'),
+      cvSize:     file.size,
+      cvText:     '',
+      cvSummary:  '',
+      parsedCv:   null,
+    }))
 
-      setData(prev => ({
-        ...prev,
-        cvFileName: file.name,
-        cvMimeType: file.type || (name.endsWith('.pdf') ? 'application/pdf' : 'application/octet-stream'),
-        cvBase64:   base64,
-        cvSize:     file.size,
-        cvText:     '',
-        cvSummary:  '',
-        parsedCv:   null,
-      }))
-
-      // Parse CV in background — failure is non-blocking
-      setCvParsing(true)
-      try {
-        const form = new FormData()
-        form.append('file', file)
-        const res = await fetch('/api/parse-cv', { method: 'POST', body: form })
-        if (res.ok) {
-          const json = await res.json()
-          setData(prev => ({
-            ...prev,
-            cvText:    json.text     ?? '',
-            cvSummary: json.cvSummary ?? '',
-            parsedCv:  json.parsedCv  ?? null,
-          }))
-        }
-      } catch {
-        // parse failure is silent — interview still works without parsedCv
-      } finally {
-        setCvParsing(false)
+    setCvParsing(true)
+    try {
+      const form = new FormData()
+      form.append('file', file)
+      const res = await fetch('/api/parse-cv', { method: 'POST', body: form })
+      if (res.ok) {
+        const json = await res.json()
+        setData(prev => ({
+          ...prev,
+          cvText:    json.text      ?? '',
+          cvSummary: json.cvSummary ?? '',
+          parsedCv:  json.parsedCv  ?? null,
+        }))
+      } else {
+        setCvError('CV attached, but analysis did not complete. The interview will continue without CV analysis.')
       }
+    } catch {
+      setCvError('CV attached, but analysis did not complete. The interview will continue without CV analysis.')
+    } finally {
+      setCvParsing(false)
     }
-    reader.onerror = () => setCvError('Could not read the file. Please try again.')
-    reader.readAsDataURL(file)
   }
 
   const handleCvClear = () => {
@@ -789,7 +777,6 @@ export default function OnboardingPage() {
       ...prev,
       cvFileName: '',
       cvMimeType: '',
-      cvBase64:   '',
       cvSize:     0,
       cvText:     '',
       cvSummary:  '',
@@ -823,10 +810,9 @@ export default function OnboardingPage() {
       language:        data.language,
       plan,
       jobRequirements: data.jobRequirements.trim(),
-      hasCv:           Boolean(data.cvBase64),
+      hasCv:           Boolean(data.cvFileName),
       cvFileName:      data.cvFileName,
       cvMimeType:      data.cvMimeType,
-      cvBase64:        data.cvBase64,
       cvText:          data.cvText,
       cvSummary:       data.cvSummary,
       parsedCv:        data.parsedCv,

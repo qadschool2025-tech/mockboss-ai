@@ -1,6 +1,13 @@
 // ============================================================================
-// Barbaros V4 — Type System (Unified Contract v3.1 — STABILIZED)
+// Barbaros V4 — Type System (Unified Contract v3.2 — STABILIZED)
 // Single source of truth. Pure types only — zero runtime logic.
+//
+// CHANGELOG v3.1 → v3.2 (additive, non-breaking):
+//   + Added: ParsedCv, CvEducation, CvWorkExperience, CvGap,
+//            and SourceConsistencyIssue for Source Consistency MVP.
+//   + Added: InterviewConfig optional fields — cvText, parsedCv,
+//            sourceConsistencyIssues. Existing cvSummary remains unchanged.
+//            All CV fields are optional to keep old sessions/configs valid.
 //
 // CHANGELOG v3 → v3.1 (additive, non-breaking):
 //   + Added: Contradiction optional fields — source, confidence,
@@ -66,6 +73,77 @@ export type ExperienceLevel =
   | 'executive'
 
 /**
+ * Education entry extracted from a candidate CV.
+ * All fields are optional because CV parsing can be partial.
+ */
+export interface CvEducation {
+  degree?: string
+  field?: string
+  institution?: string
+  year?: string
+}
+
+/**
+ * Work experience entry extracted from a candidate CV.
+ * All fields are optional because CV formats vary widely.
+ */
+export interface CvWorkExperience {
+  title?: string
+  company?: string
+  startDate?: string
+  endDate?: string
+  description?: string
+}
+
+/**
+ * Obvious timeline gap extracted from the CV.
+ * MVP scope: gaps of one year or more when detectable.
+ */
+export interface CvGap {
+  startDate?: string
+  endDate?: string
+  note?: string
+}
+
+/**
+ * Structured CV source data used by Barbaros as interview context.
+ * This is additive and optional: interviews without a CV must behave unchanged.
+ */
+export interface ParsedCv {
+  candidateName?: string
+  currentTitle?: string
+  totalYearsExperience?: string
+  education?: CvEducation[]
+  workExperience?: CvWorkExperience[]
+  skills?: string[]
+  certifications?: string[]
+  detectedGaps?: CvGap[]
+  rawText?: string
+}
+
+export type SourceConsistencyIssueType =
+  | 'name_mismatch'
+  | 'experience_mismatch'
+  | 'timeline_gap'
+  | 'role_level_mismatch'
+  | 'skill_claim_missing'
+  | 'sector_mismatch'
+  | 'cv_job_fit_gap'
+
+/**
+ * A possible mismatch between the CV source and interview claims.
+ * Separate from Contradiction, which compares candidate statements to each other.
+ */
+export interface SourceConsistencyIssue {
+  id: string
+  type: SourceConsistencyIssueType
+  severity: 'minor' | 'moderate' | 'major'
+  evidence: string
+  questionHint: string
+  resolved?: boolean
+}
+
+/**
  * Configuration passed from onboarding to the interview engine.
  */
 export interface InterviewConfig {
@@ -78,7 +156,10 @@ export interface InterviewConfig {
   experienceLevel?: ExperienceLevel
   language: Language
   plan: Plan
+  cvText?: string
   cvSummary?: string
+  parsedCv?: ParsedCv
+  sourceConsistencyIssues?: SourceConsistencyIssue[]
   jobRequirements?: string
   isCareerSwitch?: boolean
   subject?: string
@@ -172,13 +253,13 @@ export interface Contradiction {
   detectedAt: number
   phase: InterviewPhase
 
-  // ── Optional semantic-detection metadata (v3.1, additive) ────────────────
+  // Optional semantic-detection metadata (v3.1, additive)
   // Populated ONLY by the semantic detector (detectContradictionsSemantic).
   // Heuristic-detected contradictions leave these undefined.
   // The Director still consumes only `id` + `severity` (unchanged); the fields
   // below are advisory context for downstream layers, never decision inputs.
 
-  // Detection origin. Absent ⇒ treat as 'heuristic' for backward compatibility.
+  // Detection origin. Absent => treat as 'heuristic' for backward compatibility.
   source?: 'heuristic' | 'semantic'
 
   // Semantic-judge confidence, 0-100. Used to gate entry into state

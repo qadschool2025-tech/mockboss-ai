@@ -1,74 +1,57 @@
 import { NextRequest, NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { createHash } from 'crypto'
-import type {
-  ParsedCv,
-  ParsedCvRole,
-  ParsedCvEducation,
-  ParsedCvProject,
-} from '@/lib/barbaros/types'
+import type { ParsedCv } from '@/lib/barbaros/types'
+
+export const runtime = 'nodejs'
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
+
+type SupportedCvFileKind = 'text' | 'pdf' | 'docx'
+
+const DOCX_MIME =
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 
 const SUPPORTED_FILE_TYPES = new Set([
   'text/plain',
   'application/pdf',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  DOCX_MIME,
 ])
 
 export async function POST(req: NextRequest) {
   try {
     const form = await req.formData()
     const file = form.get('file') as File | null
-    if (!file) return NextResponse.json({ error: 'No file' }, { status: 400 })
 
-    if (!SUPPORTED_FILE_TYPES.has(file.type)) {
+    if (!file) {
+      return NextResponse.json({ error: 'No file' }, { status: 400 })
+    }
+
+    const fileKind = getSupportedFileKind(file)
+
+    if (!fileKind) {
       return NextResponse.json({ error: 'Unsupported file type' }, { status: 400 })
     }
 
     let text = ''
 
-    if (file.type === 'text/plain') {
+    if (fileKind === 'text') {
       text = await file.text()
     } else {
-      const bytes = await file.arrayBuffer()
-      const base64 = Buffer.from(bytes).toString('base64')
-      const isPdf = file.type === 'application/pdf'
-
-      const response = await client.messages.create({
-        model: 'claude-sonnet-4-5',
-        max_tokens: 1500,
-        messages: [
-          {
-            role: 'user',
-            content: [
-              {
-                type: 'document',
-                source: {
-                  type: 'base64',
-                  media_type: isPdf
-                    ? 'application/pdf'
-                    : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-                  data: base64,
-                },
-              } as any,
-              {
-                type: 'text',
-                text: 'Extract all text from this CV. Return ONLY the raw text, no commentary.',
-              },
-            ],
-          },
-        ],
-      })
-
-      text = collectTextBlocks(response)
+      text = await extractTextFromDocument(file, fileKind)
     }
 
     const trimmedText = text.slice(0, 4000)
     const sourceTextHash = createHash('sha256').update(trimmedText).digest('hex')
 
     if (!trimmedText.trim()) {
-      const parsedCv = buildFallbackParsedCv(trimmedText, file.name, sourceTextHash, '')
+      const parsedCv = buildFallbackParsedCv(
+        trimmedText,
+        file.name,
+        sourceTextHash,
+        ''
+      )
+
       return NextResponse.json({
         text: trimmedText,
         cvSummary: parsedCv.summary ?? '',
@@ -77,7 +60,12 @@ export async function POST(req: NextRequest) {
     }
 
     try {
-      const parsedCv = await extractParsedCv(trimmedText, file.name, sourceTextHash)
+      const parsedCv = await extractParsedCv(
+        trimmedText,
+        file.name,
+        sourceTextHash
+      )
+
       return NextResponse.json({
         text: trimmedText,
         cvSummary: parsedCv.summary ?? buildFallbackSummary(trimmedText),
@@ -85,12 +73,14 @@ export async function POST(req: NextRequest) {
       })
     } catch (parseErr: any) {
       console.error('parse-cv structured parse failed:', parseErr.message)
+
       const parsedCv = buildFallbackParsedCv(
         trimmedText,
         file.name,
         sourceTextHash,
         buildFallbackSummary(trimmedText)
       )
+
       return NextResponse.json({
         text: trimmedText,
         cvSummary: parsedCv.summary ?? '',
@@ -101,6 +91,59 @@ export async function POST(req: NextRequest) {
     console.error('parse-cv error:', err.message)
     return NextResponse.json({ error: err.message }, { status: 500 })
   }
+}
+
+function getSupportedFileKind(file: File): SupportedCvFileKind | null {
+  const name = file.name.toLowerCase().trim()
+
+  if (SUPPORTED_FILE_TYPES.has(file.type)) {
+    if (file.type === 'text/plain') return 'text'
+    if (file.type === 'application/pdf') return 'pdf'
+    if (file.type === DOCX_MIME) return 'docx'
+  }
+
+  if (name.endsWith('.txt')) return 'text'
+  if (name.endsWith('.pdf')) return 'pdf'
+  if (name.endsWith('.docx')) return 'docx'
+
+  return null
+}
+
+async function extractTextFromDocument(
+  file: File,
+  fileKind: Exclude<SupportedCvFileKind, 'text'>
+): Promise<string> {
+  const bytes = await file.arrayBuffer()
+  const base64 = Buffer.from(bytes).toString('base64')
+
+  const response = await client.messages.create({
+    model: 'claude-sonnet-4-5',
+    max_tokens: 1500,
+    messages: [
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'document',
+            source: {
+              type: 'base64',
+              media_type:
+                fileKind === 'pdf'
+                  ? 'application/pdf'
+                  : DOCX_MIME,
+              data: base64,
+            },
+          } as any,
+          {
+            type: 'text',
+            text: 'Extract all text from this CV. Return ONLY the raw text, no commentary.',
+          },
+        ],
+      },
+    ],
+  })
+
+  return collectTextBlocks(response)
 }
 
 async function extractParsedCv(
@@ -194,9 +237,9 @@ ${text}`,
     currentCompany: asString(parsed.currentCompany),
     totalYearsExperience: asString(parsed.totalYearsExperience),
     summary: asString(parsed.summary) ?? buildFallbackSummary(text),
-    roles: asTypedArray<ParsedCvRole>(parsed.roles),
-    education: asTypedArray<ParsedCvEducation>(parsed.education),
-    projects: asTypedArray<ParsedCvProject>(parsed.projects),
+    roles: asTypedArray<NonNullable<ParsedCv['roles']>[number]>(parsed.roles),
+    education: asTypedArray<NonNullable<ParsedCv['education']>[number]>(parsed.education),
+    projects: asTypedArray<NonNullable<ParsedCv['projects']>[number]>(parsed.projects),
     skills: asStringArray(parsed.skills),
     certifications: asStringArray(parsed.certifications),
     languages: asStringArray(parsed.languages),
@@ -228,7 +271,14 @@ function safeJsonParse(raw: string): any {
     .replace(/```$/i, '')
     .trim()
 
-  return JSON.parse(cleaned)
+  const firstBrace = cleaned.indexOf('{')
+  const lastBrace = cleaned.lastIndexOf('}')
+
+  if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) {
+    throw new Error('No valid JSON object found in CV parser response')
+  }
+
+  return JSON.parse(cleaned.slice(firstBrace, lastBrace + 1))
 }
 
 function buildFallbackParsedCv(

@@ -1,118 +1,83 @@
 // lib/barbaros/engine.ts
-// Barbaros V4 — Main Orchestrator.
-// Consumed by: app/api/interview/route.ts (single import point)
+// Barbaros V4, Main Orchestrator.
+// Consumed by: app/api/interview/route.ts, single import point.
 //
 // FIXES APPLIED:
-// - updateTopicMemory          → recordTopicsFromText       (topic-memory.ts)
-// - updateCompetencyTracker    → matchCompetenciesInText
+// - updateTopicMemory          -> recordTopicsFromText       (topic-memory.ts)
+// - updateCompetencyTracker    -> matchCompetenciesInText
 //                                + applyEvidenceDelta       (competency-tracker.ts)
-// - updateContradictionTracker → detectContradictions
+// - updateContradictionTracker -> detectContradictions
 //                                + applyContradictionPatch  (contradiction-tracker.ts)
-// - computeAggregateScore      → aggregateScores            (score-aggregator.ts)
+// - computeAggregateScore      -> aggregateScores            (score-aggregator.ts)
 //
-// PHASE BOOKKEEPING (Time-Awareness fix, layer 1):
-//   The phase decision now uses the REAL state with the REAL config reconciled
-//   in, via evaluatePhaseTransition. The previous advancePhase alias fabricated
-//   a stub state (per-phase count derived from messages.length, phaseStartedAt
-//   faked to session start, plan hardcoded to 'go', empty competencyCoverage),
-//   which raced the phase to 'closing' far too early. In addition, the live path
-//   never maintained phaseQuestionCount (appendMessage is unused server-side) nor
-//   phaseStartedAt (transitionPhase unused) nor a real config (route seeds a
-//   'free' stub). Those three are now reconnected in statePatch below.
+// PHASE BOOKKEEPING:
+// The phase decision uses the real state with the real config reconciled in,
+// via evaluatePhaseTransition.
 //
 // DIRECTOR INTEGRATION:
-//   After state patches and before prompt assembly, the Director decides the
-//   single tactical move for the next turn (decide-next-move.ts) and the prompt
-//   builder is instructed to EXECUTE it. The intervention budget is carried on
-//   state loosely (mirroring the existing pressure/behavior carry pattern) so it
-//   decrements across turns; a typed SessionState field can replace this later.
+// After state patches and before prompt assembly, the Director decides the
+// single tactical move for the next turn.
 //
-// FIRST-TURN FIX (root cause of black screen / no greeting):
-//   On the first message the opening greeting is a STATIC template
-//   (BARBAROS_OPENING_TEMPLATE). Previously it was injected as the first
-//   `assistant` message and passed to Claude. The Anthropic API REJECTS any
-//   conversation whose first message has role 'assistant' (400 error), which
-//   threw after 3 retries → route returned { success:false } → blank screen.
-//   FIX: on the first turn we return the opening template DIRECTLY as content
-//   (with its TTS audio) and DO NOT call Claude at all. Claude takes over from
-//   the second turn onward, when the first message is a real 'user' turn.
+// FIRST-TURN FIX:
+// On the first message the opening greeting is returned directly. Claude takes
+// over from the second turn onward.
 //
-// TYPE-SAFETY FIX:
-//   Behavior/pressure fields (contradictionCount, silenceRisk, pressureLevel,
-//   behaviorInsights, behaviorPatterns, weakCompetencyTopics,
-//   pressureEscalationTriggered) are NOT part of SessionState (see types.ts).
-//   They are derived per-turn and kept in engine-local variables.
-//   They are NO LONGER written into statePatch (which is Partial<SessionState>).
-//   Persisted equivalents that DO exist on state:
-//     - contradiction count  → metrics.contradictionCount
-//     - contradictions array  → contradictions
-//
-// CONTRADICTION DETECTION (semantic layer, Phase-2 contradiction work):
-//   Section 4 now runs TWO detectors in sequence on the contradiction array:
-//     STEP 1 detectContradictions        — heuristic, sync, free (unchanged)
-//     STEP 2 detectContradictionsSemantic — narrow JSON-only LLM judge, async
-//   The semantic judge is INJECTED (callClaude as transport only) and its result
-//   is confidence-gated inside the tracker. Both detectors write into the SAME
-//   state.contradictions (single source of truth), so the Director, metrics, and
-//   scoring INPUT all see the augmented set. NOTE: scoring LOGIC is untouched —
-//   buildRawScoreInput simply receives a more complete contradiction array.
-//
-// SCORE-TAG STRIP (Fix #6):
-//   stripScoreTag now also removes an UNCLOSED/dangling <score> block (a
-//   truncated model response can emit "<score>{...}" with no closing tag). The
-//   old closed-only regex left it in, so the raw JSON could be spoken by TTS.
+// SCORE-TAG STRIP:
+// stripScoreTag removes both closed and dangling <score> blocks so JSON never
+// reaches the candidate or TTS.
 //
 // END-OF-SESSION HARDENING:
-//   buildSessionSnapshot → toScoreSnapshot dereferences
-//   scoreBreakdown.dimensions.engagement, but this end path passes an EMPTY
-//   scoreBreakdown stub ({}), which threw "Cannot read properties of undefined
-//   (reading 'engagement')" and 500'd the session close. The snapshot +
-//   longitudinal work is NOT launch-critical, so it is now isolated in a guard:
-//   on any failure the session closes gracefully (snapshot=null, trackers
-//   unchanged). The proper fix is to feed a REAL score breakdown here — that is
-//   the "connect engine data to the report" item, handled separately.
+// Snapshot and longitudinal updates are guarded so the session closes cleanly.
+//
+// ESSENTIAL COVERAGE:
+// End-of-session now resolves covered Essential Assessment axes once, then uses
+// the same coverage for the farewell and downstream report handoff.
 
-import type { InterviewConfig, Message, CandidateProfile }  from './types'
-import type { SessionState }              from './state/session-state'
-import type { WeaknessTrackerState }      from './longitudinal/weakness-tracker'
-import type { GrowthTrackerState }        from './longitudinal/growth-tracker'
-import type { SessionSnapshot }           from './artifacts/session-snapshot'
-import type { SessionDelta }              from './longitudinal/session-delta'
+import type { InterviewConfig, Message, CandidateProfile } from './types'
+import type { SessionState } from './state/session-state'
+import type { WeaknessTrackerState } from './longitudinal/weakness-tracker'
+import type { GrowthTrackerState } from './longitudinal/growth-tracker'
+import type { SessionSnapshot } from './artifacts/session-snapshot'
+import type { SessionDelta } from './longitudinal/session-delta'
 
 import { evaluatePhaseTransition, isSessionComplete } from './state/phase-engine'
-import { recordTopicsFromText }              from './state/topic-memory'
+import { recordTopicsFromText } from './state/topic-memory'
 import {
   matchCompetenciesInText,
   applyEvidenceDelta,
-}                                            from './state/competency-tracker'
+} from './state/competency-tracker'
 import {
   detectContradictions,
   detectContradictionsSemantic,
   applyContradictionPatch,
   getUnaddressedContradictions,
-}                                            from './state/contradiction-tracker'
-import type { SemanticModelCall }            from './state/contradiction-tracker'
+} from './state/contradiction-tracker'
+import type { SemanticModelCall } from './state/contradiction-tracker'
 
-import { orchestrateBehavior }               from './analysis/behavior/behavior-orchestrator'
-import type { OrchestratorSessionState }     from './analysis/behavior/behavior-orchestrator'
-import type { BehaviorContext }              from './analysis/behavior/behavior-types'
+import { orchestrateBehavior } from './analysis/behavior/behavior-orchestrator'
+import type { OrchestratorSessionState } from './analysis/behavior/behavior-orchestrator'
+import type { BehaviorContext } from './analysis/behavior/behavior-types'
 
-import { aggregateScores }                   from './scoring/score-aggregator'
-import { normalizeScores }                   from './scoring/score-normalizer'
-import type { RawScoreInput }                from './scoring/score-normalizer'
-import { buildSessionSnapshot }              from './artifacts/session-snapshot'
+import { aggregateScores } from './scoring/score-aggregator'
+import { normalizeScores } from './scoring/score-normalizer'
+import type { RawScoreInput } from './scoring/score-normalizer'
+import {
+  resolveCoveredAreas,
+  type EssentialAxis,
+} from './scoring/coverage-resolver'
+import { buildSessionSnapshot } from './artifacts/session-snapshot'
 
-import { updateWeaknessTracker }             from './longitudinal/weakness-tracker'
-import { updateGrowthTracker }               from './longitudinal/growth-tracker'
-import { computeSessionDelta }               from './longitudinal/session-delta'
+import { updateWeaknessTracker } from './longitudinal/weakness-tracker'
+import { updateGrowthTracker } from './longitudinal/growth-tracker'
+import { computeSessionDelta } from './longitudinal/session-delta'
 
 import { decideNextMove, createInterventionBudget } from './director'
-import type { DirectorContext, InterventionBudget }  from './director'
+import type { DirectorContext, InterventionBudget } from './director'
 
-import { buildPrompt }                       from './prompt/prompt-builder'
-import { BARBAROS_CLOSING_TEMPLATE }         from './prompt/personality'
-import { callClaude }                        from './llm/claude-client'
-import { synthesizeSpeech }                  from './llm/tts'
+import { buildPrompt } from './prompt/prompt-builder'
+import { buildClosingMessage } from './prompt/personality'
+import { callClaude } from './llm/claude-client'
+import { synthesizeSpeech } from './llm/tts'
 
 // ─── Engine Input / Output ────────────────────────────────────────────────────
 
@@ -139,6 +104,7 @@ export interface EngineOutput {
   snapshot:        SessionSnapshot | null
   promptCharCount: number
   truncated:       boolean
+  coveredAreas:    EssentialAxis[]
 }
 
 // ─── Time Limits ──────────────────────────────────────────────────────────────
@@ -165,9 +131,6 @@ const NEUTRAL_CANDIDATE_PROFILE = {
 
 // ─── Score Tag Helper ─────────────────────────────────────────────────────────
 
-// Fix #6: remove score markers in BOTH forms so they never reach TTS or the
-// candidate: (1) well-formed <score>...</score>, (2) a dangling/unclosed
-// <score>... from a truncated response (strip to end), (3) any stray closing tag.
 function stripScoreTag(content: string): string {
   return content
     .replace(/<score>[\s\S]*?<\/score>/g, '')
@@ -193,7 +156,7 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
   const elapsedSeconds = (now - sessionStartTime) / 1000
   const totalSeconds   = TIME_LIMITS[config.plan] ?? TIME_LIMITS.free
   const elapsedMinutes = elapsedSeconds / 60
-  const totalMinutes   = totalSeconds   / 60
+  const totalMinutes   = totalSeconds / 60
 
   // ── 1. Session end check ────────────────────────────────────────────────────
 
@@ -201,11 +164,8 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
     return buildEndOfSessionOutput(input, elapsedMinutes, totalMinutes, now)
   }
 
-  // ── 1b. FIRST-TURN SHORT-CIRCUIT (black-screen fix) ─────────────────────────
-  // On the very first message there is no candidate input yet. The greeting is
-  // a static template — we return it DIRECTLY (with audio) and skip Claude
-  // entirely. This avoids sending an `assistant`-first message array to the
-  // Anthropic API, which would 400 and throw. Claude takes over from turn 2.
+  // ── 1b. First-turn short-circuit ────────────────────────────────────────────
+
   const isFirstMessage = messages.length === 0
 
   if (isFirstMessage) {
@@ -237,7 +197,7 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
       content:         openingText,
       audioBase64:     openingAudio,
       score:           null,
-      statePatch:      {},          // no state changes on greeting turn
+      statePatch:      {},
       weaknessPatch:   weaknessState,
       growthPatch:     growthState,
       isEndOfSession:  false,
@@ -245,28 +205,21 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
       snapshot:        null,
       promptCharCount: built.charCount,
       truncated:       built.truncated,
+      coveredAreas:    [],
     }
   }
 
   // ── 2. Phase advancement ────────────────────────────────────────────────────
-  // Decide the phase from the REAL state with the REAL config reconciled in.
-  // The previous `advancePhase` alias fabricated a stub state (per-phase count
-  // derived from messages.length, phaseStartedAt faked to session start, plan
-  // hardcoded to 'go', empty competencyCoverage) which raced the phase to
-  // 'closing' far too early. Feeding the real state + config fixes all of that;
-  // per-turn bookkeeping (phaseStartedAt / phaseQuestionCount) is maintained in
-  // statePatch below so future turns read correct values.
 
   const stateForPhase: SessionState = { ...state, config }
-  const transition   = evaluatePhaseTransition(stateForPhase)
-  const newPhase      = transition.nextPhase
-  const phaseChanged  = transition.transitioned
+  const transition = evaluatePhaseTransition(stateForPhase)
+  const newPhase = transition.nextPhase
+  const phaseChanged = transition.transitioned
 
   const stateWithPhase: SessionState = { ...state, config, phase: newPhase }
 
   // ── 2b. Engine-local behavior/pressure carry-over ───────────────────────────
-  // These fields are NOT persisted on SessionState. We read any prior values
-  // from a loosely-typed view of state (for resume support) and default safely.
+
   const carry = stateWithPhase as unknown as {
     silenceRisk?:                 'low' | 'medium' | 'high'
     pressureLevel?:               number
@@ -277,13 +230,12 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
   }
 
   const priorContradictionCount = stateWithPhase.metrics.contradictionCount ?? 0
-  const priorSilenceRisk        = carry.silenceRisk           ?? 'low'
-  const priorPressureLevel      = carry.pressureLevel         ?? 0
-  const priorWeakTopics         = carry.weakCompetencyTopics  ?? []
-  const priorInsights           = carry.behaviorInsights      ?? []
-  const priorPatterns           = carry.behaviorPatterns      ?? []
+  const priorSilenceRisk = carry.silenceRisk ?? 'low'
+  const priorPressureLevel = carry.pressureLevel ?? 0
+  const priorWeakTopics = carry.weakCompetencyTopics ?? []
+  const priorInsights = carry.behaviorInsights ?? []
+  const priorPatterns = carry.behaviorPatterns ?? []
 
-  // Director budget — carried loosely on state; initialized per plan on turn 1.
   const priorBudget: InterventionBudget =
     ((stateWithPhase as any).directorBudget as InterventionBudget | undefined)
     ?? createInterventionBudget(config.plan)
@@ -293,16 +245,16 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
   const behaviorContext = {
     runtime: {
       messages,
-      currentPhase:   stateWithPhase.phase,
+      currentPhase: stateWithPhase.phase,
       elapsedMinutes,
       now,
     },
     historical: {
-      contradictionCount:    priorContradictionCount,
-      lastSilenceRisk:       priorSilenceRisk,
-      weakCompetencyTopics:  priorWeakTopics,
-      existingInsights:      priorInsights,
-      existingPatterns:      priorPatterns,
+      contradictionCount:   priorContradictionCount,
+      lastSilenceRisk:      priorSilenceRisk,
+      weakCompetencyTopics: priorWeakTopics,
+      existingInsights:     priorInsights,
+      existingPatterns:     priorPatterns,
     },
     pressure: {
       silenceRisk:                 priorSilenceRisk,
@@ -311,26 +263,22 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
     },
   } as unknown as BehaviorContext
 
-  // orchestrateBehavior expects an OrchestratorSessionState as 2nd arg
-  // (NOT a boolean). Build it from prior engine-local values.
   const orchestratorState: OrchestratorSessionState = {
     validatedSignals: [],
-    insights:        (priorInsights as any[]) ?? [],
-    patterns:        (priorPatterns as any[]) ?? [],
-    pendingTasks:    [],
-    lastTier3RunAt:  null,
+    insights:         (priorInsights as any[]) ?? [],
+    patterns:         (priorPatterns as any[]) ?? [],
+    pendingTasks:     [],
+    lastTier3RunAt:   null,
   }
 
-  // GUARD: the behavior pipeline scans the LAST message. With the first-turn
-  // short-circuit above, messages is always non-empty here, but we keep the
-  // guard as defense-in-depth.
   let behaviorResult: any = {
-    activeRisks: [],
+    activeRisks:       [],
     validatedSignals: [],
-    insights: [],
-    patterns: [],
-    pendingTasks: [],
+    insights:         [],
+    patterns:         [],
+    pendingTasks:     [],
   }
+
   if (messages.length > 0) {
     behaviorResult = await orchestrateBehavior(behaviorContext, orchestratorState)
   }
@@ -342,16 +290,16 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
 
   // ── 4. State patches ────────────────────────────────────────────────────────
 
-  // Topic memory — record topics from the last user message
   const lastUserMsg = [...messages].reverse().find(m => m.role === 'user')
   const updatedTopics = lastUserMsg
     ? recordTopicsFromText(stateWithPhase, lastUserMsg.content, now)
     : stateWithPhase
 
-  // Competency tracker — match and apply evidence from last user message
   let stateAfterCompetency = updatedTopics
+
   if (lastUserMsg) {
     const matchedCompetencies = matchCompetenciesInText(stateWithPhase, lastUserMsg.content)
+
     for (const competency of matchedCompetencies) {
       stateAfterCompetency = applyEvidenceDelta(
         stateAfterCompetency,
@@ -362,8 +310,6 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
     }
   }
 
-  // Contradiction tracker — detect new contradictions from full message history.
-  // STEP 1 (heuristic, sync, free): keyword / negation-pair matching.
   const contradictionPatch = detectContradictions(
     {
       messages,
@@ -372,23 +318,18 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
     },
     stateWithPhase.contradictions ?? []
   )
+
   let updatedContradictions = applyContradictionPatch(
     stateWithPhase.contradictions ?? [],
     contradictionPatch
   )
 
-  // STEP 2 (semantic, async, LLM): catches logical conflicts the heuristic
-  // cannot — e.g. "I don't formally track participation" vs "participation
-  // improved" (no shared keyword, no negation pair). ONE narrow JSON-only model
-  // call per turn; the tracker guards <2 user messages (no call on the first
-  // answer) and confidence-gates entry. The injected judge fully controls the
-  // model via the tracker's own system prompt — callClaude only lends transport.
-  // Fail-safe: any failure yields an empty patch and never breaks the turn.
   const semanticJudge: SemanticModelCall = ({ system, user }) =>
     callClaude({
       systemPrompt: system,
       messages: [{ role: 'user', content: user, timestamp: now }],
     })
+
   try {
     const semanticPatch = await detectContradictionsSemantic(
       {
@@ -399,21 +340,16 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
       updatedContradictions,
       semanticJudge
     )
+
     updatedContradictions = applyContradictionPatch(updatedContradictions, semanticPatch)
   } catch (err) {
-    console.error('[barbaros:contradiction] semantic detection failed — skipped:', err)
+    console.error('[barbaros:contradiction] semantic detection failed, skipped:', err)
   }
 
-  // statePatch contains ONLY real SessionState fields.
   const statePatch: Partial<SessionState> = {
     phase:              newPhase,
-    // Phase bookkeeping — reconnected. Reset on phase change, otherwise count
-    // this turn's question (Barbaros asks one question per turn). This is what
-    // makes evaluatePhaseTransition's per-phase counters and timers work at all.
     phaseStartedAt:     phaseChanged ? now : state.phaseStartedAt,
     phaseQuestionCount: phaseChanged ? 1 : state.phaseQuestionCount + 1,
-    // Reconcile the REAL config into state. route.ts seeds a 'free' stub config
-    // that was never reconciled, which broke plan-based time budgets (pro/expert).
     config,
     contradictions:     updatedContradictions,
     recentTopics:       stateAfterCompetency.recentTopics,
@@ -424,27 +360,18 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
     },
   }
 
-  // ── 5. Score + candidate profile (REVIVED) ──────────────────────────────────
-  // Previously this waited for `behaviorResult.scoreSet`, which is NEVER
-  // produced — so `score` was always null and `candidateProfile` stayed frozen
-  // at its initial 50s. We now build a NormalizedScoreSet directly from the
-  // LIVE behavior signals + competency coverage + contradictions (this is what
-  // score-normalizer is designed to consume — no LLM RawScore needed), then
-  // aggregate it, then derive the candidate profile from the dimensions.
-  //
-  // EMPTY-SCORE GUARD: normalizeScores starts from baseline floors (e.g. depth
-  // 50) and would emit a "score" even with no real evidence. To avoid mistaking
-  // those floors for live data, we only compute/apply when at least one CONFIRMED
-  // behavior signal (or a confirmed insight) exists. On signal-less turns we
-  // leave `score` null and DO NOT touch candidateProfile.
+  // ── 5. Score + candidate profile ────────────────────────────────────────────
+
   let score: ReturnType<typeof aggregateScores> | null = null
 
   const confirmedSignals: any[] = Array.isArray((behaviorResult as any).validatedSignals)
     ? (behaviorResult as any).validatedSignals.filter((s: any) => s?.confirmed)
     : []
+
   const insightCount: number = Array.isArray((behaviorResult as any).insights)
     ? (behaviorResult as any).insights.length
     : 0
+
   const hasLiveSignal = confirmedSignals.length > 0 || insightCount > 0
 
   if (lastUserMsg && hasLiveSignal) {
@@ -457,18 +384,13 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
         elapsedMinutes,
         now
       )
+
       const scoreSet = normalizeScores(rawScoreInput)
       score = aggregateScores(scoreSet, now)
 
-      // Derive the LIVE candidate profile from the normalized dimensions.
-      // Direct matches: clarity, depth, engagement.
-      // TODO: confidenceLevel ← credibility is an approximation.
-      // credibility = source consistency; confidence = user self-certainty.
-      // Replace when a real signal is available.
-      // ownershipScore + consistency have NO source in the normalizer yet —
-      // left at their existing values (known gap, not guessed).
       const baseProfile: CandidateProfile =
         stateWithPhase.candidateProfile ?? NEUTRAL_CANDIDATE_PROFILE
+
       statePatch.candidateProfile = {
         ...baseProfile,
         clarity:         scoreSet.dimensions.clarity.score,
@@ -478,9 +400,6 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
         lastUpdatedAt:   now,
       }
 
-      // TEMP DIAGNOSTIC — remove after Phase 2 verification. Prints the live
-      // profile each turn to Vercel function logs. Does not affect any logic
-      // or output; read in Vercel → Logs, NOT the browser console.
       console.log('[barbaros:profile]', JSON.stringify({
         turn:             messages.filter(m => m.role === 'user').length,
         confirmedSignals: confirmedSignals.length,
@@ -491,24 +410,18 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
         confidenceLevel:  statePatch.candidateProfile?.confidenceLevel,
       }))
     } catch (err) {
-      // Scoring is a secondary feature — never let it break the interview.
       score = null
-      console.error('[barbaros:profile] scoring failed — skipped this turn:', err)
+      console.error('[barbaros:profile] scoring failed, skipped this turn:', err)
     }
   } else if (lastUserMsg) {
-    // TEMP DIAGNOSTIC — remove after Phase 2 verification. Makes a signal-less
-    // turn explicit, so a frozen profile is never ambiguous in the logs.
-    console.log('[barbaros:profile] skipped — no confirmed signals this turn', JSON.stringify({
+    console.log('[barbaros:profile] skipped, no confirmed signals this turn', JSON.stringify({
       turn:             messages.filter(m => m.role === 'user').length,
       confirmedSignals: confirmedSignals.length,
       insightCount,
     }))
   }
 
-  // ── 5b. Director — tactical decision (what should Barbaros DO next?) ─────────
-  // Reads the decision-relevant slice of the just-patched state and picks ONE
-  // move. Pure & budgeted. The decision is handed to the prompt builder, which
-  // instructs the LLM to EXECUTE it rather than choose its own direction.
+  // ── 5b. Director ────────────────────────────────────────────────────────────
 
   const missingCompetencies = Object.entries(stateAfterCompetency.competencyCoverage)
     .filter(([, cov]) => (cov as { coverage: number }).coverage < 50)
@@ -537,11 +450,8 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
 
   const directorDecision = decideNextMove(directorContext)
 
-  // Persist the updated budget so the next turn sees decremented counters.
   ;(statePatch as Record<string, unknown>).directorBudget = directorDecision.budgetAfter
 
-  // If we're returning to a contradiction, pre-mark it addressed so the Director
-  // does not re-select the same one next turn.
   if (directorDecision.intent === 'RETURN_TO_PREVIOUS' && directorDecision.targetRef) {
     statePatch.contradictions = applyContradictionPatch(updatedContradictions, {
       markAddressed: [directorDecision.targetRef],
@@ -553,6 +463,7 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
   const activeWeaknesses = weaknessState.weaknesses.filter(
     w => w.status === 'active' || w.status === 'improving'
   )
+
   const confirmedGrowth = growthState.growthSignals.filter(
     g => g.strength !== 'emerging' && g.status === 'active'
   )
@@ -568,12 +479,10 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
       isFirstSession: previousSnapshot === null,
       directorDecision,
     },
-    false   // not first message — opening already delivered on turn 1
+    false
   )
 
   // ── 7. LLM call ─────────────────────────────────────────────────────────────
-  // messages is non-empty and starts with a real 'user' turn, so the Anthropic
-  // API accepts it. No opening injection here — it was delivered on turn 1.
 
   const content = await callClaude({
     systemPrompt: built.systemPrompt,
@@ -583,8 +492,10 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
   // ── 8. TTS ──────────────────────────────────────────────────────────────────
 
   let audioBase64: string | null = null
+
   try {
     const speechText = stripScoreTag(content)
+
     if (speechText.length > 0) {
       audioBase64 = await synthesizeSpeech(speechText)
     }
@@ -594,17 +505,19 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
 
   // ── 9. Longitudinal updates ─────────────────────────────────────────────────
 
-  const sessionId   = (stateWithPhase as any).sessionId ?? 'unknown'
+  const sessionId = (stateWithPhase as any).sessionId ?? 'unknown'
   let weaknessPatch = weaknessState
-  let growthPatch   = growthState
+  let growthPatch = growthState
 
   if (previousSnapshot !== null && score !== null) {
     const patternsForDelta = Array.isArray((behaviorResult as any).patterns)
       ? (behaviorResult as any).patterns
       : []
+
     const miniDelta = buildMiniDelta(patternsForDelta, sessionId, now)
+
     weaknessPatch = updateWeaknessTracker(weaknessState, miniDelta, sessionId, now)
-    growthPatch   = updateGrowthTracker(growthState,     miniDelta, sessionId, now)
+    growthPatch = updateGrowthTracker(growthState, miniDelta, sessionId, now)
   }
 
   return {
@@ -619,6 +532,7 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
     snapshot:        null,
     promptCharCount: built.charCount,
     truncated:       built.truncated,
+    coveredAreas:    [],
   }
 }
 
@@ -630,68 +544,77 @@ async function buildEndOfSessionOutput(
   totalMinutes:   number,
   now:            number
 ): Promise<EngineOutput> {
-  const { config, state, weaknessState, growthState, previousSnapshot, messages } = input
+  const {
+    config,
+    state,
+    weaknessState,
+    growthState,
+    previousSnapshot,
+    messages,
+  } = input
 
-  const closingContent = BARBAROS_CLOSING_TEMPLATE
-    .replace('{candidateName}', config.candidateName)
+  const coverageState = buildCoverageStateForEnd(state, config, messages, now)
+  const coveredAreas = resolveCoveredAreas(coverageState, config, messages)
+
+  const closingContent = buildClosingMessage(
+    coveredAreas,
+    config.language,
+    config.candidateName
+  )
 
   let audioBase64: string | null = null
+
   try {
     audioBase64 = await synthesizeSpeech(closingContent)
   } catch {
     audioBase64 = null
   }
 
-  // buildSessionSnapshot takes a single SessionSnapshotInput object.
-  // Several nested fields (scoreBreakdown, behaviorResult, contradictionSummary)
-  // are not computed on this end path; we pass minimal stubs cast to satisfy
-  // the type. The end-of-session snapshot only feeds longitudinal trackers,
-  // which are not on the launch-critical path.
   const snapshotInput = {
-    sessionId:        (state as any).sessionId ?? 'unknown',
-    candidateId:      (state as any).sessionId ?? 'unknown',
-    jobTitle:         config.jobTitle,
-    institution:      config.institution,
-    language:         config.language,
-    completedPhases:  [] as any[],
-    durationMinutes:  elapsedMinutes,
-    totalMessages:    messages.length,
-    scoreBreakdown:   {} as any,
-    behaviorResult:   { validatedSignals: [], insights: [], patterns: [], activeRisks: [] } as any,
-    competencies:     state.competencyCoverage,
+    sessionId:       (state as any).sessionId ?? 'unknown',
+    candidateId:     (state as any).sessionId ?? 'unknown',
+    jobTitle:        config.jobTitle,
+    institution:     config.institution,
+    language:        config.language,
+    completedPhases: [] as any[],
+    durationMinutes: elapsedMinutes,
+    totalMessages:   messages.length,
+    scoreBreakdown:  {} as any,
+    behaviorResult:  { validatedSignals: [], insights: [], patterns: [], activeRisks: [] } as any,
+    competencies:    coverageState.competencyCoverage,
     contradictionSummary: { total: 0 } as any,
-    phaseSummaries:   [] as any[],
+    phaseSummaries:  [] as any[],
     now,
   } as unknown as Parameters<typeof buildSessionSnapshot>[0]
 
-  // HARDENING: the snapshot stub above passes an EMPTY scoreBreakdown ({}), and
-  // buildSessionSnapshot → toScoreSnapshot dereferences
-  // scoreBreakdown.dimensions.engagement → throws "reading 'engagement'" and
-  // 500's the session close. The snapshot + longitudinal work is NOT
-  // launch-critical, so we isolate it: on ANY failure we close the session
-  // gracefully (snapshot=null, trackers unchanged). The proper fix is to feed a
-  // real score breakdown here — the "connect engine data to the report" item.
   let snapshot: SessionSnapshot | null = null
   let weaknessPatch = weaknessState
-  let growthPatch   = growthState
+  let growthPatch = growthState
+
   try {
-    snapshot        = buildSessionSnapshot(snapshotInput)
-    const delta     = computeSessionDelta(snapshot, previousSnapshot, now)
+    snapshot = buildSessionSnapshot(snapshotInput)
+
+    const delta = computeSessionDelta(snapshot, previousSnapshot, now)
     const sessionId = (state as any).sessionId ?? 'unknown'
-    weaknessPatch   = updateWeaknessTracker(weaknessState, delta, sessionId, now)
-    growthPatch     = updateGrowthTracker(growthState,     delta, sessionId, now)
+
+    weaknessPatch = updateWeaknessTracker(weaknessState, delta, sessionId, now)
+    growthPatch = updateGrowthTracker(growthState, delta, sessionId, now)
   } catch (err) {
-    console.error('[barbaros:endSession] snapshot/longitudinal failed — closing gracefully:', err)
-    snapshot      = null
+    console.error('[barbaros:endSession] snapshot/longitudinal failed, closing gracefully:', err)
+
+    snapshot = null
     weaknessPatch = weaknessState
-    growthPatch   = growthState
+    growthPatch = growthState
   }
 
   return {
     content:         closingContent,
     audioBase64,
     score:           null,
-    statePatch:      { phase: 'closing' } as Partial<SessionState>,
+    statePatch: {
+      phase:              'closing',
+      competencyCoverage: coverageState.competencyCoverage,
+    } as Partial<SessionState>,
     weaknessPatch,
     growthPatch,
     isEndOfSession:  true,
@@ -699,19 +622,51 @@ async function buildEndOfSessionOutput(
     snapshot,
     promptCharCount: 0,
     truncated:       false,
+    coveredAreas,
   }
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-// Fallback opening if buildPrompt returns no openingMessage for any reason.
+function buildCoverageStateForEnd(
+  state:    SessionState,
+  config:   InterviewConfig,
+  messages: Message[],
+  now:      number
+): SessionState {
+  const baseState: SessionState = { ...state, config }
+
+  const lastUserMsg = [...messages].reverse().find(
+    m => m.role === 'user' && m.content.trim()
+  )
+
+  if (!lastUserMsg) {
+    return baseState
+  }
+
+  let coverageState = baseState
+
+  const matchedCompetencies = matchCompetenciesInText(
+    baseState,
+    lastUserMsg.content
+  )
+
+  for (const competency of matchedCompetencies) {
+    coverageState = applyEvidenceDelta(
+      coverageState,
+      competency,
+      lastUserMsg.content,
+      now
+    )
+  }
+
+  return coverageState
+}
+
 function defaultOpening(config: InterviewConfig): string {
   return `Hello ${config.candidateName}, I'm Barbaros. We're here today for the ${config.jobTitle} position at ${config.institution}. Are you ready to begin?`
 }
 
-// Builds the RawScoreInput consumed by normalizeScores from live engine state.
-// Pure: same inputs → same output. Extracted from section 5 for readability and
-// isolated testability (keeps runEngine an orchestrator, not a calculator).
 function buildRawScoreInput(
   behavior:       any,
   competencies:   SessionState['competencyCoverage'],
@@ -720,9 +675,9 @@ function buildRawScoreInput(
   elapsedMinutes: number,
   now:            number
 ): RawScoreInput {
-  const majorContradictions    = contradictions.filter(c => c.severity === 'major').length
+  const majorContradictions = contradictions.filter(c => c.severity === 'major').length
   const moderateContradictions = contradictions.filter(c => c.severity === 'moderate').length
-  const totalUserMessages      = messages.filter(m => m.role === 'user').length
+  const totalUserMessages = messages.filter(m => m.role === 'user').length
 
   return {
     behavior,
@@ -736,21 +691,23 @@ function buildRawScoreInput(
   }
 }
 
-// Lightweight per-answer signals for the Director, derived from the candidate's
-// last message. STOPGAP: replace with real BehaviorSignals (vagueness,
-// hasExamples) from the behavior pipeline when those are surfaced per turn.
 function quickAnswerSignals(
   text: string
 ): { vagueness: 'low' | 'medium' | 'high'; hasExamples: boolean } {
   const t = text.trim()
   const words = t.split(/\s+/).filter(Boolean).length
+
   const hasExamples =
     /\b(for example|for instance|e\.g\.|such as|specifically|one time|once|when i|at my|last year|this year|in \d{4})\b/i.test(t) ||
     /\d/.test(t)
 
   let vagueness: 'low' | 'medium' | 'high' = 'low'
-  if (!hasExamples && words < 25) vagueness = 'high'
-  else if (!hasExamples && words < 60) vagueness = 'medium'
+
+  if (!hasExamples && words < 25) {
+    vagueness = 'high'
+  } else if (!hasExamples && words < 60) {
+    vagueness = 'medium'
+  }
 
   return { vagueness, hasExamples }
 }
@@ -760,13 +717,19 @@ function deriveSilenceRisk(
 ): 'low' | 'medium' | 'high' {
   const hasSilence = activeRisks.some(r => r.type === 'silence_risk')
   const hasDropout = activeRisks.some(r => r.type === 'dropout_risk')
+
   if (hasSilence && hasDropout) return 'high'
   if (hasSilence || hasDropout) return 'medium'
   return 'low'
 }
 
 function buildMiniDelta(
-  patterns:  Array<{ canonicalKey: string; canonicalType: string; polarity: 'positive' | 'negative'; occurrences: number }>,
+  patterns: Array<{
+    canonicalKey: string
+    canonicalType: string
+    polarity: 'positive' | 'negative'
+    occurrences: number
+  }>,
   sessionId: string,
   now:       number
 ): SessionDelta {

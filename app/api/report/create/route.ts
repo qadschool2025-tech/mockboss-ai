@@ -1,6 +1,6 @@
-
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import { tasks } from "@trigger.dev/sdk";
 
 export const runtime = "nodejs";
 
@@ -58,13 +58,24 @@ export async function POST(req: NextRequest) {
     .single();
 
   if (!insertError && inserted) {
+    // New job only -> trigger the worker by string id.
+    // No import from trigger/ , so the task code (and ws) never enters this bundle.
+    let triggered = false;
+    try {
+      await tasks.trigger("report-generate", { reportJobId: inserted.id });
+      triggered = true;
+    } catch (err) {
+      // The job is already persisted; a failed trigger must NOT roll it back.
+      console.error("[report:create] trigger report-generate failed:", err);
+    }
+
     return NextResponse.json(
-      { reportJobId: inserted.id, status: inserted.status, created: true },
+      { reportJobId: inserted.id, status: inserted.status, created: true, triggered },
       { status: 201 }
     );
   }
 
-  // 2. Duplicate session_id (unique violation) -> return the existing job
+  // 2. Duplicate session_id -> return existing job, do NOT trigger again
   if (insertError?.code === "23505") {
     const { data: existing, error: selectError } = await supabase
       .from("report_jobs")

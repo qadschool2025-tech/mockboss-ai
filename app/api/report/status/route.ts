@@ -1,4 +1,3 @@
-
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
@@ -11,6 +10,7 @@ type ReportJobRow = {
   session_id: string;
   status: ReportJobStatus;
   report_data: Record<string, unknown> | null;
+  config: Record<string, unknown> | null;
   error_message: string | null;
   created_at: string | null;
   started_at: string | null;
@@ -41,6 +41,7 @@ export async function GET(req: NextRequest) {
         "session_id",
         "status",
         "report_data",
+        "config",
         "error_message",
         "created_at",
         "started_at",
@@ -79,6 +80,7 @@ export async function GET(req: NextRequest) {
         reportJobId: data.id,
         sessionId: data.session_id,
         report: data.report_data,
+        config: data.config ?? null,
         error: null,
         timestamps: {
           createdAt: data.created_at,
@@ -98,6 +100,7 @@ export async function GET(req: NextRequest) {
         reportJobId: data.id,
         sessionId: data.session_id,
         report: null,
+        config: data.config ?? null,
         error: data.error_message || "Report generation failed",
         timestamps: {
           createdAt: data.created_at,
@@ -116,6 +119,7 @@ export async function GET(req: NextRequest) {
       reportJobId: data.id,
       sessionId: data.session_id,
       report: null,
+      config: data.config ?? null,
       error: null,
       timestamps: {
         createdAt: data.created_at,

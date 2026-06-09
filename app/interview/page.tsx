@@ -849,67 +849,61 @@ function InterviewRoom() {
     ? ['تحليل اتساق إجاباتك...', 'مراجعة العمق التخصصي...', 'رصد الأنماط السلوكية...', 'إعداد تقييم التوظيف...']
     : ['Analyzing answer consistency...', 'Reviewing domain depth...', 'Detecting behavioral patterns...', 'Generating hiring evaluation...']
 
-  const goToReport = async () => {
-    setGenError(null)
-    setIsGenerating(true)
-    setGenStep(0)
+const goToReport = async () => {
+  setGenError(null)
+  setIsGenerating(true)
+  setGenStep(0)
 
-    if (silenceTimer.current) clearTimeout(silenceTimer.current)
+  if (silenceTimer.current) clearTimeout(silenceTimer.current)
 
-    stopAudio()
+  stopAudio()
 
-    const stepTimer = setInterval(() => {
-      setGenStep(prev => (prev + 1) % genSteps.length)
-    }, 2200)
+  const stepTimer = setInterval(() => {
+    setGenStep(prev => (prev + 1) % genSteps.length)
+  }, 2200)
 
-    try {
-      const res = await fetch('/api/generate-report', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          messages: messagesRef.current,
-          coveredAreas: coveredAreasRef.current,
-          config: {
-            candidateName:   CONFIG.candidateName,
-            jobTitle:        CONFIG.jobTitle,
-            institution:     CONFIG.institution,
-            sector:          CONFIG.sector,
-            yearsExperience: CONFIG.yearsExperience,
-            language:        CONFIG.language,
-            plan:            CONFIG.plan,
-            coveredAreas:    coveredAreasRef.current,
-          },
-        }),
-      })
+  try {
+    const res = await fetch('/api/report/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session_id: CONFIG.sessionId,
+        messages: messagesRef.current,
+        covered_areas: coveredAreasRef.current,
+        config: {
+          candidateName:   CONFIG.candidateName,
+          jobTitle:        CONFIG.jobTitle,
+          institution:     CONFIG.institution,
+          sector:          CONFIG.sector,
+          yearsExperience: CONFIG.yearsExperience,
+          language:        CONFIG.language,
+          plan:            CONFIG.plan,
+          coveredAreas:    coveredAreasRef.current,
+        },
+      }),
+    })
 
-      const data = await res.json()
+    const data = await res.json()
 
-      if (!data.success) throw new Error(data.error || 'Report generation failed')
-
-      sessionStorage.setItem('barbaros_report', JSON.stringify({
-        report:          data.report,
-        candidateName:   CONFIG.candidateName,
-        jobTitle:        CONFIG.jobTitle,
-        institution:     CONFIG.institution,
-        sector:          CONFIG.sector,
-        yearsExperience: CONFIG.yearsExperience,
-        language:        CONFIG.language,
-        plan:            CONFIG.plan,
-        coveredAreas:    coveredAreasRef.current,
-      }))
-
-      clearInterval(stepTimer)
-      window.location.href = '/report'
-    } catch (err: any) {
-      clearInterval(stepTimer)
-      setIsGenerating(false)
-      setGenError(
-        CONFIG.language === 'ar'
-          ? 'تعذّر إنشاء التقرير. حاول مرة أخرى.'
-          : 'Could not generate the report. Please try again.'
-      )
+    if (!res.ok || !data.reportJobId) {
+      throw new Error(data.error || 'Report job creation failed')
     }
+
+    clearInterval(stepTimer)
+
+    window.location.href = `/report?reportJobId=${encodeURIComponent(
+      data.reportJobId
+    )}`
+  } catch (err: any) {
+    clearInterval(stepTimer)
+    setIsGenerating(false)
+    setGenError(
+      CONFIG.language === 'ar'
+        ? 'تعذّر إنشاء التقرير. حاول مرة أخرى.'
+        : 'Could not generate the report. Please try again.'
+    )
   }
+}
 
   // Time-up or engine-signalled end now routes through isClosing first.
   // goToReport runs only after finishClosing sets isEnded.

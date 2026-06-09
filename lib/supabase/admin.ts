@@ -1,5 +1,4 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import WebSocket from 'ws';
 
 let cachedClient: SupabaseClient | null = null;
 
@@ -22,11 +21,7 @@ export function getSupabaseAdmin(): SupabaseClient {
       autoRefreshToken: false,
       persistSession: false,
     },
-    realtime: {
-      transport: WebSocket as any,
-    },
   });
 
   return cachedClient;
 }
-

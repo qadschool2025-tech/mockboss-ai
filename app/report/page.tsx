@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState, useEffect, Suspense } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 
 interface Competency {
   name: string
@@ -129,116 +129,43 @@ function hasCoverage(coverage?: AssessmentCoverage): coverage is AssessmentCover
   )
 }
 
-export default function ReportPage() {
+/* ---------- Shared centered screen for non-report states ---------- */
+
+function CenteredScreen({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      style={{
+        minHeight: '100vh',
+        background: '#F5F1EB',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontFamily: 'system-ui, sans-serif',
+        padding: 24,
+        textAlign: 'center',
+      }}
+    >
+      {children}
+    </div>
+  )
+}
+
+/* ---------- Report view (unchanged design, fed by props) ---------- */
+
+function ReportView({ data }: { data: Stored }) {
   const router = useRouter()
-  const [mounted, setMounted] = useState(false)
-  const [data, setData] = useState<Stored | null>(null)
   const [showReplay, setShowReplay] = useState(true)
 
-  useEffect(() => {
-    try {
-      const raw = sessionStorage.getItem('barbaros_report')
-
-      if (raw) {
-        const parsed = JSON.parse(raw)
-
-        if (parsed.report) {
-          setData(parsed)
-        }
-      }
-    } catch {}
-
-    setMounted(true)
-  }, [])
-
-  const isAr = data?.language === 'ar'
-
-  if (!mounted) {
-    return (
-      <div
-        style={{
-          minHeight: '100vh',
-          background: '#F5F1EB',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-      >
-        <div
-          style={{
-            fontSize: 14,
-            color: 'rgba(26,26,26,0.4)',
-            fontFamily: 'system-ui',
-          }}
-        >
-          Loading report...
-        </div>
-      </div>
-    )
-  }
-
-  if (!data || !data.report) {
-    return (
-      <div
-        style={{
-          minHeight: '100vh',
-          background: '#F5F1EB',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          fontFamily: 'system-ui',
-          padding: 24,
-          textAlign: 'center',
-        }}
-      >
-        <div
-          style={{
-            fontSize: 15,
-            color: '#1A1A1A',
-            fontWeight: 700,
-            marginBottom: 8,
-          }}
-        >
-          No report found
-        </div>
-
-        <div
-          style={{
-            fontSize: 13,
-            color: 'rgba(26,26,26,0.5)',
-            marginBottom: 20,
-          }}
-        >
-          Complete an interview to generate your report.
-        </div>
-
-        <button
-          onClick={() => router.push('/onboarding')}
-          style={{
-            background: '#CC785C',
-            color: '#fff',
-            border: 'none',
-            borderRadius: 12,
-            padding: '12px 28px',
-            fontSize: 13,
-            fontWeight: 700,
-            cursor: 'pointer',
-          }}
-        >
-          Start an Interview
-        </button>
-      </div>
-    )
-  }
-
+  const isAr = data.language === 'ar'
   const r = data.report
   const v = verdictStyle(r.readinessLevel)
   const coverage = r.assessmentCoverage
 
- const footerText = isAr
-  ? 'تم إعداد هذا التقرير وفق منهجية تقييم منظمة قائمة على الكفاءات، ومتوافقة مع ممارسات التوظيف الحديثة المستخدمة في الجهات الحكومية، والمؤسسات العالمية، والشركات الرائدة في القطاع الخاص.'
-  : 'Generated through a structured, competency-based evaluation methodology aligned with modern hiring practices used across government entities, global organizations, and leading private-sector companies.'
+  const footerText = isAr
+    ? 'تم إعداد هذا التقرير وفق منهجية تقييم منظمة قائمة على الكفاءات، ومتوافقة مع ممارسات التوظيف الحديثة المستخدمة في الجهات الحكومية، والمؤسسات العالمية، والشركات الرائدة في القطاع الخاص.'
+    : 'Generated through a structured, competency-based evaluation methodology aligned with modern hiring practices used across government entities, global organizations, and leading private-sector companies.'
+
   return (
     <div
       dir={isAr ? 'rtl' : 'ltr'}
@@ -493,7 +420,7 @@ export default function ReportPage() {
                       textTransform: 'uppercase',
                     }}
                   >
-                {isAr ? 'المحاور التي تغطيها باقة Essential' : 'Covered by your Essential Assessment'}
+                    {isAr ? 'المحاور التي تغطيها باقة Essential' : 'Covered by your Essential Assessment'}
                   </div>
 
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
@@ -1001,10 +928,7 @@ export default function ReportPage() {
         {/* 9. CTA */}
         <div style={{ textAlign: 'center', marginTop: 8 }}>
           <button
-            onClick={() => {
-              sessionStorage.removeItem('barbaros_report')
-              router.push('/onboarding')
-            }}
+            onClick={() => router.push('/onboarding')}
             style={{
               background: 'transparent',
               color: '#CC785C',
@@ -1047,5 +971,233 @@ export default function ReportPage() {
         </div>
       </div>
     </div>
+  )
+}
+
+/* ---------- Orchestrator: reads reportJobId, polls status ---------- */
+
+type Phase = 'loading' | 'ready' | 'failed' | 'error'
+
+function ReportContent() {
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const reportJobId = searchParams.get('reportJobId')
+
+  const [phase, setPhase] = useState<Phase>('loading')
+  const [data, setData] = useState<Stored | null>(null)
+  const [lang, setLang] = useState<'en' | 'ar'>('en')
+
+  useEffect(() => {
+    if (!reportJobId) return
+
+    let cancelled = false
+    let timer: ReturnType<typeof setInterval> | null = null
+
+    const stop = () => {
+      if (timer) {
+        clearInterval(timer)
+        timer = null
+      }
+    }
+
+    const readLang = (cfg: Record<string, unknown>) => {
+      if (cfg && typeof cfg.language === 'string') {
+        setLang(cfg.language === 'ar' ? 'ar' : 'en')
+      }
+    }
+
+    const poll = async () => {
+      try {
+        const res = await fetch(
+          `/api/report/status?reportJobId=${encodeURIComponent(reportJobId)}`,
+          { cache: 'no-store' }
+        )
+        const json = await res.json()
+        if (cancelled) return
+
+        const cfg = (json?.config ?? {}) as Record<string, unknown>
+        readLang(cfg)
+
+        if (!res.ok) {
+          stop()
+          setPhase('error')
+          return
+        }
+
+        if (json.status === 'completed' && json.report) {
+          const str = (k: string) =>
+            typeof cfg[k] === 'string' ? (cfg[k] as string) : ''
+
+          stop()
+          setData({
+            report: json.report as Report,
+            candidateName: str('candidateName'),
+            jobTitle: str('jobTitle'),
+            institution: str('institution'),
+            sector: str('sector'),
+            yearsExperience: str('yearsExperience'),
+            language: str('language') || 'en',
+            plan: str('plan'),
+          })
+          setPhase('ready')
+          return
+        }
+
+        if (json.status === 'failed') {
+          stop()
+          setPhase('failed')
+          return
+        }
+
+        // pending | processing -> keep polling
+        setPhase('loading')
+      } catch {
+        // transient network issue: keep polling, do not crash
+        if (!cancelled) setPhase('loading')
+      }
+    }
+
+    poll()
+    timer = setInterval(poll, 3000)
+
+    return () => {
+      cancelled = true
+      stop()
+    }
+  }, [reportJobId])
+
+  if (!reportJobId) {
+    return (
+      <CenteredScreen>
+        <Barbaros size={20} />
+        <div style={{ marginTop: 16, fontSize: 15, fontWeight: 700, color: '#1A1A1A' }}>
+          {lang === 'ar' ? 'رابط التقرير غير مكتمل' : 'Incomplete report link'}
+        </div>
+        <div
+          style={{
+            marginTop: 8,
+            fontSize: 12.5,
+            color: 'rgba(26,26,26,0.5)',
+            maxWidth: 360,
+            lineHeight: 1.7,
+            marginBottom: 20,
+          }}
+        >
+          {lang === 'ar'
+            ? 'لا يحتوي هذا الرابط على مُعرّف تقرير صالح. ابدأ مقابلة للحصول على تقريرك.'
+            : 'This link does not include a valid report reference. Start an interview to generate your report.'}
+        </div>
+        <button
+          onClick={() => router.push('/onboarding')}
+          style={{
+            background: '#CC785C',
+            color: '#fff',
+            border: 'none',
+            borderRadius: 12,
+            padding: '12px 28px',
+            fontSize: 13,
+            fontWeight: 700,
+            cursor: 'pointer',
+          }}
+        >
+          {lang === 'ar' ? 'ابدأ مقابلة' : 'Start an Interview'}
+        </button>
+      </CenteredScreen>
+    )
+  }
+
+  if (phase === 'ready' && data) {
+    return <ReportView data={data} />
+  }
+
+  if (phase === 'failed' || phase === 'error') {
+    return (
+      <CenteredScreen>
+        <Barbaros size={20} />
+        <div style={{ marginTop: 16, fontSize: 15, fontWeight: 700, color: '#1A1A1A' }}>
+          {lang === 'ar' ? 'تعذّر إنشاء التقرير' : 'We could not generate your report'}
+        </div>
+        <div
+          style={{
+            marginTop: 8,
+            fontSize: 12.5,
+            color: 'rgba(26,26,26,0.5)',
+            maxWidth: 360,
+            lineHeight: 1.7,
+            marginBottom: 20,
+          }}
+        >
+          {lang === 'ar'
+            ? 'حدث خطأ أثناء تجهيز التقييم. يمكنك المحاولة مجدداً بإجراء مقابلة جديدة.'
+            : 'Something went wrong while preparing the assessment. You can try again with a new interview.'}
+        </div>
+        <button
+          onClick={() => router.push('/onboarding')}
+          style={{
+            background: '#CC785C',
+            color: '#fff',
+            border: 'none',
+            borderRadius: 12,
+            padding: '12px 28px',
+            fontSize: 13,
+            fontWeight: 700,
+            cursor: 'pointer',
+          }}
+        >
+          {lang === 'ar' ? 'مقابلة جديدة' : 'Start a New Interview'}
+        </button>
+      </CenteredScreen>
+    )
+  }
+
+  // loading (pending | processing | initial)
+  return (
+    <CenteredScreen>
+      <Barbaros size={22} />
+      <div
+        style={{
+          marginTop: 18,
+          fontSize: 14,
+          fontWeight: 700,
+          color: '#1A1A1A',
+          lineHeight: 1.6,
+        }}
+      >
+        {lang === 'ar' ? (
+          <>يتم الآن إعداد تقرير <Barbaros size={14} /> الخاص بك...</>
+        ) : (
+          <>Your <Barbaros size={14} /> report is being prepared...</>
+        )}
+      </div>
+      <div
+        style={{
+          marginTop: 8,
+          fontSize: 12.5,
+          color: 'rgba(26,26,26,0.5)',
+          lineHeight: 1.7,
+          maxWidth: 340,
+        }}
+      >
+        {lang === 'ar'
+          ? 'نقوم بتحليل المقابلة وتجهيز التقييم. يُرجى إبقاء هذه الصفحة مفتوحة.'
+          : 'We are analyzing your interview and compiling the assessment. Please keep this page open.'}
+      </div>
+    </CenteredScreen>
+  )
+}
+
+/* ---------- Page export: Suspense wrapper required for useSearchParams ---------- */
+
+export default function ReportPage() {
+  return (
+    <Suspense
+      fallback={
+        <CenteredScreen>
+          <Barbaros size={20} />
+        </CenteredScreen>
+      }
+    >
+      <ReportContent />
+    </Suspense>
   )
 }

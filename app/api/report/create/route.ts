@@ -11,6 +11,19 @@ type CreateBody = {
   covered_areas?: unknown;
 };
 
+// Triggers the worker by string id (no import of the task module, so the task
+// code and its `ws` dependency never enter this bundle). A failed trigger is
+// logged and reported, never thrown — the job is already persisted.
+async function triggerWorker(reportJobId: string): Promise<boolean> {
+  try {
+    await tasks.trigger("report-generate", { reportJobId });
+    return true;
+  } catch (err) {
+    console.error("[report:create] trigger report-generate failed:", err);
+    return false;
+  }
+}
+
 export async function POST(req: NextRequest) {
   let body: CreateBody;
   try {
@@ -58,24 +71,14 @@ export async function POST(req: NextRequest) {
     .single();
 
   if (!insertError && inserted) {
-    // New job only -> trigger the worker by string id.
-    // No import from trigger/ , so the task code (and ws) never enters this bundle.
-    let triggered = false;
-    try {
-      await tasks.trigger("report-generate", { reportJobId: inserted.id });
-      triggered = true;
-    } catch (err) {
-      // The job is already persisted; a failed trigger must NOT roll it back.
-      console.error("[report:create] trigger report-generate failed:", err);
-    }
-
+    const triggered = await triggerWorker(inserted.id);
     return NextResponse.json(
       { reportJobId: inserted.id, status: inserted.status, created: true, triggered },
       { status: 201 }
     );
   }
 
-  // 2. Duplicate session_id -> return existing job, do NOT trigger again
+  // 2. Duplicate session_id -> return the existing job
   if (insertError?.code === "23505") {
     const { data: existing, error: selectError } = await supabase
       .from("report_jobs")
@@ -84,8 +87,15 @@ export async function POST(req: NextRequest) {
       .single();
 
     if (!selectError && existing) {
+      // Safe recovery: a prior trigger may have failed, leaving the job stuck
+      // 'pending'. Re-trigger ONLY while still pending. The worker lock prevents
+      // double processing if the task ends up triggered twice.
+      let triggered = false;
+      if (existing.status === "pending") {
+        triggered = await triggerWorker(existing.id);
+      }
       return NextResponse.json(
-        { reportJobId: existing.id, status: existing.status, created: false },
+        { reportJobId: existing.id, status: existing.status, created: false, triggered },
         { status: 200 }
       );
     }

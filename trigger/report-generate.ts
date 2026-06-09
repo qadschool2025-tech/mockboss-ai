@@ -1,7 +1,6 @@
 
 import { task } from '@trigger.dev/sdk'
-import { getSupabaseAdmin } from '../lib/supabase/admin'
-
+import { getTriggerSupabaseAdmin } from './supabase-admin'
 type ReportGeneratePayload = {
   reportJobId: string
 }
@@ -16,7 +15,7 @@ export const reportGenerate = task({
       throw new Error('reportJobId is required in payload')
     }
 
-    const supabase = getSupabaseAdmin()
+  const supabase = getTriggerSupabaseAdmin()
     const runId = ctx.run.id
     const now = new Date().toISOString()
 

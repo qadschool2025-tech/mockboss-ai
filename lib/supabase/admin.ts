@@ -29,3 +29,4 @@ export function getSupabaseAdmin(): SupabaseClient {
 
   return cachedClient;
 }
+

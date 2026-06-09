@@ -1,31 +1,32 @@
+import { createClient, type SupabaseClient } from '@supabase/supabase-js'
+import ws from 'ws'
 
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+let cachedClient: SupabaseClient | null = null
 
-let cached: SupabaseClient | null = null;
-
-/**
- * Server-side Supabase client using the service_role key.
- * Bypasses Row Level Security. NEVER import this into client-side code.
- * Use only inside API routes or other server-only code.
- */
 export function getSupabaseAdmin(): SupabaseClient {
-  if (cached) return cached;
+  if (cachedClient) return cachedClient
 
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const supabaseUrl = process.env.NEXT_PUBLIC createClient, type SupabaseClient } from '@supabase/supabase-js'
+import ws from 'ws'
 
-  if (!url || !serviceRoleKey) {
+let cachedClient:_SUPABASE_URL
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+
+  if (!supabaseUrl || !serviceRoleKey) {
     throw new Error(
-      "Missing Supabase env vars: NEXT_PUBLIC_SUPABASE_URL and/or SUPABASE_SERVICE_ROLE_KEY"
-    );
+      'Missing Supabase environment variables: NEXT_PUBLIC_SUPABASE_URL and/or SUPABASE_SERVICE_ROLE_KEY'
+    )
   }
 
-  cached = createClient(url, serviceRoleKey, {
+  cachedClient = createClient(supabaseUrl, serviceRoleKey, {
     auth: {
       autoRefreshToken: false,
       persistSession: false,
     },
-  });
+    realtime: {
+      transport: ws as any,
+    },
+  })
 
-  return cached;
+  return cachedClient
 }

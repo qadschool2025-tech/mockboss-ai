@@ -596,7 +596,7 @@ async function repairJson(
 // ─── Core (Next-independent, reusable by Trigger worker) ─────────────────────
 
 // claude-sonnet-4-5 supports far larger outputs; 16000 gives an Arabic report
-// with a full replay section real headroom (Arabic is 2-3x heavier in tokens).
+// with a full replay section real headroom, especially for Arabic reports.
 // Raising the cap costs nothing unless the tokens are actually generated.
 const REPORT_MAX_TOKENS = 16000
 

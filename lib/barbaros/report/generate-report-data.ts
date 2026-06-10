@@ -1,4 +1,3 @@
-
 // lib/barbaros/report/generate-report-data.ts
 // Barbaros report data generator (Next-independent, reusable).
 // Logic extracted verbatim from app/api/generate-report/route.ts.
@@ -48,6 +47,7 @@ export interface AssessmentCoverage {
 
 export class ReportGenerationError extends Error {
   readonly status: number
+
   constructor(message: string, status: number) {
     super(message)
     this.name = 'ReportGenerationError'
@@ -74,6 +74,22 @@ const DEEPER_ASSESSMENT_LABELS: Record<'en' | 'ar', string[]> = {
     'تحليل سلوكي مطوّل',
     'محاكاة أدوار متعددة',
   ],
+}
+
+const AR_READINESS_LEVELS: Record<string, string> = {
+  'Strong Hire': 'جاهز بقوة',
+  'Maybe Hire': 'قابل للتوصية بحذر',
+  'Risky Candidate': 'مخاطرة عالية',
+  'Not Recommended': 'غير جاهز حالياً',
+}
+
+const AR_COMPETENCY_NAMES: Record<string, string> = {
+  Communication: 'التواصل',
+  Confidence: 'الثقة',
+  'Domain Expertise': 'الخبرة في المجال',
+  Structure: 'تنظيم الإجابة',
+  'Problem Solving': 'حل المشكلات',
+  Clarity: 'الوضوح',
 }
 
 function reportLang(language: string): 'en' | 'ar' {
@@ -122,15 +138,15 @@ function buildAssessmentCoverage(
 
   const upgradeNote =
     lang === 'ar'
-      ? `ركّز تقييمك الحالي ضمن باقة Essential على المحاور الأساسية الأكثر تأثيراً في الجاهزية المبدئية للمقابلة: ${joinAr(coveredLabels)}. للحصول على تقييم أعمق, تمنحك الباقات الأعلى تغطية أوسع تشمل العمق التقني المتقدم، الحكم القيادي، الضغط القائم على السيناريوهات، التفكير الاستراتيجي، التحليل السلوكي المطوّل، ومحاكاة أدوار متعددة.`
-      : `Your current Essential Assessment focused on the core areas most important for baseline interview readiness: ${joinEn(coveredLabels)}. For a deeper evaluation, higher packages expand the assessment into advanced technical depth, leadership judgment, scenario-based pressure, strategic thinking, long-form behavioral analysis, and multiple role simulations.`
+      ? `ضمن هذه الباقة، تم تقييم المحاور الأساسية التالية فقط: ${joinAr(coveredLabels)}. أمّا المحاور المتقدمة الظاهرة أدناه فلم يتم قياسها ضمن هذه الجلسة، وهي متاحة بتفصيل أعمق في الباقات الأعلى. مهنياً، هذا لا يعني أن تقريرك ناقص؛ بل يعني أن هذه الباقة تقيس جاهزيتك الأساسية للمقابلة، بينما تكشف الباقات الأعلى صورة أوسع عن أدائك، وحكمك القيادي، وتفكيرك الاستراتيجي، وقدرتك على الثبات تحت ضغط أقرب للمقابلات الحقيقية.`
+      : `In this package, only the following core areas were assessed: ${joinEn(coveredLabels)}. The advanced areas listed below were not measured in this session; they are available in greater depth in higher-tier plans. Professionally, this does not mean your report is incomplete; it means this package measures your baseline interview readiness, while higher-tier plans reveal a fuller picture of your performance, leadership judgment, strategic thinking, and ability to perform under realistic interview pressure.`
 
   return {
-    title: lang === 'ar' ? 'نطاق التقييم' : 'Assessment Coverage',
+    title: lang === 'ar' ? 'نطاق التقييم في هذه الباقة' : 'Assessment scope for this package',
     summary:
       lang === 'ar'
-        ? 'يقدّم التقييم الأساسي تقييماً مركّزاً عالي الإشارة للمحاور الجوهرية التي تحدّد الجاهزية المبدئية.'
-        : 'This Essential Assessment delivers a focused, high-signal evaluation of the core areas that determine baseline readiness.',
+        ? 'يعرض هذا القسم نطاق التقييم المُنجز في هذه الباقة، والمحاور المتاحة بتفصيل أعمق في الباقات الأعلى.'
+        : 'This section outlines the scope of evaluation completed in this package and the areas available in greater depth in higher-tier plans.',
     coveredAreaKeys: coveredAreas,
     coveredAreas: coveredLabels,
     recommendedForDeeperAssessment: DEEPER_ASSESSMENT_LABELS[lang],
@@ -147,13 +163,49 @@ function buildTranscript(messages: IncomingMessage[]): string {
 
   return clean
     .map(message => {
-      const speaker = message.role === 'assistant'
-        ? 'INTERVIEWER (Barbaros)'
-        : 'CANDIDATE'
+      const speaker =
+        message.role === 'assistant'
+          ? 'INTERVIEWER (Barbaros)'
+          : 'CANDIDATE'
 
       return `${speaker}: ${message.content.trim()}`
     })
     .join('\n\n')
+}
+
+// ─── Report output localization guard ────────────────────────────────────────
+
+function localizeReportLabels(
+  report: Record<string, unknown>,
+  language: string
+): Record<string, unknown> {
+  if (language !== 'ar') return report
+
+  const localized: Record<string, unknown> = { ...report }
+
+  if (typeof localized.readinessLevel === 'string') {
+    localized.readinessLevel =
+      AR_READINESS_LEVELS[localized.readinessLevel] ?? localized.readinessLevel
+  }
+
+  if (Array.isArray(localized.competencies)) {
+    localized.competencies = localized.competencies.map(item => {
+      if (!item || typeof item !== 'object') return item
+
+      const competency = item as Record<string, unknown>
+
+      if (typeof competency.name !== 'string') {
+        return competency
+      }
+
+      return {
+        ...competency,
+        name: AR_COMPETENCY_NAMES[competency.name] ?? competency.name,
+      }
+    })
+  }
+
+  return localized
 }
 
 // ─── Prompt builder ──────────────────────────────────────────────────────────
@@ -172,7 +224,33 @@ function buildReportPrompt(
     ? `Assessment Coverage تم تحديده مسبقاً من محرك المقابلة. لا تضف محاور، لا تحذف محاور، لا تغيّر الأسماء، ولا تعيد تفسيرها. استخدم هذا الكائن كما هو:\n${JSON.stringify(assessmentCoverage, null, 2)}`
     : `Assessment Coverage has already been resolved by the interview engine. Do not add, remove, rename, or reinterpret covered areas. Use this exact object:\n${JSON.stringify(assessmentCoverage, null, 2)}`
 
-  return `You are Barbaros, an elite AI hiring evaluator who has just finished conducting a real, live job interview. You are now writing a private, serious hiring review.
+  const audienceRule = isArabic
+    ? `هذا التقرير يُعرض مباشرة للمرشح، وليس لصاحب العمل. اكتب بصيغة تخاطب المرشح مباشرة: "أداؤك"، "إجابتك"، "تحتاج إلى"، "قبل مقابلتك القادمة". لا تستخدم "المرشح" أو "المرشحة" كصياغة أساسية داخل verdict أو hiddenWeakness أو behavioralPatterns أو recommendation. كن صارماً وواضحاً، لكن اجعل التقرير موجهاً لصاحب الأداء نفسه.`
+    : `This report is shown directly to the candidate, not to the employer. Write in a candidate-facing voice: "your answer", "your performance", "you need to", "before your next interview". Do not mainly write "the candidate" in verdict, hiddenWeakness, behavioralPatterns, or recommendation. Stay direct and rigorous, but address the person who took the interview.`
+
+  const readinessLevelOptions = isArabic
+    ? 'جاهز بقوة | قابل للتوصية بحذر | مخاطرة عالية | غير جاهز حالياً'
+    : 'Strong Hire | Maybe Hire | Risky Candidate | Not Recommended'
+
+  const competencyOutput = isArabic
+    ? `[
+    { "name": "التواصل", "score": <0-100>, "why": "<سبب مبني على دليل من المقابلة>" },
+    { "name": "الثقة", "score": <0-100>, "why": "<سبب مبني على دليل من المقابلة>" },
+    { "name": "الخبرة في المجال", "score": <0-100>, "why": "<سبب مبني على دليل من المقابلة>" },
+    { "name": "تنظيم الإجابة", "score": <0-100>, "why": "<سبب مبني على دليل من المقابلة>" },
+    { "name": "حل المشكلات", "score": <0-100>, "why": "<سبب مبني على دليل من المقابلة>" },
+    { "name": "الوضوح", "score": <0-100>, "why": "<سبب مبني على دليل من المقابلة>" }
+  ]`
+    : `[
+    { "name": "Communication", "score": <0-100>, "why": "<evidence-based reason>" },
+    { "name": "Confidence", "score": <0-100>, "why": "<evidence-based reason>" },
+    { "name": "Domain Expertise", "score": <0-100>, "why": "<evidence-based reason>" },
+    { "name": "Structure", "score": <0-100>, "why": "<evidence-based reason>" },
+    { "name": "Problem Solving", "score": <0-100>, "why": "<evidence-based reason>" },
+    { "name": "Clarity", "score": <0-100>, "why": "<evidence-based reason>" }
+  ]`
+
+  return `You are Barbaros, an elite AI hiring evaluator who has just finished conducting a real, live job interview. You are now writing a private, serious candidate-facing interview performance report.
 
 CANDIDATE CONTEXT:
 - Name: ${config.candidateName}
@@ -190,7 +268,7 @@ CORE RULES
 - Reference real moments and the actual content of the candidate's answers.
 - Do NOT use generic HR filler: "strong candidate", "good communication", "solid understanding", "well-rounded", or "demonstrates potential".
 - Be honest and realistic. If an answer was weak, explain precisely why.
-- Sound like a senior interviewer making a real hiring decision, not like a supportive AI assistant.
+- Sound like a senior interviewer giving a direct private debrief after a real interview, not like a supportive AI assistant.
 - Do not invent experience, licensing, achievements, or qualifications that the candidate did not prove.
 
 ═══════════════════════════════
@@ -231,12 +309,18 @@ HUMAN CALIBRATION
 - Do not compare the candidate to an ideal AI-generated response.
 
 ═══════════════════════════════
+AUDIENCE & VOICE
+═══════════════════════════════
+${audienceRule}
+
+═══════════════════════════════
 ASSESSMENT COVERAGE
 ═══════════════════════════════
 ${coverageRule}
 
 The assessmentCoverage object must appear in the final JSON exactly with the same values.
-The upgradeNote is intentional. Keep it professional, not pushy.
+The upgradeNote is intentional. Keep it professional, clear, and not pushy.
+Make it clear that the advanced areas listed in recommendedForDeeperAssessment were NOT measured in this package.
 
 ═══════════════════════════════
 SCORING RULES
@@ -280,21 +364,14 @@ The JSON must match this exact shape:
 
 {
   "finalScore": <number 0-100>,
-  "readinessLevel": "<one of: Strong Hire | Maybe Hire | Risky Candidate | Not Recommended>",
+  "readinessLevel": "<one of: ${readinessLevelOptions}>",
   "hireProbability": <number 0-100>,
-  "verdict": "<2-3 sentence hiring verdict, specific to this candidate>",
+  "verdict": "<2-3 sentence candidate-facing verdict, specific to this interview>",
   "barbarosAssessment": "<2-3 sentence first-person assessment in Barbaros's voice>",
   "assessmentCoverage": ${JSON.stringify(assessmentCoverage, null, 2)},
-  "competencies": [
-    { "name": "Communication", "score": <0-100>, "why": "<evidence-based reason>" },
-    { "name": "Confidence", "score": <0-100>, "why": "<evidence-based reason>" },
-    { "name": "Domain Expertise", "score": <0-100>, "why": "<evidence-based reason>" },
-    { "name": "Structure", "score": <0-100>, "why": "<evidence-based reason>" },
-    { "name": "Problem Solving", "score": <0-100>, "why": "<evidence-based reason>" },
-    { "name": "Clarity", "score": <0-100>, "why": "<evidence-based reason>" }
-  ],
-  "hiddenWeakness": "<the single most important recurring weakness, described specifically>",
-  "behavioralPatterns": "<2-4 sentences on recurring behavioral patterns observed across the interview>",
+  "competencies": ${competencyOutput},
+  "hiddenWeakness": "<the single most important recurring weakness, written directly to the candidate>",
+  "behavioralPatterns": "<2-4 sentences on recurring behavioral patterns observed across the interview, written directly to the candidate>",
   "replay": [
     {
       "question": "<the interviewer's actual question>",
@@ -305,7 +382,7 @@ The JSON must match this exact shape:
       "stronger": "<a realistic stronger response; empty string if the answer was already strong>"
     }
   ],
-  "recommendation": "<2-3 sentences on what the candidate should do next>"
+  "recommendation": "<2-3 direct sentences on what the candidate should do next>"
 }
 
 Remember: if the report feels reusable or generic, it is wrong. Make it specific to THIS candidate.`
@@ -390,8 +467,10 @@ export async function generateReportData(
     throw new ReportGenerationError('Could not parse report output', 502)
   }
 
+  const localizedReport = localizeReportLabels(report, config.language)
+
   return {
-    ...report,
+    ...localizedReport,
     assessmentCoverage,
   }
 }

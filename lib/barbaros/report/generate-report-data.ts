@@ -388,26 +388,217 @@ The JSON must match this exact shape:
 Remember: if the report feels reusable or generic, it is wrong. Make it specific to THIS candidate.`
 }
 
-// ─── JSON extraction ─────────────────────────────────────────────────────────
+// ─── JSON extraction (4-step ladder) ─────────────────────────────────────────
+// Step 1: direct JSON.parse.
+// Step 2: extract a fenced ```json block.
+// Step 3: string-aware balanced-brace scan for the first complete object
+//         (a blind first-{ / last-} slice breaks on braces inside strings).
+// Step 4: cleanup pass (smart quotes, trailing commas) and re-parse.
 
-function extractJson(text: string): Record<string, unknown> | null {
-  let cleaned = text.replace(/```json/gi, '').replace(/```/g, '').trim()
-
-  const first = cleaned.indexOf('{')
-  const last = cleaned.lastIndexOf('}')
-
-  if (first === -1 || last === -1 || last <= first) return null
-
-  cleaned = cleaned.slice(first, last + 1)
-
+function tryParseObject(text: string): Record<string, unknown> | null {
   try {
-    return JSON.parse(cleaned)
+    const parsed: unknown = JSON.parse(text)
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>
+    }
+    return null
   } catch {
     return null
   }
 }
 
+function extractFencedBlock(text: string): string | null {
+  const match = text.match(/```(?:json)?\s*([\s\S]*?)```/i)
+  return match ? match[1].trim() : null
+}
+
+// Scans from the first '{' tracking string state and escape characters.
+// Returns the first COMPLETE object, or null if the object never closes —
+// which is exactly what truncated output looks like.
+function extractBalancedObject(text: string): string | null {
+  const start = text.indexOf('{')
+  if (start === -1) return null
+
+  let depth = 0
+  let inString = false
+  let escaped = false
+
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i]
+
+    if (escaped) {
+      escaped = false
+      continue
+    }
+
+    if (ch === '\\') {
+      escaped = true
+      continue
+    }
+
+    if (ch === '"') {
+      inString = !inString
+      continue
+    }
+
+    if (inString) continue
+
+    if (ch === '{') depth++
+    if (ch === '}') {
+      depth--
+      if (depth === 0) {
+        return text.slice(start, i + 1)
+      }
+    }
+  }
+
+  return null
+}
+
+function cleanupJsonText(text: string): string {
+  return text
+    .replace(/[\u201C\u201D]/g, '"')   // smart double quotes
+    .replace(/[\u2018\u2019]/g, "'")   // smart single quotes
+    .replace(/,\s*([}\]])/g, '$1')     // trailing commas
+    .trim()
+}
+
+function extractJson(text: string): Record<string, unknown> | null {
+  const trimmed = text.trim()
+
+  // Step 1: direct parse
+  let result = tryParseObject(trimmed)
+  if (result) return result
+
+  // Step 2: fenced block
+  const fenced = extractFencedBlock(trimmed)
+  if (fenced) {
+    result = tryParseObject(fenced) ?? tryParseObject(cleanupJsonText(fenced))
+    if (result) return result
+  }
+
+  // Step 3: balanced-brace scan (on fence-stripped text)
+  const stripped = trimmed.replace(/```json/gi, '').replace(/```/g, '')
+  const balanced = extractBalancedObject(stripped)
+  if (balanced) {
+    result = tryParseObject(balanced) ?? tryParseObject(cleanupJsonText(balanced))
+    if (result) return result
+  }
+
+  // Step 4: cleanup on the whole text, then one more balanced scan
+  const cleaned = cleanupJsonText(stripped)
+  result = tryParseObject(cleaned)
+  if (result) return result
+
+  const cleanedBalanced = extractBalancedObject(cleaned)
+  if (cleanedBalanced) {
+    result = tryParseObject(cleanedBalanced)
+    if (result) return result
+  }
+
+  return null
+}
+
+// ─── Validation ──────────────────────────────────────────────────────────────
+// A report missing a core field must NEVER be persisted as report_data.
+// assessmentCoverage is excluded: it is engine-resolved and force-attached
+// after generation, so the model copy is not the source of truth.
+
+function isNonEmptyString(value: unknown): boolean {
+  return typeof value === 'string' && value.trim().length > 0
+}
+
+function isScoreNumber(value: unknown): boolean {
+  return typeof value === 'number' && Number.isFinite(value)
+}
+
+function validateReportData(report: Record<string, unknown>): string[] {
+  const problems: string[] = []
+
+  if (!isScoreNumber(report.finalScore)) problems.push('finalScore')
+  if (!isNonEmptyString(report.readinessLevel)) problems.push('readinessLevel')
+  if (!isScoreNumber(report.hireProbability)) problems.push('hireProbability')
+  if (!isNonEmptyString(report.verdict)) problems.push('verdict')
+  if (!isNonEmptyString(report.barbarosAssessment)) problems.push('barbarosAssessment')
+  if (!isNonEmptyString(report.hiddenWeakness)) problems.push('hiddenWeakness')
+  if (!isNonEmptyString(report.behavioralPatterns)) problems.push('behavioralPatterns')
+  if (!isNonEmptyString(report.recommendation)) problems.push('recommendation')
+
+  if (!Array.isArray(report.competencies) || report.competencies.length === 0) {
+    problems.push('competencies')
+  }
+
+  if (!Array.isArray(report.replay) || report.replay.length === 0) {
+    problems.push('replay')
+  }
+
+  return problems
+}
+
+// ─── Safe logging ────────────────────────────────────────────────────────────
+// NEVER persist raw model output to Supabase. Trigger/Vercel logs only,
+// and only length + small head/tail slices.
+
+function logRawSafely(stage: string, raw: string): void {
+  const head = raw.slice(0, 120)
+  const tail = raw.length > 240 ? raw.slice(-120) : ''
+  console.error(
+    `[report] ${stage}: raw.length=${raw.length}` +
+    ` head=${JSON.stringify(head)}` +
+    (tail ? ` tail=${JSON.stringify(tail)}` : '')
+  )
+}
+
+// ─── Repair pass ─────────────────────────────────────────────────────────────
+// Internal second chance for COMPLETE but badly formatted output only.
+// NEVER called for truncated output (stop_reason === 'max_tokens'): repairing
+// a truncated report means the model INVENTS the missing tail, which is
+// fabricated evaluative content and violates evidence anchoring.
+
+const REPAIR_SYSTEM_PROMPT = `You are a strict JSON repair tool.
+The user message contains the output of another model that was supposed to be a single valid JSON object but has formatting problems (extra text, markdown fences, bad quotes, trailing commas, unescaped characters).
+
+Your ONLY job:
+- Output the SAME object as a single valid JSON object.
+- Fix syntax only: quoting, escaping, commas, brackets, surrounding noise.
+- Preserve every key and every value EXACTLY. Do not add, remove, translate, shorten, or rewrite ANY content.
+- Output ONLY the JSON object. No markdown. No backticks. No explanation.`
+
+async function repairJson(
+  raw: string
+): Promise<Record<string, unknown> | null> {
+  try {
+    const response = await client.messages.create({
+      model: 'claude-sonnet-4-5',
+      max_tokens: REPORT_MAX_TOKENS,
+      system: REPAIR_SYSTEM_PROMPT,
+      messages: [{ role: 'user', content: raw }],
+    })
+
+    if (response.stop_reason === 'max_tokens') {
+      logRawSafely('repair_output_truncated', raw)
+      return null
+    }
+
+    const repairedRaw =
+      response.content[0]?.type === 'text' ? response.content[0].text : ''
+
+    return extractJson(repairedRaw)
+  } catch (err) {
+    console.error(
+      '[report] repair pass failed:',
+      err instanceof Error ? err.message : err
+    )
+    return null
+  }
+}
+
 // ─── Core (Next-independent, reusable by Trigger worker) ─────────────────────
+
+// claude-sonnet-4-5 supports far larger outputs; 16000 gives an Arabic report
+// with a full replay section real headroom (Arabic is 2-3x heavier in tokens).
+// Raising the cap costs nothing unless the tokens are actually generated.
+const REPORT_MAX_TOKENS = 16000
 
 export async function generateReportData(
   input: GenerateReportInput
@@ -448,7 +639,7 @@ export async function generateReportData(
 
   const response = await client.messages.create({
     model: 'claude-sonnet-4-5',
-    max_tokens: 4000,
+    max_tokens: REPORT_MAX_TOKENS,
     system: systemPrompt,
     messages: [
       {
@@ -461,10 +652,37 @@ export async function generateReportData(
   const raw =
     response.content[0]?.type === 'text' ? response.content[0].text : ''
 
-  const report = extractJson(raw)
+  // Truncated output is NEVER repaired — it is regenerated (worker retry).
+  if (response.stop_reason === 'max_tokens') {
+    logRawSafely('output_truncated', raw)
+    throw new ReportGenerationError(
+      'Report output truncated (max_tokens reached)',
+      502
+    )
+  }
+
+  let report = extractJson(raw)
 
   if (!report) {
+    logRawSafely('parse_failed_trying_repair', raw)
+    report = await repairJson(raw)
+  }
+
+  if (!report) {
+    logRawSafely('repair_failed', raw)
     throw new ReportGenerationError('Could not parse report output', 502)
+  }
+
+  const missingFields = validateReportData(report)
+
+  if (missingFields.length > 0) {
+    console.error(
+      `[report] validation failed, missing/invalid fields: ${missingFields.join(', ')}`
+    )
+    throw new ReportGenerationError(
+      `Report validation failed: ${missingFields.join(', ')}`,
+      502
+    )
   }
 
   const localizedReport = localizeReportLabels(report, config.language)

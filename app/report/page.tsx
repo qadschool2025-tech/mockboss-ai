@@ -51,6 +51,8 @@ interface Stored {
   yearsExperience: string
   language: string
   plan: string
+  reportGeneratedAt?: string
+  reportReference?: string
 }
 
 type Lang = 'en' | 'ar'
@@ -80,12 +82,12 @@ const AR_READINESS_LEVELS: Record<string, string> = {
 }
 
 const AR_COMPETENCY_NAMES: Record<string, string> = {
-  'Communication':    'التواصل',
-  'Confidence':       'الثقة',
-  'Domain Expertise': 'الخبرة في المجال',
-  'Structure':        'تنظيم الإجابة',
+  'Communication':    'التواصل المهني',
+  'Confidence':       'الحضور والاتزان',
+  'Domain Expertise': 'التمكّن المهني في المجال',
+  'Structure':        'بنية الطرح',
   'Problem Solving':  'حل المشكلات',
-  'Clarity':          'الوضوح',
+  'Clarity':          'وضوح الإجابة',
 }
 
 function displayReadinessLevel(level: string, isAr: boolean) {
@@ -195,6 +197,7 @@ const Section = ({
   lang?: Lang
 }) => (
   <div
+    className="report-section"
     style={{
       background: '#FFFFFF',
       border: '1px solid #E5DDD0',
@@ -268,6 +271,266 @@ function hasCoverage(coverage?: AssessmentCoverage): coverage is AssessmentCover
   )
 }
 
+function safeText(value: string | undefined, fallback: string) {
+  const v = typeof value === 'string' ? value.trim() : ''
+  return v || fallback
+}
+
+function displayPlanName(plan: string, isAr: boolean) {
+  const key = (plan || '').toLowerCase()
+
+  if (key.includes('executive')) {
+    return isAr ? 'Executive Interview' : 'Executive Interview'
+  }
+
+  if (key.includes('professional') || key.includes('pro')) {
+    return isAr ? 'Professional Interview' : 'Professional Interview'
+  }
+
+  if (key.includes('essential') || key.includes('basic')) {
+    return isAr ? 'Essential Interview' : 'Essential Interview'
+  }
+
+  return isAr ? 'Barbaros Interview' : 'Barbaros Interview'
+}
+
+function formatReportDate(value: string | undefined, isAr: boolean) {
+  const date = value ? new Date(value) : new Date()
+  const safeDate = Number.isNaN(date.getTime()) ? new Date() : date
+
+  return new Intl.DateTimeFormat(isAr ? 'ar-AE' : 'en-AE', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  }).format(safeDate)
+}
+
+function shortReference(value: string | undefined) {
+  if (!value) return ''
+  return value.replace(/-/g, '').slice(0, 10).toUpperCase()
+}
+
+const MetaItem = ({
+  label,
+  value,
+  isAr,
+}: {
+  label: string
+  value: string
+  isAr: boolean
+}) => (
+  <div
+    style={{
+      background: 'rgba(255,255,255,0.72)',
+      border: '0.5px solid rgba(229,221,208,0.9)',
+      borderRadius: 14,
+      padding: '12px 14px',
+      minHeight: 64,
+    }}
+  >
+    <div
+      style={{
+        fontSize: 10,
+        fontWeight: 800,
+        color: 'rgba(26,26,26,0.42)',
+        marginBottom: 6,
+        ...labelType(isAr),
+      }}
+    >
+      {label}
+    </div>
+    <div
+      style={{
+        fontSize: 13,
+        fontWeight: 800,
+        color: '#1A1A1A',
+        lineHeight: 1.5,
+      }}
+    >
+      {value}
+    </div>
+  </div>
+)
+
+function ReportCover({
+  data,
+  isAr,
+  readinessLabel,
+  reportDate,
+  reference,
+}: {
+  data: Stored
+  isAr: boolean
+  readinessLabel: string
+  reportDate: string
+  reference: string
+}) {
+  return (
+    <section
+      className="report-cover"
+      style={{
+        position: 'relative',
+        overflow: 'hidden',
+        background: 'linear-gradient(135deg, #FFFFFF 0%, #F8EFE7 52%, #F1E4D5 100%)',
+        border: '1px solid rgba(204,120,92,0.25)',
+        borderRadius: 26,
+        padding: '28px',
+        marginBottom: 18,
+        boxShadow: '0 12px 34px rgba(26,26,26,0.08)',
+      }}
+    >
+      <div
+        aria-hidden="true"
+        style={{
+          position: 'absolute',
+          width: 220,
+          height: 220,
+          borderRadius: '50%',
+          background: 'rgba(204,120,92,0.10)',
+          top: -86,
+          insetInlineEnd: -78,
+        }}
+      />
+
+      <div style={{ position: 'relative' }}>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'flex-start',
+            gap: 16,
+            marginBottom: 24,
+          }}
+        >
+          <div>
+            <Barbaros size={26} />
+            <div
+              style={{
+                marginTop: 8,
+                fontSize: 10.5,
+                fontWeight: 800,
+                color: 'rgba(26,26,26,0.45)',
+                ...labelType(isAr),
+              }}
+            >
+              {isAr ? 'منهجية تقييم مقابلات قائمة على الكفاءات' : 'Competency-Based Interview Assessment'}
+            </div>
+          </div>
+
+          <div
+            style={{
+              background: '#1A1A1A',
+              color: '#FFFFFF',
+              borderRadius: 999,
+              padding: '8px 14px',
+              fontSize: 11,
+              fontWeight: 800,
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {displayPlanName(data.plan, isAr)}
+          </div>
+        </div>
+
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: '1.4fr 0.8fr',
+            gap: 18,
+            alignItems: 'end',
+            marginBottom: 22,
+          }}
+          className="cover-title-grid"
+        >
+          <div>
+            <div
+              style={{
+                fontSize: 12,
+                fontWeight: 800,
+                color: '#CC785C',
+                marginBottom: 8,
+                ...labelType(isAr),
+              }}
+            >
+              {isAr ? 'تقرير تقييم المقابلة' : 'Interview Assessment Report'}
+            </div>
+
+            <h1
+              style={{
+                fontFamily: SERIF,
+                fontSize: 34,
+                lineHeight: 1.12,
+                color: '#1A1A1A',
+                margin: 0,
+                letterSpacing: -0.4,
+              }}
+            >
+              {isAr ? 'تحليل مهني لأداء المرشح' : 'Professional Candidate Performance Analysis'}
+            </h1>
+          </div>
+
+          <div
+            style={{
+              background: 'rgba(26,26,26,0.92)',
+              borderRadius: 18,
+              padding: '16px 18px',
+              color: '#FFFFFF',
+              textAlign: isAr ? 'right' : 'left',
+            }}
+          >
+            <div style={{ fontSize: 10, opacity: 0.65, fontWeight: 800, marginBottom: 7, ...labelType(isAr) }}>
+              {isAr ? 'الحكم المهني' : 'Professional Verdict'}
+            </div>
+            <div style={{ fontFamily: SERIF, fontSize: 18, fontWeight: 800, lineHeight: 1.35 }}>
+              {readinessLabel}
+            </div>
+          </div>
+        </div>
+
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(3, 1fr)',
+            gap: 10,
+          }}
+          className="cover-meta-grid"
+        >
+          <MetaItem
+            isAr={isAr}
+            label={isAr ? 'المرشح' : 'Candidate'}
+            value={safeText(data.candidateName, isAr ? 'غير محدد' : 'Not provided')}
+          />
+          <MetaItem
+            isAr={isAr}
+            label={isAr ? 'المسمى المستهدف' : 'Target Role'}
+            value={safeText(data.jobTitle, isAr ? 'غير محدد' : 'Not provided')}
+          />
+          <MetaItem
+            isAr={isAr}
+            label={isAr ? 'تاريخ التقرير' : 'Report Date'}
+            value={reportDate}
+          />
+          <MetaItem
+            isAr={isAr}
+            label={isAr ? 'الجهة أو القطاع' : 'Institution or Sector'}
+            value={safeText(data.institution || data.sector, isAr ? 'غير محدد' : 'Not provided')}
+          />
+          <MetaItem
+            isAr={isAr}
+            label={isAr ? 'سنوات الخبرة' : 'Years of Experience'}
+            value={safeText(data.yearsExperience, isAr ? 'غير محدد' : 'Not provided')}
+          />
+          <MetaItem
+            isAr={isAr}
+            label={isAr ? 'مرجع التقرير' : 'Report Reference'}
+            value={reference || (isAr ? 'غير متاح' : 'Not available')}
+          />
+        </div>
+      </div>
+    </section>
+  )
+}
+
 /* ---------- Shared centered screen for non-report states ---------- */
 
 function CenteredScreen({ children }: { children: React.ReactNode }) {
@@ -302,6 +565,8 @@ function ReportView({ data }: { data: Stored }) {
   const readinessLabel = displayReadinessLevel(r.readinessLevel, isAr)
   const v = verdictStyle(readinessLabel)
   const coverage = r.assessmentCoverage
+  const reportDate = formatReportDate(data.reportGeneratedAt, isAr)
+  const reportReference = shortReference(data.reportReference)
 
   const footerText = isAr
     ? 'تم إعداد هذا التقرير وفق منهجية تقييم منظمة قائمة على الكفاءات، ومتوافقة مع ممارسات التوظيف الحديثة المستخدمة في الجهات الحكومية، والمؤسسات العالمية، والشركات الرائدة في القطاع الخاص.'
@@ -319,15 +584,53 @@ function ReportView({ data }: { data: Stored }) {
     >
       {/* Print styles */}
       <style>{`
+        @media screen {
+          .print-header { display: none; }
+        }
+
+        @media screen and (max-width: 720px) {
+          .report-shell { padding: 20px 14px 80px !important; }
+          .report-cover { border-radius: 22px !important; padding: 22px !important; }
+          .cover-title-grid { grid-template-columns: 1fr !important; }
+          .cover-meta-grid { grid-template-columns: 1fr !important; }
+        }
+
         @media print {
+          html, body {
+            background: #FFFFFF !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+
+          @page {
+            size: A4;
+            margin: 14mm;
+          }
+
           .no-print { display: none !important; }
           .print-show { display: block !important; }
           .print-header { display: flex !important; }
-          body { background: #F5F1EB !important; }
-          @page { margin: 16mm; }
-        }
-        @media screen {
-          .print-header { display: none; }
+          .report-shell {
+            max-width: none !important;
+            padding: 0 !important;
+            margin: 0 !important;
+          }
+          .report-cover,
+          .report-section {
+            box-shadow: none !important;
+            break-inside: avoid;
+            page-break-inside: avoid;
+          }
+          .report-cover {
+            border-radius: 18px !important;
+            margin-bottom: 14px !important;
+          }
+          .report-section {
+            border-radius: 16px !important;
+            margin-bottom: 12px !important;
+          }
+          .cover-title-grid { grid-template-columns: 1.35fr 0.85fr !important; }
+          .cover-meta-grid { grid-template-columns: repeat(3, 1fr) !important; }
         }
       `}</style>
 
@@ -388,7 +691,22 @@ function ReportView({ data }: { data: Stored }) {
         </button>
       </nav>
 
-      <div style={{ maxWidth: 560, margin: '0 auto', padding: '24px 16px 80px' }}>
+      <div
+        className="report-shell"
+        style={{
+          maxWidth: 860,
+          margin: '0 auto',
+          padding: '34px 24px 90px',
+        }}
+      >
+        <ReportCover
+          data={data}
+          isAr={isAr}
+          readinessLabel={readinessLabel}
+          reportDate={reportDate}
+          reference={reportReference}
+        />
+
         {/* 1. SCORE */}
         <Section lang={lang} style={{ textAlign: 'center' }}>
           <div
@@ -433,7 +751,7 @@ function ReportView({ data }: { data: Stored }) {
                   ...labelType(isAr),
                 }}
               >
-                {isAr ? 'تقييم بارباروس' : 'Barbaros Assessment'}
+                {isAr ? 'الخلاصة التقييمية' : 'Barbaros Assessment'}
               </div>
 
               <div
@@ -468,7 +786,7 @@ function ReportView({ data }: { data: Stored }) {
                   fontWeight: 600,
                 }}
               >
-                {isAr ? 'احتمال القبول' : 'Hire Probability'}
+                {isAr ? 'مؤشر احتمالية التوظيف' : 'Hire Probability'}
               </span>
 
               <span
@@ -547,7 +865,7 @@ function ReportView({ data }: { data: Stored }) {
                     }}
                   >
                     {isAr
-                      ? 'المحاور التي تم قياسها فعلياً في هذه الباقة'
+                      ? 'الأبعاد المقاسة فعلياً في هذه الباقة'
                       : 'Measured in this package'}
                   </div>
 
@@ -588,7 +906,7 @@ function ReportView({ data }: { data: Stored }) {
                     }}
                   >
                     {isAr
-                      ? 'محاور لم تُقَس في هذه الباقة — متاحة بتفصيل أعمق في الباقات الأعلى'
+                      ? 'أبعاد لم تُقَس في هذه الباقة — متاحة بتفصيل أعمق في الباقات الأعلى'
                       : 'Not measured here · available in greater depth in higher-tier plans'}
                   </div>
 
@@ -654,7 +972,7 @@ function ReportView({ data }: { data: Stored }) {
         {Array.isArray(r.competencies) && r.competencies.length > 0 && (
           <Section lang={lang}>
             <SectionTitle>
-              {isAr ? 'تفصيل الكفاءات' : 'Competency Breakdown'}
+              {isAr ? 'مصفوفة الكفاءات' : 'Competency Breakdown'}
             </SectionTitle>
 
             {r.competencies.map((c, i) => (
@@ -736,7 +1054,7 @@ function ReportView({ data }: { data: Stored }) {
             }}
           >
             <SectionTitle color="#A14234">
-              {isAr ? 'نقطة الضعف الخفية' : 'Hidden Weakness'}
+              {isAr ? 'المخاطرة الجوهرية في الأداء' : 'Hidden Weakness'}
             </SectionTitle>
 
             <div style={{ fontSize: 13, color: '#7A2E24', lineHeight: 1.8 }}>
@@ -786,7 +1104,7 @@ function ReportView({ data }: { data: Stored }) {
               <span
                 style={{ fontFamily: SERIF, fontSize: 16, fontWeight: 700 }}
               >
-                {isAr ? 'تحليل المقابلة' : 'Interview Analysis'}
+                {isAr ? 'تحليل الإجابات والتدريب' : 'Interview Analysis'}
               </span>
 
               <span
@@ -825,6 +1143,7 @@ function ReportView({ data }: { data: Stored }) {
                 {r.replay.map((item, i) => (
                   <div
                     key={i}
+                    className="replay-item"
                     style={{
                       marginBottom: 28,
                       paddingBottom: 28,
@@ -881,7 +1200,7 @@ function ReportView({ data }: { data: Stored }) {
                           ...labelType(isAr),
                         }}
                       >
-                        {isAr ? 'السؤال الذي تم تقييمه' : 'Evaluated Question'}
+                        {isAr ? 'السؤال محل التقييم' : 'Evaluated Question'}
                       </div>
 
                       <div
@@ -909,7 +1228,7 @@ function ReportView({ data }: { data: Stored }) {
                           ...labelType(isAr),
                         }}
                       >
-                        {isAr ? 'إجابتك كما قُدّمت' : 'Your Submitted Answer'}
+                        {isAr ? 'الإجابة كما وردت' : 'Your Submitted Answer'}
                       </div>
 
                       <div
@@ -968,7 +1287,7 @@ function ReportView({ data }: { data: Stored }) {
                             ...labelType(isAr),
                           }}
                         >
-                          {isAr ? 'ما الذي أضعف الإجابة' : 'What Weakened the Answer'}
+                          {isAr ? 'مواطن الضعف في الطرح' : 'What Weakened the Answer'}
                         </div>
 
                         <div
@@ -998,7 +1317,7 @@ function ReportView({ data }: { data: Stored }) {
                             ...labelType(isAr),
                           }}
                         >
-                          {isAr ? 'صياغة أقوى مقترحة' : 'Suggested Stronger Response'}
+                          {isAr ? 'النموذج المرجعي للإجابة' : 'Suggested Stronger Response'}
                         </div>
 
                         <div
@@ -1033,7 +1352,7 @@ function ReportView({ data }: { data: Stored }) {
             }}
           >
             <SectionTitle>
-              {isAr ? 'خطوتك التالية' : 'Your Next Step'}
+              {isAr ? 'التوصية الختامية' : 'Your Next Step'}
             </SectionTitle>
 
             <div style={{ fontSize: 13, color: '#1A1A1A', lineHeight: 1.9 }}>
@@ -1179,6 +1498,17 @@ function ReportContent() {
             yearsExperience: str('yearsExperience'),
             language: str('language') || 'en',
             plan: str('plan'),
+            reportGeneratedAt:
+              typeof json.completedAt === 'string'
+                ? json.completedAt
+                : typeof json.completed_at === 'string'
+                  ? json.completed_at
+                  : typeof json.updatedAt === 'string'
+                    ? json.updatedAt
+                    : typeof json.updated_at === 'string'
+                      ? json.updated_at
+                      : undefined,
+            reportReference: reportJobId,
           })
           setPhase('ready')
           return

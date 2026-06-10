@@ -70,6 +70,34 @@ const Barbaros = ({ size = 22 }: { size?: number }) => (
 const scoreColor = (s: number) =>
   s >= 75 ? '#3F6B5E' : s >= 50 ? '#CC785C' : s >= 25 ? '#B07A2E' : '#A14234'
 
+/* ---------- Arabic label guards ---------- */
+
+const AR_READINESS_LEVELS: Record<string, string> = {
+  'Strong Hire':       'جاهز بقوة',
+  'Maybe Hire':        'قابل للتوصية بحذر',
+  'Risky Candidate':   'مخاطرة عالية',
+  'Not Recommended':   'غير جاهز حالياً',
+}
+
+const AR_COMPETENCY_NAMES: Record<string, string> = {
+  'Communication':    'التواصل',
+  'Confidence':       'الثقة',
+  'Domain Expertise': 'الخبرة في المجال',
+  'Structure':        'تنظيم الإجابة',
+  'Problem Solving':  'حل المشكلات',
+  'Clarity':          'الوضوح',
+}
+
+function displayReadinessLevel(level: string, isAr: boolean) {
+  if (!isAr) return level
+  return AR_READINESS_LEVELS[level] ?? level
+}
+
+function displayCompetencyName(name: string, isAr: boolean) {
+  if (!isAr) return name
+  return AR_COMPETENCY_NAMES[name] ?? name
+}
+
 // Subtle tint from a 6-digit hex, returned as rgba() for full support.
 const tint = (hex: string, alpha = 0.07) => {
   const h = hex.replace('#', '')
@@ -271,7 +299,8 @@ function ReportView({ data }: { data: Stored }) {
   const isAr = data.language === 'ar'
   const lang: Lang = isAr ? 'ar' : 'en'
   const r = data.report
-  const v = verdictStyle(r.readinessLevel)
+  const readinessLabel = displayReadinessLevel(r.readinessLevel, isAr)
+  const v = verdictStyle(readinessLabel)
   const coverage = r.assessmentCoverage
 
   const footerText = isAr
@@ -436,7 +465,7 @@ function ReportView({ data }: { data: Stored }) {
                 marginBottom: 10,
               }}
             >
-              {r.readinessLevel}
+              {readinessLabel}
             </div>
 
             <div style={{ fontSize: 13, color: v.color, lineHeight: 1.8 }}>
@@ -614,7 +643,7 @@ function ReportView({ data }: { data: Stored }) {
                     marginBottom: 8,
                   }}
                 >
-                  <span style={{ fontSize: 13, fontWeight: 800 }}>{c.name}</span>
+                  <span style={{ fontSize: 13, fontWeight: 800 }}>{displayCompetencyName(c.name, isAr)}</span>
 
                   <span
                     style={{
@@ -725,7 +754,7 @@ function ReportView({ data }: { data: Stored }) {
               <span
                 style={{ fontFamily: SERIF, fontSize: 16, fontWeight: 700 }}
               >
-                {isAr ? 'إعادة المقابلة' : 'Interview Replay'}
+                {isAr ? 'تحليل الإجابات والتدريب' : 'Answer Analysis & Coaching'}
               </span>
 
               <span
@@ -744,6 +773,20 @@ function ReportView({ data }: { data: Stored }) {
                     : 'Show ▼'}
               </span>
             </button>
+
+            <div
+              style={{
+                fontSize: 12,
+                color: 'rgba(26,26,26,0.52)',
+                lineHeight: 1.7,
+                marginTop: 8,
+                marginBottom: 16,
+              }}
+            >
+              {isAr
+                ? 'يراجع هذا القسم إجاباتك كما قُدّمت، ويوضح سبب التقييم، وما أضعف كل إجابة، وكيف يمكن صياغتها بصورة أقوى.'
+                : 'This section reviews your submitted answers, explains the score, identifies what weakened each response, and shows how to strengthen it.'}
+            </div>
 
             {showReplay && (
               <div style={{ marginTop: 16 }}>
@@ -806,7 +849,7 @@ function ReportView({ data }: { data: Stored }) {
                           ...labelType(isAr),
                         }}
                       >
-                        {isAr ? 'سؤال بارباروس' : 'Barbaros Question'}
+                        {isAr ? 'السؤال الذي تم تقييمه' : 'Evaluated Question'}
                       </div>
 
                       <div
@@ -834,7 +877,7 @@ function ReportView({ data }: { data: Stored }) {
                           ...labelType(isAr),
                         }}
                       >
-                        {isAr ? 'جوابك' : 'Your Answer'}
+                        {isAr ? 'إجابتك كما قُدّمت' : 'Your Submitted Answer'}
                       </div>
 
                       <div
@@ -863,7 +906,7 @@ function ReportView({ data }: { data: Stored }) {
                             ...labelType(isAr),
                           }}
                         >
-                          {isAr ? 'ملاحظة المحاور' : 'Interviewer Notes'}
+                          {isAr ? 'تحليل الأداء' : 'Performance Analysis'}
                         </div>
 
                         <div
@@ -893,7 +936,7 @@ function ReportView({ data }: { data: Stored }) {
                             ...labelType(isAr),
                           }}
                         >
-                          {isAr ? 'ما أضعف إجابتك' : 'What Weakened It'}
+                          {isAr ? 'ما الذي أضعف الإجابة' : 'What Weakened the Answer'}
                         </div>
 
                         <div
@@ -923,7 +966,7 @@ function ReportView({ data }: { data: Stored }) {
                             ...labelType(isAr),
                           }}
                         >
-                          {isAr ? 'إجابة أقوى' : 'Stronger Response'}
+                          {isAr ? 'صياغة أقوى مقترحة' : 'Suggested Stronger Response'}
                         </div>
 
                         <div

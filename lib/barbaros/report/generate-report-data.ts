@@ -575,11 +575,13 @@ async function repairJson(
       messages: [{ role: 'user', content: raw }],
     })
 
-    if (response.stop_reason === 'max_tokens') {
-      logRawSafely('repair_output_truncated', raw)
-      return null
-    }
+  if (response.stop_reason === 'max_tokens') {
+  const repairedRaw =
+    response.content[0]?.type === 'text' ? response.content[0].text : ''
 
+  logRawSafely('repair_output_truncated', repairedRaw)
+  return null
+}
     const repairedRaw =
       response.content[0]?.type === 'text' ? response.content[0].text : ''
 

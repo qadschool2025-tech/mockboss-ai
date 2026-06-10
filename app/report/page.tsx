@@ -70,8 +70,23 @@ const Barbaros = ({ size = 22 }: { size?: number }) => (
 const scoreColor = (s: number) =>
   s >= 75 ? '#3F6B5E' : s >= 50 ? '#CC785C' : s >= 25 ? '#B07A2E' : '#A14234'
 
-// Subtle tint derived from a 6-digit hex (RRGGBB + AA).
-const tint = (hex: string, alpha = '14') => `${hex}${alpha}`
+// Subtle tint from a 6-digit hex, returned as rgba() for full support.
+const tint = (hex: string, alpha = 0.07) => {
+  const h = hex.replace('#', '')
+  const r = parseInt(h.slice(0, 2), 16)
+  const g = parseInt(h.slice(2, 4), 16)
+  const b = parseInt(h.slice(4, 6), 16)
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`
+}
+
+// Small uppercase labels: in Arabic, drop letter-spacing/uppercase so the
+// connected (cursive) letters are not broken apart.
+function labelType(isAr: boolean): React.CSSProperties {
+  return {
+    letterSpacing: isAr ? 0 : 0.5,
+    textTransform: isAr ? 'none' : 'uppercase',
+  }
+}
 
 function verdictStyle(level: string) {
   const l = level.toLowerCase()
@@ -89,6 +104,55 @@ function verdictStyle(level: string) {
   }
 
   return { color: '#7A2E24', bg: '#F3E3DE', border: '#DFC1B8' }
+}
+
+/* ---------- Score ring (SVG, rounded cap) ---------- */
+
+function ScoreRing({ score }: { score: number }) {
+  const r = 58
+  const c = 2 * Math.PI * r
+  const offset = c * (1 - Math.max(0, Math.min(100, score)) / 100)
+  const color = scoreColor(score)
+
+  return (
+    <div style={{ position: 'relative', width: 130, height: 130, margin: '0 auto 16px' }}>
+      <svg
+        width="130"
+        height="130"
+        viewBox="0 0 130 130"
+        style={{ transform: 'rotate(-90deg)' }}
+      >
+        <circle cx="65" cy="65" r={r} fill="none" stroke="#E5DDD0" strokeWidth="9" />
+        <circle
+          cx="65"
+          cy="65"
+          r={r}
+          fill="none"
+          stroke={color}
+          strokeWidth="9"
+          strokeLinecap="round"
+          strokeDasharray={c}
+          strokeDashoffset={offset}
+        />
+      </svg>
+
+      <div
+        style={{
+          position: 'absolute',
+          inset: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <div style={{ fontFamily: SERIF, fontSize: 36, fontWeight: 700, color, lineHeight: 1 }}>
+          {score}
+        </div>
+        <div style={{ fontSize: 11, color: 'rgba(26,26,26,0.35)' }}>/100</div>
+      </div>
+    </div>
+  )
 }
 
 /* ---------- Section: every section carries the Barbaros wordmark ---------- */
@@ -128,7 +192,7 @@ const Section = ({
         style={{
           fontSize: 8.5,
           fontWeight: 700,
-          letterSpacing: lang === 'ar' ? 0.3 : 1.4,
+          letterSpacing: lang === 'ar' ? 0 : 1.4,
           textTransform: lang === 'ar' ? 'none' : 'uppercase',
           color: 'rgba(26,26,26,0.30)',
         }}
@@ -141,14 +205,20 @@ const Section = ({
   </div>
 )
 
-const SectionTitle = ({ children }: { children: React.ReactNode }) => (
+const SectionTitle = ({
+  children,
+  color = '#1A1A1A',
+}: {
+  children: React.ReactNode
+  color?: string
+}) => (
   <div
     style={{
       fontFamily: SERIF,
       fontSize: 16,
       fontWeight: 700,
       marginBottom: 16,
-      color: '#1A1A1A',
+      color,
       letterSpacing: 0.2,
     }}
   >
@@ -281,49 +351,7 @@ function ReportView({ data }: { data: Stored }) {
             {data.institution}
           </div>
 
-          <div
-            style={{
-              width: 130,
-              height: 130,
-              borderRadius: '50%',
-              margin: '0 auto 16px',
-              background: `conic-gradient(${scoreColor(r.finalScore)} ${
-                r.finalScore * 3.6
-              }deg, #E5DDD0 0deg)`,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <div
-              style={{
-                width: 100,
-                height: 100,
-                borderRadius: '50%',
-                background: '#FFFFFF',
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              <div
-                style={{
-                  fontFamily: SERIF,
-                  fontSize: 36,
-                  fontWeight: 700,
-                  color: scoreColor(r.finalScore),
-                  lineHeight: 1,
-                }}
-              >
-                {r.finalScore}
-              </div>
-
-              <div style={{ fontSize: 11, color: 'rgba(26,26,26,0.35)' }}>
-                /100
-              </div>
-            </div>
-          </div>
+          <ScoreRing score={r.finalScore} />
 
           {r.barbarosAssessment && (
             <div
@@ -342,8 +370,7 @@ function ReportView({ data }: { data: Stored }) {
                   fontWeight: 700,
                   color: '#CC785C',
                   marginBottom: 6,
-                  letterSpacing: 0.5,
-                  textTransform: 'uppercase',
+                  ...labelType(isAr),
                 }}
               >
                 {isAr ? 'تقييم بارباروس' : 'Barbaros Assessment'}
@@ -423,7 +450,7 @@ function ReportView({ data }: { data: Stored }) {
           <Section
             lang={lang}
             style={{
-              background: 'linear-gradient(180deg, #FFFFFF 0%, #FFF8F3 100%)',
+              background: '#FFF8F3',
               border: '1px solid rgba(204,120,92,0.22)',
             }}
           >
@@ -453,8 +480,7 @@ function ReportView({ data }: { data: Stored }) {
                       fontWeight: 800,
                       color: 'rgba(26,26,26,0.5)',
                       marginBottom: 8,
-                      letterSpacing: 0.4,
-                      textTransform: 'uppercase',
+                      ...labelType(isAr),
                     }}
                   >
                     {isAr
@@ -475,7 +501,7 @@ function ReportView({ data }: { data: Stored }) {
                           border: '0.5px solid rgba(204,120,92,0.28)',
                           color: '#8A3F2B',
                           fontSize: 11,
-                          fontWeight: 750,
+                          fontWeight: 700,
                           lineHeight: 1,
                         }}
                       >
@@ -495,8 +521,7 @@ function ReportView({ data }: { data: Stored }) {
                       fontWeight: 800,
                       color: 'rgba(26,26,26,0.5)',
                       marginBottom: 8,
-                      letterSpacing: 0.4,
-                      textTransform: 'uppercase',
+                      ...labelType(isAr),
                     }}
                   >
                     {isAr
@@ -624,7 +649,7 @@ function ReportView({ data }: { data: Stored }) {
                     color: '#1A1A1A',
                     lineHeight: 1.7,
                     padding: '8px 12px',
-                    background: tint(scoreColor(c.score), '12'),
+                    background: tint(scoreColor(c.score), 0.07),
                     borderRadius: 8,
                     borderLeft: isAr ? 'none' : `3px solid ${scoreColor(c.score)}`,
                     borderRight: isAr ? `3px solid ${scoreColor(c.score)}` : 'none',
@@ -642,11 +667,12 @@ function ReportView({ data }: { data: Stored }) {
           <Section
             lang={lang}
             style={{
-              background: tint('#A14234', '0A'),
+              background: tint('#A14234', 0.07),
               border: '1px solid rgba(161,66,52,0.22)',
+              borderInlineStart: '4px solid #A14234',
             }}
           >
-            <SectionTitle>
+            <SectionTitle color="#A14234">
               {isAr ? 'نقطة الضعف الخفية' : 'Hidden Weakness'}
             </SectionTitle>
 
@@ -774,8 +800,7 @@ function ReportView({ data }: { data: Stored }) {
                           fontWeight: 700,
                           color: 'rgba(26,26,26,0.4)',
                           marginBottom: 4,
-                          letterSpacing: 0.5,
-                          textTransform: 'uppercase',
+                          ...labelType(isAr),
                         }}
                       >
                         {isAr ? 'سؤال بارباروس' : 'Barbaros Question'}
@@ -803,8 +828,7 @@ function ReportView({ data }: { data: Stored }) {
                           fontWeight: 700,
                           color: 'rgba(26,26,26,0.4)',
                           marginBottom: 4,
-                          letterSpacing: 0.5,
-                          textTransform: 'uppercase',
+                          ...labelType(isAr),
                         }}
                       >
                         {isAr ? 'جوابك' : 'Your Answer'}
@@ -833,8 +857,7 @@ function ReportView({ data }: { data: Stored }) {
                             fontWeight: 700,
                             color: '#86591D',
                             marginBottom: 4,
-                            letterSpacing: 0.5,
-                            textTransform: 'uppercase',
+                            ...labelType(isAr),
                           }}
                         >
                           {isAr ? 'ملاحظة المحاور' : 'Interviewer Notes'}
@@ -846,7 +869,7 @@ function ReportView({ data }: { data: Stored }) {
                             color: '#86591D',
                             lineHeight: 1.7,
                             padding: '10px 14px',
-                            background: tint('#B07A2E', '12'),
+                            background: tint('#B07A2E', 0.07),
                             border: '0.5px solid rgba(176,122,46,0.25)',
                             borderRadius: 10,
                           }}
@@ -864,8 +887,7 @@ function ReportView({ data }: { data: Stored }) {
                             fontWeight: 700,
                             color: '#A14234',
                             marginBottom: 4,
-                            letterSpacing: 0.5,
-                            textTransform: 'uppercase',
+                            ...labelType(isAr),
                           }}
                         >
                           {isAr ? 'ما أضعف إجابتك' : 'What Weakened It'}
@@ -877,7 +899,7 @@ function ReportView({ data }: { data: Stored }) {
                             color: '#7A2E24',
                             lineHeight: 1.7,
                             padding: '10px 14px',
-                            background: tint('#A14234', '0E'),
+                            background: tint('#A14234', 0.055),
                             border: '0.5px solid rgba(161,66,52,0.22)',
                             borderRadius: 10,
                           }}
@@ -895,8 +917,7 @@ function ReportView({ data }: { data: Stored }) {
                             fontWeight: 700,
                             color: '#3F6B5E',
                             marginBottom: 4,
-                            letterSpacing: 0.5,
-                            textTransform: 'uppercase',
+                            ...labelType(isAr),
                           }}
                         >
                           {isAr ? 'إجابة أقوى' : 'Stronger Response'}
@@ -908,7 +929,7 @@ function ReportView({ data }: { data: Stored }) {
                             color: '#2E5248',
                             lineHeight: 1.8,
                             padding: '10px 14px',
-                            background: tint('#3F6B5E', '12'),
+                            background: tint('#3F6B5E', 0.07),
                             border: '0.5px solid rgba(63,107,94,0.30)',
                             borderRadius: 10,
                           }}
@@ -977,8 +998,8 @@ function ReportView({ data }: { data: Stored }) {
 
             <div
               style={{
-                fontSize: 10.5,
-                lineHeight: 1.6,
+                fontSize: 12,
+                lineHeight: 1.7,
                 maxWidth: 430,
                 margin: '0 auto',
               }}

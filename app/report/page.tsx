@@ -1042,45 +1042,47 @@ function ReportView({ data }: { data: Stored }) {
           </Section>
         )}
 
-        {/* 9. CTA */}
-        <div className="no-print" style={{ textAlign: 'center', marginTop: 8 }}>
-          <button
-            onClick={() => window.print()}
-            style={{
-              background: '#1A1A1A',
-              color: '#FFFFFF',
-              border: 'none',
-              borderRadius: 14,
-              padding: '12px 36px',
-              fontSize: 13,
-              fontWeight: 700,
-              cursor: 'pointer',
-              fontFamily: 'inherit',
-              width: '100%',
-              marginBottom: 10,
-            }}
-          >
-            {isAr ? 'طباعة التقرير / حفظ PDF' : 'Print Report / Save PDF'}
-          </button>
+               {/* 9. CTA / PRINT FOOTER */}
+        <div style={{ textAlign: 'center', marginTop: 8 }}>
+          <div className="no-print">
+            <button
+              onClick={() => window.print()}
+              style={{
+                background: '#1A1A1A',
+                color: '#FFFFFF',
+                border: 'none',
+                borderRadius: 14,
+                padding: '12px 36px',
+                fontSize: 13,
+                fontWeight: 700,
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+                width: '100%',
+                marginBottom: 10,
+              }}
+            >
+              {isAr ? 'طباعة التقرير / حفظ PDF' : 'Print Report / Save PDF'}
+            </button>
 
-          <button
-            onClick={() => router.push('/onboarding')}
-            style={{
-              background: 'transparent',
-              color: '#CC785C',
-              border: '1px solid #CC785C',
-              borderRadius: 14,
-              padding: '12px 36px',
-              fontSize: 13,
-              fontWeight: 700,
-              cursor: 'pointer',
-              fontFamily: 'inherit',
-              width: '100%',
-              marginBottom: 12,
-            }}
-          >
-            {isAr ? 'مقابلة جديدة' : 'Start New Interview'}
-          </button>
+            <button
+              onClick={() => router.push('/onboarding')}
+              style={{
+                background: 'transparent',
+                color: '#CC785C',
+                border: '1px solid #CC785C',
+                borderRadius: 14,
+                padding: '12px 36px',
+                fontSize: 13,
+                fontWeight: 700,
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+                width: '100%',
+                marginBottom: 12,
+              }}
+            >
+              {isAr ? 'مقابلة جديدة' : 'Start New Interview'}
+            </button>
+          </div>
 
           <div
             style={{
@@ -1089,6 +1091,9 @@ function ReportView({ data }: { data: Stored }) {
               alignItems: 'center',
               gap: 6,
               color: 'rgba(26,26,26,0.38)',
+              marginTop: 18,
+              paddingTop: 14,
+              borderTop: '0.5px solid rgba(26,26,26,0.10)',
             }}
           >
             <Barbaros size={11} />

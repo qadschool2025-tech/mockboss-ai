@@ -1,5 +1,4 @@
 // lib/barbaros/report/generate-report-data.ts
-
 // Barbaros report data generator (Next-independent, reusable).
 // Logic extracted verbatim from app/api/generate-report/route.ts.
 
@@ -576,15 +575,13 @@ async function repairJson(
       messages: [{ role: 'user', content: raw }],
     })
 
-  if (response.stop_reason === 'max_tokens') {
-  const repairedRaw =
-    response.content[0]?.type === 'text' ? response.content[0].text : ''
-
-  logRawSafely('repair_output_truncated', repairedRaw)
-  return null
-}
     const repairedRaw =
       response.content[0]?.type === 'text' ? response.content[0].text : ''
+
+    if (response.stop_reason === 'max_tokens') {
+      logRawSafely('repair_output_truncated', repairedRaw)
+      return null
+    }
 
     return extractJson(repairedRaw)
   } catch (err) {
@@ -600,7 +597,6 @@ async function repairJson(
 
 // claude-sonnet-4-5 supports far larger outputs; 16000 gives an Arabic report
 // with a full replay section real headroom, especially for Arabic reports.
-// Raising the cap costs nothing unless the tokens are actually generated.
 const REPORT_MAX_TOKENS = 16000
 
 export async function generateReportData(

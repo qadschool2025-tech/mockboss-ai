@@ -43,7 +43,7 @@ import {
   buildTimeLayer,
   type SystemLayer,
 } from './system-layers'
-import { BARBAROS_OPENING_TEMPLATE } from './personality'
+import { BARBAROS_OPENING_TEMPLATES } from './personality'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -253,7 +253,12 @@ function buildDirectorLayer(decision: DirectorDecision): SystemLayer {
  * Injected as the assistant's first turn, not part of system prompt.
  */
 function buildOpeningMessage(config: InterviewConfig): string {
-  return BARBAROS_OPENING_TEMPLATE
+  const template =
+    config.language === 'ar'
+      ? BARBAROS_OPENING_TEMPLATES.ar
+      : BARBAROS_OPENING_TEMPLATES.en
+
+  return template
     .replace('{candidateName}', config.candidateName)
     .replace('{jobTitle}',      config.jobTitle)
     .replace('{institution}',   config.institution)

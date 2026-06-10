@@ -652,14 +652,14 @@ function ReportCover({
 
           <div
             style={{
-              background: 'linear-gradient(135deg, #CC785C 0%, #A85A42 100%)',
+              background: 'linear-gradient(135deg, #5A463E 0%, #3F322D 100%)',
               borderRadius: 18,
               padding: '16px 18px',
               color: '#FFFFFF',
               textAlign: isAr ? 'right' : 'left',
             }}
           >
-            <div style={{ fontSize: 10, opacity: 0.78, fontWeight: 800, marginBottom: 7, ...labelType(isAr) }}>
+            <div style={{ fontSize: 10, color: '#D8C7BD', fontWeight: 800, marginBottom: 7, ...labelType(isAr) }}>
               {isAr ? 'الحكم المهني' : 'Professional Verdict'}
             </div>
             <div style={{ fontFamily: SERIF, fontSize: 18, fontWeight: 800, lineHeight: 1.35 }}>

@@ -117,8 +117,13 @@ export const BARBAROS_SCORING_ANCHORS = [
 
 // ─── Opening Script ───────────────────────────────────────────────────────────
 
-export const BARBAROS_OPENING_TEMPLATE =
-  `Hello {candidateName}, I'm Barbaros. We're here today for the {jobTitle} position at {institution}. Are you ready to begin?` as const
+export const BARBAROS_OPENING_TEMPLATES = {
+  en: `Hello {candidateName}, I'm Barbaros. We're here today for the {jobTitle} position at {institution}. Are you ready to begin?`,
+  ar: `مرحباً {candidateName}، أنا Barbaros. نحن هنا اليوم لمقابلة وظيفة {jobTitle} في {institution}. هل أنت مستعد للبدء؟`,
+} as const
+
+// Legacy alias retained for backward compatibility (English wording).
+export const BARBAROS_OPENING_TEMPLATE = BARBAROS_OPENING_TEMPLATES.en
 
 // ─── Closing Script ───────────────────────────────────────────────────────────
 // Legacy static template, retained for backward compatibility only.

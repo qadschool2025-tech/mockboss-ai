@@ -760,6 +760,198 @@ function ReportCover({
   )
 }
 
+/* ---------- Premium generating screen (UI-only staged progress) ---------- */
+/* Stages are presentational pacing; completion is driven solely by polling. */
+
+const GENERATION_STAGES = {
+  ar: [
+    'قراءة المقابلة كاملة',
+    'تحليل الإجابات والأدلة',
+    'قياس الكفاءات الست',
+    'رصد الأنماط السلوكية',
+    'بناء التوصيات',
+    'إخراج التقرير النهائي',
+  ],
+  en: [
+    'Reading the full interview',
+    'Analyzing answers and evidence',
+    'Measuring the six competencies',
+    'Detecting behavioral patterns',
+    'Building recommendations',
+    'Finalizing your report',
+  ],
+} as const
+
+function GeneratingScreen({ lang }: { lang: Lang }) {
+  const isAr = lang === 'ar'
+  const stages = GENERATION_STAGES[isAr ? 'ar' : 'en']
+  const [stage, setStage] = useState(0)
+
+  useEffect(() => {
+    // Advance through stages on a fixed cadence, hold on the last one.
+    const t = setInterval(() => {
+      setStage(prev => (prev < stages.length - 1 ? prev + 1 : prev))
+    }, 7000)
+    return () => clearInterval(t)
+  }, [stages.length])
+
+  const progress = Math.min(92, Math.round(((stage + 1) / stages.length) * 100))
+
+  return (
+    <div
+      dir={isAr ? 'rtl' : 'ltr'}
+      style={{
+        minHeight: '100vh',
+        background: '#F5F1EB',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontFamily: 'system-ui, sans-serif',
+        padding: 24,
+      }}
+    >
+      <style>{`
+        @keyframes barbarosPulse {
+          0%, 100% { transform: scale(1); opacity: 1; }
+          50% { transform: scale(1.06); opacity: 0.85; }
+        }
+        @keyframes barbarosSheen {
+          0% { background-position: 200% 0; }
+          100% { background-position: -200% 0; }
+        }
+      `}</style>
+
+      <div
+        style={{
+          width: '100%',
+          maxWidth: 440,
+          background: '#FFFFFF',
+          border: '1px solid #E5DDD0',
+          borderRadius: 22,
+          padding: '30px 26px',
+          boxShadow: '0 12px 34px rgba(26,26,26,0.07)',
+          textAlign: 'center',
+        }}
+      >
+        <div style={{ animation: 'barbarosPulse 2.4s ease-in-out infinite', display: 'inline-block' }}>
+          <Barbaros size={26} />
+        </div>
+
+        <div
+          style={{
+            marginTop: 14,
+            fontFamily: SERIF,
+            fontSize: 17,
+            fontWeight: 700,
+            color: '#1A1A1A',
+          }}
+        >
+          {isAr ? 'يجري إعداد تقريرك الآن' : 'Your report is being prepared'}
+        </div>
+
+        <div
+          style={{
+            marginTop: 6,
+            fontSize: 12,
+            color: 'rgba(26,26,26,0.5)',
+            lineHeight: 1.7,
+          }}
+        >
+          {isAr
+            ? 'يُرجى إبقاء هذه الصفحة مفتوحة. عادةً تستغرق العملية دقيقة إلى دقيقتين.'
+            : 'Please keep this page open. This usually takes one to two minutes.'}
+        </div>
+
+        <div
+          style={{
+            marginTop: 20,
+            height: 7,
+            background: '#F5F1EB',
+            borderRadius: 6,
+            overflow: 'hidden',
+          }}
+        >
+          <div
+            style={{
+              height: '100%',
+              width: `${progress}%`,
+              borderRadius: 6,
+              background:
+                'linear-gradient(90deg, #CC785C 25%, #E2A088 50%, #CC785C 75%)',
+              backgroundSize: '200% 100%',
+              animation: 'barbarosSheen 2.2s linear infinite',
+              transition: 'width 1.2s ease',
+            }}
+          />
+        </div>
+
+        <div style={{ marginTop: 22, textAlign: isAr ? 'right' : 'left' }}>
+          {stages.map((label, i) => {
+            const done = i < stage
+            const active = i === stage
+            const color = done ? '#3F6B5E' : active ? '#CC785C' : 'rgba(26,26,26,0.30)'
+
+            return (
+              <div
+                key={label}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  padding: '7px 0',
+                  fontSize: 12.5,
+                  fontWeight: active ? 800 : 600,
+                  color,
+                  transition: 'color 0.4s ease',
+                }}
+              >
+                <span
+                  style={{
+                    width: 18,
+                    height: 18,
+                    borderRadius: '50%',
+                    flexShrink: 0,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: 10,
+                    fontWeight: 900,
+                    color: done || active ? '#FFFFFF' : 'rgba(26,26,26,0.35)',
+                    background: done
+                      ? '#3F6B5E'
+                      : active
+                        ? '#CC785C'
+                        : '#EDE6D8',
+                    animation: active ? 'barbarosPulse 1.6s ease-in-out infinite' : undefined,
+                  }}
+                >
+                  {done ? '✓' : i + 1}
+                </span>
+                <span>{label}</span>
+              </div>
+            )
+          })}
+        </div>
+
+        <div
+          style={{
+            marginTop: 18,
+            paddingTop: 14,
+            borderTop: '0.5px solid rgba(26,26,26,0.08)',
+            fontSize: 11,
+            color: 'rgba(26,26,26,0.38)',
+            lineHeight: 1.7,
+          }}
+        >
+          {isAr
+            ? 'يُبنى كل قسم في تقريرك على أدلة فعلية من إجاباتك في المقابلة.'
+            : 'Every section of your report is built on actual evidence from your interview answers.'}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 /* ---------- Shared centered screen for non-report states ---------- */
 
 
@@ -1803,39 +1995,7 @@ function ReportContent() {
   }
 
   // loading (pending | processing | initial)
-  return (
-    <CenteredScreen>
-      <Barbaros size={22} />
-      <div
-        style={{
-          marginTop: 18,
-          fontSize: 14,
-          fontWeight: 700,
-          color: '#1A1A1A',
-          lineHeight: 1.6,
-        }}
-      >
-        {lang === 'ar' ? (
-          <>يتم الآن إعداد تقرير <Barbaros size={14} /> الخاص بك...</>
-        ) : (
-          <>Your <Barbaros size={14} /> report is being prepared...</>
-        )}
-      </div>
-      <div
-        style={{
-          marginTop: 8,
-          fontSize: 12.5,
-          color: 'rgba(26,26,26,0.5)',
-          lineHeight: 1.7,
-          maxWidth: 340,
-        }}
-      >
-        {lang === 'ar'
-          ? 'نقوم بتحليل المقابلة وتجهيز التقييم. يُرجى إبقاء هذه الصفحة مفتوحة.'
-          : 'We are analyzing your interview and compiling the assessment. Please keep this page open.'}
-      </div>
-    </CenteredScreen>
-  )
+  return <GeneratingScreen lang={lang} />
 }
 
 /* ---------- Page export: Suspense wrapper required for useSearchParams ---------- */

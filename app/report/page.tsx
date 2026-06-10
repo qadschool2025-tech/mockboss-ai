@@ -1,3 +1,4 @@
+// app/report/page.tsx
 'use client'
 
 import { useState, useEffect, Suspense } from 'react'
@@ -52,52 +53,90 @@ interface Stored {
   plan: string
 }
 
+type Lang = 'en' | 'ar'
+
+/* ---------- Brand + design tokens ---------- */
+
+const SERIF = 'Georgia, "Times New Roman", "Noto Serif", serif'
+
 const Barbaros = ({ size = 22 }: { size?: number }) => (
-  <span style={{ fontWeight: 900, fontSize: size }}>
+  <span style={{ fontWeight: 900, fontSize: size, letterSpacing: 0.2 }}>
     <span style={{ color: '#1A1A1A' }}>Barbar</span>
     <span style={{ color: '#CC785C' }}>os</span>
   </span>
 )
 
+// Premium, brand-aligned palette (no traffic-light colors).
 const scoreColor = (s: number) =>
-  s >= 75 ? '#10B981' : s >= 50 ? '#F59E0B' : s >= 25 ? '#EF4444' : '#9CA3AF'
+  s >= 75 ? '#3F6B5E' : s >= 50 ? '#CC785C' : s >= 25 ? '#B07A2E' : '#A14234'
+
+// Subtle tint derived from a 6-digit hex (RRGGBB + AA).
+const tint = (hex: string, alpha = '14') => `${hex}${alpha}`
 
 function verdictStyle(level: string) {
   const l = level.toLowerCase()
 
-  if (l.includes('strong')) {
-    return { color: '#065F46', bg: '#D1FAE5', border: '#6EE7B7' }
+  if (l.includes('strong') || level.includes('جاهز بقوة')) {
+    return { color: '#2E5248', bg: '#E9EFEB', border: '#C6D8CE' }
   }
 
-  if (l.includes('maybe')) {
-    return { color: '#78350F', bg: '#FEF3C7', border: '#FCD34D' }
+  if (l.includes('maybe') || level.includes('قابل')) {
+    return { color: '#8A4A2E', bg: '#F6EAE1', border: '#E7CBBA' }
   }
 
-  if (l.includes('risky')) {
-    return { color: '#7C2D12', bg: '#FEE2E2', border: '#FCA5A5' }
+  if (l.includes('risky') || level.includes('مخاطرة')) {
+    return { color: '#86591D', bg: '#F4ECDB', border: '#E3D0A9' }
   }
 
-  return { color: '#7F1D1D', bg: '#FEE2E2', border: '#F87171' }
+  return { color: '#7A2E24', bg: '#F3E3DE', border: '#DFC1B8' }
 }
+
+/* ---------- Section: every section carries the Barbaros wordmark ---------- */
 
 const Section = ({
   children,
   style,
+  lang = 'en',
 }: {
   children: React.ReactNode
   style?: React.CSSProperties
+  lang?: Lang
 }) => (
   <div
     style={{
       background: '#FFFFFF',
       border: '1px solid #E5DDD0',
       borderRadius: 20,
-      padding: '20px',
+      padding: '22px',
       marginBottom: 16,
-      boxShadow: '0 1px 4px rgba(0,0,0,0.04)',
+      boxShadow: '0 2px 12px rgba(26,26,26,0.05)',
       ...style,
     }}
   >
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        marginBottom: 16,
+        paddingBottom: 12,
+        borderBottom: '0.5px solid rgba(26,26,26,0.08)',
+      }}
+    >
+      <Barbaros size={12} />
+      <span
+        style={{
+          fontSize: 8.5,
+          fontWeight: 700,
+          letterSpacing: lang === 'ar' ? 0.3 : 1.4,
+          textTransform: lang === 'ar' ? 'none' : 'uppercase',
+          color: 'rgba(26,26,26,0.30)',
+        }}
+      >
+        {lang === 'ar' ? 'ذكاء المقابلات' : 'Interview Intelligence'}
+      </span>
+    </div>
+
     {children}
   </div>
 )
@@ -105,10 +144,12 @@ const Section = ({
 const SectionTitle = ({ children }: { children: React.ReactNode }) => (
   <div
     style={{
-      fontSize: 13,
-      fontWeight: 800,
-      marginBottom: 14,
+      fontFamily: SERIF,
+      fontSize: 16,
+      fontWeight: 700,
+      marginBottom: 16,
       color: '#1A1A1A',
+      letterSpacing: 0.2,
     }}
   >
     {children}
@@ -151,13 +192,14 @@ function CenteredScreen({ children }: { children: React.ReactNode }) {
   )
 }
 
-/* ---------- Report view (unchanged design, fed by props) ---------- */
+/* ---------- Report view (premium restyle, fed by props) ---------- */
 
 function ReportView({ data }: { data: Stored }) {
   const router = useRouter()
   const [showReplay, setShowReplay] = useState(true)
 
   const isAr = data.language === 'ar'
+  const lang: Lang = isAr ? 'ar' : 'en'
   const r = data.report
   const v = verdictStyle(r.readinessLevel)
   const coverage = r.assessmentCoverage
@@ -218,7 +260,7 @@ function ReportView({ data }: { data: Stored }) {
 
       <div style={{ maxWidth: 560, margin: '0 auto', padding: '24px 16px 80px' }}>
         {/* 1. SCORE */}
-        <Section style={{ textAlign: 'center' }}>
+        <Section lang={lang} style={{ textAlign: 'center' }}>
           <div
             style={{
               fontSize: 13,
@@ -267,8 +309,9 @@ function ReportView({ data }: { data: Stored }) {
             >
               <div
                 style={{
-                  fontSize: 34,
-                  fontWeight: 900,
+                  fontFamily: SERIF,
+                  fontSize: 36,
+                  fontWeight: 700,
                   color: scoreColor(r.finalScore),
                   lineHeight: 1,
                 }}
@@ -303,7 +346,7 @@ function ReportView({ data }: { data: Stored }) {
                   textTransform: 'uppercase',
                 }}
               >
-                {isAr ? 'تقييم باربروس' : 'Barbaros Assessment'}
+                {isAr ? 'تقييم بارباروس' : 'Barbaros Assessment'}
               </div>
 
               <div
@@ -356,19 +399,12 @@ function ReportView({ data }: { data: Stored }) {
 
         {/* 2. VERDICT */}
         {r.verdict && (
-          <div
-            style={{
-              background: v.bg,
-              border: `1px solid ${v.border}`,
-              borderRadius: 20,
-              padding: '20px',
-              marginBottom: 16,
-            }}
-          >
+          <Section lang={lang} style={{ background: v.bg, border: `1px solid ${v.border}` }}>
             <div
               style={{
-                fontSize: 14,
-                fontWeight: 900,
+                fontFamily: SERIF,
+                fontSize: 17,
+                fontWeight: 700,
                 color: v.color,
                 marginBottom: 10,
               }}
@@ -376,22 +412,23 @@ function ReportView({ data }: { data: Stored }) {
               {r.readinessLevel}
             </div>
 
-            <div style={{ fontSize: 13, color: v.color, lineHeight: 1.7 }}>
+            <div style={{ fontSize: 13, color: v.color, lineHeight: 1.8 }}>
               {r.verdict}
             </div>
-          </div>
+          </Section>
         )}
 
         {/* 3. ASSESSMENT COVERAGE */}
         {hasCoverage(coverage) && (
           <Section
+            lang={lang}
             style={{
               background: 'linear-gradient(180deg, #FFFFFF 0%, #FFF8F3 100%)',
               border: '1px solid rgba(204,120,92,0.22)',
             }}
           >
             <SectionTitle>
-              {isAr ? '🧭 نطاق التقييم' : '🧭 Assessment Coverage'}
+              {isAr ? 'نطاق التقييم' : 'Assessment Coverage'}
             </SectionTitle>
 
             {coverage.summary && (
@@ -420,7 +457,9 @@ function ReportView({ data }: { data: Stored }) {
                       textTransform: 'uppercase',
                     }}
                   >
-                    {isAr ? 'المحاور التي تغطيها باقة Essential' : 'Covered by your Essential Assessment'}
+                    {isAr
+                      ? 'المحاور التي تم قياسها في هذه الباقة'
+                      : 'Measured in this package'}
                   </div>
 
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
@@ -461,8 +500,8 @@ function ReportView({ data }: { data: Stored }) {
                     }}
                   >
                     {isAr
-                      ? 'تغطيه الباقات الأعلى بعمق أكبر'
-                      : 'Expanded in higher packages'}
+                      ? 'محاور لم تُقَس هنا — متاحة في الباقات الأعلى'
+                      : 'Not measured here · available in higher-tier plans'}
                   </div>
 
                   <div
@@ -525,9 +564,9 @@ function ReportView({ data }: { data: Stored }) {
 
         {/* 4. COMPETENCIES */}
         {Array.isArray(r.competencies) && r.competencies.length > 0 && (
-          <Section>
+          <Section lang={lang}>
             <SectionTitle>
-              {isAr ? '📊 تفصيل الكفاءات' : '📊 Competency Breakdown'}
+              {isAr ? 'تفصيل الكفاءات' : 'Competency Breakdown'}
             </SectionTitle>
 
             {r.competencies.map((c, i) => (
@@ -585,12 +624,7 @@ function ReportView({ data }: { data: Stored }) {
                     color: '#1A1A1A',
                     lineHeight: 1.7,
                     padding: '8px 12px',
-                    background:
-                      c.score >= 75
-                        ? 'rgba(16,185,129,0.05)'
-                        : c.score >= 50
-                          ? 'rgba(245,158,11,0.05)'
-                          : 'rgba(239,68,68,0.05)',
+                    background: tint(scoreColor(c.score), '12'),
                     borderRadius: 8,
                     borderLeft: isAr ? 'none' : `3px solid ${scoreColor(c.score)}`,
                     borderRight: isAr ? `3px solid ${scoreColor(c.score)}` : 'none',
@@ -605,37 +639,28 @@ function ReportView({ data }: { data: Stored }) {
 
         {/* 5. HIDDEN WEAKNESS */}
         {r.hiddenWeakness && (
-          <div
+          <Section
+            lang={lang}
             style={{
-              background: 'rgba(239,68,68,0.04)',
-              border: '1px solid rgba(239,68,68,0.2)',
-              borderRadius: 20,
-              padding: '20px',
-              marginBottom: 16,
+              background: tint('#A14234', '0A'),
+              border: '1px solid rgba(161,66,52,0.22)',
             }}
           >
-            <div
-              style={{
-                fontSize: 13,
-                fontWeight: 800,
-                color: '#DC2626',
-                marginBottom: 10,
-              }}
-            >
-              {isAr ? '⚠️ نقطة الضعف الخفية' : '⚠️ Hidden Weakness'}
-            </div>
+            <SectionTitle>
+              {isAr ? 'نقطة الضعف الخفية' : 'Hidden Weakness'}
+            </SectionTitle>
 
-            <div style={{ fontSize: 13, color: '#7F1D1D', lineHeight: 1.8 }}>
+            <div style={{ fontSize: 13, color: '#7A2E24', lineHeight: 1.8 }}>
               {r.hiddenWeakness}
             </div>
-          </div>
+          </Section>
         )}
 
         {/* 6. BEHAVIORAL PATTERNS */}
         {r.behavioralPatterns && (
-          <Section>
+          <Section lang={lang}>
             <SectionTitle>
-              {isAr ? '🧠 الأنماط السلوكية' : '🧠 Behavioral Patterns'}
+              {isAr ? 'الأنماط السلوكية' : 'Behavioral Patterns'}
             </SectionTitle>
 
             <div
@@ -653,7 +678,7 @@ function ReportView({ data }: { data: Stored }) {
 
         {/* 7. INTERVIEW REPLAY */}
         {Array.isArray(r.replay) && r.replay.length > 0 && (
-          <Section>
+          <Section lang={lang}>
             <button
               onClick={() => setShowReplay(p => !p)}
               style={{
@@ -668,8 +693,10 @@ function ReportView({ data }: { data: Stored }) {
                 fontFamily: 'inherit',
               }}
             >
-              <span style={{ fontSize: 13, fontWeight: 800 }}>
-                {isAr ? '🎬 إعادة المقابلة' : '🎬 Interview Replay'}
+              <span
+                style={{ fontFamily: SERIF, fontSize: 16, fontWeight: 700 }}
+              >
+                {isAr ? 'إعادة المقابلة' : 'Interview Replay'}
               </span>
 
               <span
@@ -751,7 +778,7 @@ function ReportView({ data }: { data: Stored }) {
                           textTransform: 'uppercase',
                         }}
                       >
-                        {isAr ? 'سؤال باربروس' : 'Barbaros Question'}
+                        {isAr ? 'سؤال بارباروس' : 'Barbaros Question'}
                       </div>
 
                       <div
@@ -804,23 +831,23 @@ function ReportView({ data }: { data: Stored }) {
                           style={{
                             fontSize: 10,
                             fontWeight: 700,
-                            color: '#92400E',
+                            color: '#86591D',
                             marginBottom: 4,
                             letterSpacing: 0.5,
                             textTransform: 'uppercase',
                           }}
                         >
-                          {isAr ? '🔎 ملاحظة المحاور' : '🔎 Interviewer Notes'}
+                          {isAr ? 'ملاحظة المحاور' : 'Interviewer Notes'}
                         </div>
 
                         <div
                           style={{
                             fontSize: 12,
-                            color: '#78350F',
+                            color: '#86591D',
                             lineHeight: 1.7,
                             padding: '10px 14px',
-                            background: 'rgba(245,158,11,0.06)',
-                            border: '0.5px solid rgba(245,158,11,0.2)',
+                            background: tint('#B07A2E', '12'),
+                            border: '0.5px solid rgba(176,122,46,0.25)',
                             borderRadius: 10,
                           }}
                         >
@@ -835,23 +862,23 @@ function ReportView({ data }: { data: Stored }) {
                           style={{
                             fontSize: 10,
                             fontWeight: 700,
-                            color: '#DC2626',
+                            color: '#A14234',
                             marginBottom: 4,
                             letterSpacing: 0.5,
                             textTransform: 'uppercase',
                           }}
                         >
-                          {isAr ? '⚠️ ما أضعف إجابتك' : '⚠️ What Weakened It'}
+                          {isAr ? 'ما أضعف إجابتك' : 'What Weakened It'}
                         </div>
 
                         <div
                           style={{
                             fontSize: 12,
-                            color: '#7F1D1D',
+                            color: '#7A2E24',
                             lineHeight: 1.7,
                             padding: '10px 14px',
-                            background: 'rgba(239,68,68,0.04)',
-                            border: '0.5px solid rgba(239,68,68,0.2)',
+                            background: tint('#A14234', '0E'),
+                            border: '0.5px solid rgba(161,66,52,0.22)',
                             borderRadius: 10,
                           }}
                         >
@@ -866,23 +893,23 @@ function ReportView({ data }: { data: Stored }) {
                           style={{
                             fontSize: 10,
                             fontWeight: 700,
-                            color: '#10B981',
+                            color: '#3F6B5E',
                             marginBottom: 4,
                             letterSpacing: 0.5,
                             textTransform: 'uppercase',
                           }}
                         >
-                          {isAr ? '💡 إجابة أقوى' : '💡 Stronger Response'}
+                          {isAr ? 'إجابة أقوى' : 'Stronger Response'}
                         </div>
 
                         <div
                           style={{
                             fontSize: 12,
-                            color: '#065F46',
+                            color: '#2E5248',
                             lineHeight: 1.8,
                             padding: '10px 14px',
-                            background: 'rgba(16,185,129,0.05)',
-                            border: '0.5px solid rgba(16,185,129,0.25)',
+                            background: tint('#3F6B5E', '12'),
+                            border: '0.5px solid rgba(63,107,94,0.30)',
                             borderRadius: 10,
                           }}
                         >
@@ -899,30 +926,21 @@ function ReportView({ data }: { data: Stored }) {
 
         {/* 8. RECOMMENDATION */}
         {r.recommendation && (
-          <div
+          <Section
+            lang={lang}
             style={{
               background: 'rgba(204,120,92,0.06)',
               border: '1px solid rgba(204,120,92,0.3)',
-              borderRadius: 20,
-              padding: '20px',
-              marginBottom: 16,
             }}
           >
-            <div
-              style={{
-                fontSize: 14,
-                fontWeight: 900,
-                color: '#CC785C',
-                marginBottom: 12,
-              }}
-            >
-              {isAr ? '🎯 خطوتك التالية' : '🎯 Your Next Step'}
-            </div>
+            <SectionTitle>
+              {isAr ? 'خطوتك التالية' : 'Your Next Step'}
+            </SectionTitle>
 
             <div style={{ fontSize: 13, color: '#1A1A1A', lineHeight: 1.9 }}>
               {r.recommendation}
             </div>
-          </div>
+          </Section>
         )}
 
         {/* 9. CTA */}
@@ -943,7 +961,7 @@ function ReportView({ data }: { data: Stored }) {
               marginBottom: 12,
             }}
           >
-            {isAr ? '🔁 مقابلة جديدة' : '🔁 Start New Interview'}
+            {isAr ? 'مقابلة جديدة' : 'Start New Interview'}
           </button>
 
           <div
@@ -985,7 +1003,7 @@ function ReportContent() {
 
   const [phase, setPhase] = useState<Phase>('loading')
   const [data, setData] = useState<Stored | null>(null)
-  const [lang, setLang] = useState<'en' | 'ar'>('en')
+  const [lang, setLang] = useState<Lang>('en')
 
   useEffect(() => {
     if (!reportJobId) return

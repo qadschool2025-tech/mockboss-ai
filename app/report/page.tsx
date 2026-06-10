@@ -2188,7 +2188,7 @@ function ReportContent() {
                 fontFamily: 'inherit',
               }}
             >
-              {isArF ? 'إعادة المحاولة الآن' : 'Try Again Now'}
+              {isArF ? 'تحديث حالة التقرير' : 'Refresh Report Status'}
             </button>
 
             <button

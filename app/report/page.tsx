@@ -445,13 +445,16 @@ function ReportView({ data }: { data: Stored }) {
           </Section>
         )}
 
-        {/* 3. ASSESSMENT COVERAGE */}
+        {/* 3. ASSESSMENT COVERAGE
+            - background: gradient واضح من أبيض إلى برتقالي كريمي دافئ
+            - عنوان "محاور لم تُقَس" أغمق بوضوح
+        */}
         {hasCoverage(coverage) && (
           <Section
             lang={lang}
             style={{
-              background: '#FFF8F3',
-              border: '1px solid rgba(204,120,92,0.22)',
+              background: 'linear-gradient(160deg, #FFFFFF 0%, #FDEEE4 100%)',
+              border: '1px solid rgba(204,120,92,0.28)',
             }}
           >
             <SectionTitle>
@@ -519,7 +522,7 @@ function ReportView({ data }: { data: Stored }) {
                     style={{
                       fontSize: 11,
                       fontWeight: 800,
-                      color: 'rgba(26,26,26,0.5)',
+                      color: 'rgba(26,26,26,0.62)',
                       marginBottom: 8,
                       ...labelType(isAr),
                     }}

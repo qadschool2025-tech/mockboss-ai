@@ -317,7 +317,38 @@ function ReportView({ data }: { data: Stored }) {
         minHeight: '100vh',
       }}
     >
+      {/* Print styles */}
+      <style>{`
+        @media print {
+          .no-print { display: none !important; }
+          .print-show { display: block !important; }
+          .print-header { display: flex !important; }
+          body { background: #F5F1EB !important; }
+          @page { margin: 16mm; }
+        }
+        @media screen {
+          .print-header { display: none; }
+        }
+      `}</style>
+
+      {/* Print-only header */}
+      <div
+        className="print-header"
+        style={{
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          marginBottom: 16,
+          paddingBottom: 12,
+          borderBottom: '1px solid #E5DDD0',
+        }}
+      >
+        <Barbaros size={20} />
+        <div style={{ fontSize: 12, color: 'rgba(26,26,26,0.45)' }}>
+          {isAr ? 'تقرير المقابلة' : 'Interview Report'}
+        </div>
+      </div>
       <nav
+        className="no-print"
         style={{
           background: '#F5F1EB',
           borderBottom: '0.5px solid #E5DDD0',
@@ -738,6 +769,7 @@ function ReportView({ data }: { data: Stored }) {
         {Array.isArray(r.replay) && r.replay.length > 0 && (
           <Section lang={lang}>
             <button
+              className="no-print"
               onClick={() => setShowReplay(p => !p)}
               style={{
                 width: '100%',
@@ -789,7 +821,7 @@ function ReportView({ data }: { data: Stored }) {
             </div>
 
             {showReplay && (
-              <div style={{ marginTop: 16 }}>
+              <div className="print-show" style={{ marginTop: 16 }}>
                 {r.replay.map((item, i) => (
                   <div
                     key={i}
@@ -1011,7 +1043,26 @@ function ReportView({ data }: { data: Stored }) {
         )}
 
         {/* 9. CTA */}
-        <div style={{ textAlign: 'center', marginTop: 8 }}>
+        <div className="no-print" style={{ textAlign: 'center', marginTop: 8 }}>
+          <button
+            onClick={() => window.print()}
+            style={{
+              background: '#1A1A1A',
+              color: '#FFFFFF',
+              border: 'none',
+              borderRadius: 14,
+              padding: '12px 36px',
+              fontSize: 13,
+              fontWeight: 700,
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+              width: '100%',
+              marginBottom: 10,
+            }}
+          >
+            {isAr ? 'طباعة التقرير / حفظ PDF' : 'Print Report / Save PDF'}
+          </button>
+
           <button
             onClick={() => router.push('/onboarding')}
             style={{

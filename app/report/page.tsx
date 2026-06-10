@@ -474,6 +474,33 @@ function PerformancePath({ replay, isAr }: { replay: ReplayItem[]; isAr: boolean
   )
 }
 
+/* ---------- Executive glance helpers (derive-only, no invented values) ---------- */
+
+// First complete sentence, word-safe capped at ~140 chars.
+function firstSentence(text: string | undefined): string {
+  const t = typeof text === 'string' ? text.trim() : ''
+  if (!t) return ''
+
+  const m = t.match(/^[^.!?؟۔]+[.!?؟۔]?/)
+  let out = (m ? m[0] : t).trim()
+
+  if (out.length > 140) {
+    out = out.slice(0, 140)
+    const cut = out.lastIndexOf(' ')
+    if (cut > 80) out = out.slice(0, cut)
+    out = out.trimEnd() + '…'
+  }
+
+  return out
+}
+
+function topCompetency(list: Competency[] | undefined): Competency | null {
+  if (!Array.isArray(list) || list.length === 0) return null
+  return list.reduce((best, c) =>
+    typeof c.score === 'number' && c.score > best.score ? c : best
+  , list[0])
+}
+
 /* ---------- Premium cover helpers ---------- */
 
 function safeText(value: string | undefined, fallback: string) {
@@ -755,6 +782,110 @@ function ReportCover({
             </div>
           )}
         </div>
+
+        {(() => {
+          const r = data.report
+          const top = topCompetency(r.competencies)
+          const risk = firstSentence(r.hiddenWeakness)
+          const action = firstSentence(r.recommendation)
+
+          const GlanceCard = ({
+            label,
+            value,
+            sub,
+            accent,
+          }: {
+            label: string
+            value: string
+            sub?: string
+            accent: string
+          }) => (
+            <div
+              style={{
+                background: 'rgba(255,255,255,0.78)',
+                border: `0.5px solid ${accent}40`,
+                borderInlineStart: `3px solid ${accent}`,
+                borderRadius: 14,
+                padding: '12px 14px',
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 10,
+                  fontWeight: 800,
+                  color: accent,
+                  marginBottom: 6,
+                  ...labelType(isAr),
+                }}
+              >
+                {label}
+              </div>
+              <div style={{ fontSize: 13, fontWeight: 800, color: '#1A1A1A', lineHeight: 1.55 }}>
+                {value}
+              </div>
+              {sub && (
+                <div style={{ fontSize: 11.5, color: 'rgba(26,26,26,0.55)', lineHeight: 1.6, marginTop: 3 }}>
+                  {sub}
+                </div>
+              )}
+            </div>
+          )
+
+          return (
+            <div style={{ marginTop: 18 }}>
+              <div
+                style={{
+                  fontSize: 10,
+                  fontWeight: 800,
+                  color: 'rgba(26,26,26,0.42)',
+                  marginBottom: 10,
+                  ...labelType(isAr),
+                }}
+              >
+                {isAr ? 'لمحة تنفيذية سريعة' : 'Executive Glance'}
+              </div>
+
+              <div
+                className="cover-glance-grid"
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(2, 1fr)',
+                  gap: 10,
+                }}
+              >
+                <GlanceCard
+                  accent="#5A463E"
+                  label={isAr ? 'الحكم المهني النهائي' : 'Final Professional Verdict'}
+                  value={`${readinessLabel} · ${r.finalScore}/100`}
+                />
+
+                {top && (
+                  <GlanceCard
+                    accent="#3F6B5E"
+                    label={isAr ? 'أقوى ميزة في أدائك' : 'Your Strongest Asset'}
+                    value={`${isAr ? AR_COMPETENCY_NAMES[top.name] ?? top.name : top.name} · ${top.score}/100`}
+                  />
+                )}
+
+                {risk && (
+                  <GlanceCard
+                    accent="#A14234"
+                    label={isAr ? 'أكبر نقطة خطر' : 'Primary Risk'}
+                    value={risk}
+                  />
+                )}
+
+                {action && (
+                  <GlanceCard
+                    accent="#CC785C"
+                    label={isAr ? 'أول إجراء مطلوب للتحسن' : 'First Action to Improve'}
+                    value={action}
+                  />
+                )}
+              </div>
+            </div>
+          )
+        })()}
       </div>
     </section>
   )
@@ -1042,6 +1173,7 @@ function ReportView({ data }: { data: Stored }) {
           .report-cover { border-radius: 22px !important; padding: 22px !important; }
           .cover-title-grid { grid-template-columns: 1fr !important; }
           .cover-meta-grid { grid-template-columns: 1fr 1fr !important; }
+          .cover-glance-grid { grid-template-columns: 1fr !important; }
         }
       `}</style>
 

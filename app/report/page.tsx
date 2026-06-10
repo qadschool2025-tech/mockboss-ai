@@ -52,6 +52,7 @@ interface Stored {
   language: string
   plan: string
   reportDate: string
+  reportReference: string
 }
 
 type Lang = 'en' | 'ar'
@@ -289,7 +290,294 @@ function hasCoverage(coverage?: AssessmentCoverage): coverage is AssessmentCover
   )
 }
 
+/* ---------- Premium cover helpers ---------- */
+
+function safeText(value: string | undefined, fallback: string) {
+  const v = typeof value === 'string' ? value.trim() : ''
+  return v || fallback
+}
+
+function displayPlanName(plan: string) {
+  const key = (plan || '').toLowerCase()
+  if (key.includes('executive')) return 'Executive Interview'
+  if (key.includes('professional') || key.includes('pro')) return 'Professional Interview'
+  if (key.includes('essential') || key.includes('basic') || key.includes('free')) return 'Essential Interview'
+  return 'Barbaros Interview'
+}
+
+function shortReference(value: string | undefined) {
+  if (!value) return ''
+  return value.replace(/-/g, '').slice(0, 10).toUpperCase()
+}
+
+const MetaItem = ({
+  label,
+  value,
+  isAr,
+}: {
+  label: string
+  value: string
+  isAr: boolean
+}) => (
+  <div
+    style={{
+      background: 'rgba(255,255,255,0.72)',
+      border: '0.5px solid rgba(229,221,208,0.9)',
+      borderRadius: 14,
+      padding: '12px 14px',
+      minHeight: 64,
+    }}
+  >
+    <div
+      style={{
+        fontSize: 10,
+        fontWeight: 800,
+        color: 'rgba(26,26,26,0.42)',
+        marginBottom: 6,
+        ...labelType(isAr),
+      }}
+    >
+      {label}
+    </div>
+    <div style={{ fontSize: 13, fontWeight: 800, color: '#1A1A1A', lineHeight: 1.5 }}>
+      {value}
+    </div>
+  </div>
+)
+
+function ReportCover({
+  data,
+  isAr,
+  readinessLabel,
+  reportDate,
+  reference,
+  summaryLine,
+  assessment,
+}: {
+  data: Stored
+  isAr: boolean
+  readinessLabel: string
+  reportDate: string
+  reference: string
+  summaryLine: string
+  assessment: string
+}) {
+  return (
+    <section
+      className="report-cover"
+      style={{
+        position: 'relative',
+        overflow: 'hidden',
+        background: 'linear-gradient(135deg, #FFFFFF 0%, #F8EFE7 52%, #F1E4D5 100%)',
+        border: '1px solid rgba(204,120,92,0.25)',
+        borderRadius: 26,
+        padding: '28px',
+        marginBottom: 18,
+        boxShadow: '0 12px 34px rgba(26,26,26,0.08)',
+      }}
+    >
+      <div
+        aria-hidden="true"
+        style={{
+          position: 'absolute',
+          width: 220,
+          height: 220,
+          borderRadius: '50%',
+          background: 'rgba(204,120,92,0.10)',
+          top: -86,
+          insetInlineEnd: -78,
+        }}
+      />
+
+      <div style={{ position: 'relative' }}>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'flex-start',
+            gap: 16,
+            marginBottom: 24,
+          }}
+        >
+          <div>
+            <Barbaros size={26} />
+            <div
+              style={{
+                marginTop: 8,
+                fontSize: 10.5,
+                fontWeight: 800,
+                color: 'rgba(26,26,26,0.45)',
+                ...labelType(isAr),
+              }}
+            >
+              {isAr ? 'منهجية تقييم مقابلات قائمة على الكفاءات' : 'Competency-Based Interview Assessment'}
+            </div>
+          </div>
+
+          <div
+            style={{
+              background: '#1A1A1A',
+              color: '#FFFFFF',
+              borderRadius: 999,
+              padding: '8px 14px',
+              fontSize: 11,
+              fontWeight: 800,
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {displayPlanName(data.plan)}
+          </div>
+        </div>
+
+        <div
+          className="cover-title-grid"
+          style={{
+            display: 'grid',
+            gridTemplateColumns: '1.4fr 0.8fr',
+            gap: 18,
+            alignItems: 'end',
+            marginBottom: 22,
+          }}
+        >
+          <div>
+            <div
+              style={{
+                fontSize: 12,
+                fontWeight: 800,
+                color: '#CC785C',
+                marginBottom: 8,
+                ...labelType(isAr),
+              }}
+            >
+              {isAr ? 'تقرير تقييم المقابلة' : 'Interview Assessment Report'}
+            </div>
+
+            <h1
+              style={{
+                fontFamily: SERIF,
+                fontSize: 34,
+                lineHeight: 1.12,
+                color: '#1A1A1A',
+                margin: 0,
+                letterSpacing: -0.4,
+              }}
+            >
+              {safeText(data.candidateName, isAr ? 'المرشح' : 'Candidate')}
+            </h1>
+          </div>
+
+          <div
+            style={{
+              background: 'linear-gradient(135deg, #CC785C 0%, #A85A42 100%)',
+              borderRadius: 18,
+              padding: '16px 18px',
+              color: '#FFFFFF',
+              textAlign: isAr ? 'right' : 'left',
+            }}
+          >
+            <div style={{ fontSize: 10, opacity: 0.78, fontWeight: 800, marginBottom: 7, ...labelType(isAr) }}>
+              {isAr ? 'الحكم المهني' : 'Professional Verdict'}
+            </div>
+            <div style={{ fontFamily: SERIF, fontSize: 18, fontWeight: 800, lineHeight: 1.35 }}>
+              {readinessLabel}
+            </div>
+          </div>
+        </div>
+
+        <div
+          className="cover-meta-grid"
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(3, 1fr)',
+            gap: 10,
+            marginBottom: 18,
+          }}
+        >
+          <MetaItem
+            isAr={isAr}
+            label={isAr ? 'المسمى المستهدف' : 'Target Role'}
+            value={safeText(data.jobTitle, isAr ? 'غير محدد' : 'Not provided')}
+          />
+          <MetaItem
+            isAr={isAr}
+            label={isAr ? 'الجهة أو القطاع' : 'Institution or Sector'}
+            value={safeText(data.institution || data.sector, isAr ? 'غير محدد' : 'Not provided')}
+          />
+          <MetaItem
+            isAr={isAr}
+            label={isAr ? 'سنوات الخبرة' : 'Years of Experience'}
+            value={safeText(data.yearsExperience, isAr ? 'غير محدد' : 'Not provided')}
+          />
+          <MetaItem
+            isAr={isAr}
+            label={isAr ? 'تاريخ التقرير' : 'Report Date'}
+            value={reportDate || (isAr ? 'غير متاح' : 'Not available')}
+          />
+          <MetaItem
+            isAr={isAr}
+            label={isAr ? 'مرجع التقرير' : 'Report Reference'}
+            value={reference || (isAr ? 'غير متاح' : 'Not available')}
+          />
+          <MetaItem
+            isAr={isAr}
+            label={isAr ? 'النتيجة الإجمالية' : 'Overall Score'}
+            value={`${data.report.finalScore} / 100`}
+          />
+        </div>
+
+        <div
+          style={{
+            padding: '16px 18px',
+            background: 'rgba(255,255,255,0.78)',
+            border: '0.5px solid rgba(229,221,208,0.9)',
+            borderRadius: 14,
+          }}
+        >
+          <div
+            style={{
+              fontSize: 10,
+              fontWeight: 800,
+              color: '#CC785C',
+              marginBottom: 10,
+              ...labelType(isAr),
+            }}
+          >
+            {isAr ? 'الخلاصة التقييمية' : 'Executive Summary'}
+          </div>
+
+          <div
+            style={{
+              fontSize: 13,
+              color: '#1A1A1A',
+              lineHeight: 1.9,
+              marginBottom: assessment ? 12 : 0,
+            }}
+          >
+            {summaryLine}
+          </div>
+
+          {assessment && (
+            <div
+              style={{
+                fontSize: 12.5,
+                color: '#1A1A1A',
+                lineHeight: 1.9,
+                fontStyle: 'italic',
+                paddingTop: 12,
+                borderTop: '0.5px solid rgba(26,26,26,0.08)',
+              }}
+            >
+              "{assessment}"
+            </div>
+          )}
+        </div>
+      </div>
+    </section>
+  )
+}
+
 /* ---------- Shared centered screen for non-report states ---------- */
+
 
 function CenteredScreen({ children }: { children: React.ReactNode }) {
   return (
@@ -362,11 +650,22 @@ function ReportView({ data }: { data: Stored }) {
           .report-cover {
             break-after: page;
             page-break-after: always;
+            break-inside: avoid;
+            page-break-inside: avoid;
+            box-shadow: none !important;
           }
+          .cover-title-grid { grid-template-columns: 1.35fr 0.85fr !important; }
+          .cover-meta-grid { grid-template-columns: repeat(3, 1fr) !important; }
           @page { margin: 16mm; }
         }
         @media screen {
           .print-header { display: none; }
+        }
+        @media screen and (max-width: 720px) {
+          .report-shell { padding: 20px 14px 80px !important; }
+          .report-cover { border-radius: 22px !important; padding: 22px !important; }
+          .cover-title-grid { grid-template-columns: 1fr !important; }
+          .cover-meta-grid { grid-template-columns: 1fr 1fr !important; }
         }
       `}</style>
 
@@ -431,105 +730,24 @@ function ReportView({ data }: { data: Stored }) {
         className="report-shell"
         style={{ maxWidth: 780, margin: '0 auto', padding: '24px 16px 80px' }}
       >
-        {/* 0. COVER — identity, issue date, executive summary */}
-        <Section lang={lang} className="report-cover">
-          <div style={{ textAlign: isAr ? 'right' : 'left' }}>
-            <div
-              style={{
-                fontFamily: SERIF,
-                fontSize: 30,
-                fontWeight: 700,
-                lineHeight: 1.25,
-                color: '#1A1A1A',
-                marginBottom: 6,
-              }}
-            >
-              {data.candidateName}
-            </div>
-
-            <div
-              style={{
-                fontSize: 15,
-                color: 'rgba(26,26,26,0.6)',
-                lineHeight: 1.6,
-              }}
-            >
-              {data.jobTitle}
-              {data.institution ? ` · ${data.institution}` : ''}
-            </div>
-
-            {formatReportDate(data.reportDate, isAr) && (
-              <div
-                style={{
-                  fontSize: 12,
-                  color: 'rgba(26,26,26,0.4)',
-                  marginTop: 14,
-                  paddingTop: 14,
-                  borderTop: '0.5px solid rgba(26,26,26,0.08)',
-                }}
-              >
-                {(isAr ? 'تاريخ التقرير: ' : 'Report Date: ') +
-                  formatReportDate(data.reportDate, isAr)}
-              </div>
-            )}
-
-            {/* Executive summary — composed from existing report fields */}
-            <div
-              style={{
-                marginTop: 20,
-                padding: '16px 18px',
-                background: '#F5F1EB',
-                border: '0.5px solid #E5DDD0',
-                borderRadius: 14,
-              }}
-            >
-              <div
-                style={{
-                  fontSize: 10,
-                  fontWeight: 700,
-                  color: '#CC785C',
-                  marginBottom: 10,
-                  ...labelType(isAr),
-                }}
-              >
-                {isAr ? 'الخلاصة التقييمية' : 'Executive Summary'}
-              </div>
-
-              <div
-                style={{
-                  fontSize: 13,
-                  color: '#1A1A1A',
-                  lineHeight: 1.9,
-                  marginBottom: r.barbarosAssessment ? 12 : 0,
-                }}
-              >
-                {isAr
-                  ? `حصل المرشّح على ${r.finalScore} من 100 ضمن مستوى «${readinessLabel}»`
-                  : `Overall score of ${r.finalScore} out of 100 — readiness level: “${readinessLabel}”`}
-                {typeof r.hireProbability === 'number'
-                  ? isAr
-                    ? `، باحتمالية توظيف ${r.hireProbability}%.`
-                    : `, with a ${r.hireProbability}% probability of hire.`
-                  : '.'}
-              </div>
-
-              {r.barbarosAssessment && (
-                <div
-                  style={{
-                    fontSize: 12.5,
-                    color: '#1A1A1A',
-                    lineHeight: 1.9,
-                    fontStyle: 'italic',
-                    paddingTop: 12,
-                    borderTop: '0.5px solid rgba(26,26,26,0.08)',
-                  }}
-                >
-                  "{r.barbarosAssessment}"
-                </div>
-              )}
-            </div>
-          </div>
-        </Section>
+        <ReportCover
+          data={data}
+          isAr={isAr}
+          readinessLabel={readinessLabel}
+          reportDate={formatReportDate(data.reportDate, isAr)}
+          reference={shortReference(data.reportReference)}
+          summaryLine={
+            (isAr
+              ? `حصل المرشّح على ${r.finalScore} من 100 ضمن مستوى «${readinessLabel}»`
+              : `Overall score of ${r.finalScore} out of 100 — readiness level: “${readinessLabel}”`) +
+            (typeof r.hireProbability === 'number'
+              ? isAr
+                ? `، باحتمالية توظيف ${r.hireProbability}%.`
+                : `, with a ${r.hireProbability}% probability of hire.`
+              : '.')
+          }
+          assessment={r.barbarosAssessment || ''}
+        />
 
         {/* 1. SCORE */}
         <Section lang={lang} style={{ textAlign: 'center' }}>
@@ -1276,6 +1494,7 @@ function ReportContent() {
             language: str('language') || 'en',
             plan: str('plan'),
             reportDate,
+            reportReference: reportJobId,
           })
           setPhase('ready')
           return

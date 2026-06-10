@@ -2087,42 +2087,144 @@ function ReportContent() {
   }
 
   if (phase === 'failed' || phase === 'error') {
+    const isArF = lang === 'ar'
+    const ref = shortReference(reportJobId)
+
     return (
-      <CenteredScreen>
-        <Barbaros size={20} />
-        <div style={{ marginTop: 16, fontSize: 15, fontWeight: 700, color: '#1A1A1A' }}>
-          {lang === 'ar' ? 'تعذّر إنشاء التقرير' : 'We could not generate your report'}
-        </div>
+      <div
+        dir={isArF ? 'rtl' : 'ltr'}
+        style={{
+          minHeight: '100vh',
+          background: '#F5F1EB',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontFamily: 'system-ui, sans-serif',
+          padding: 24,
+        }}
+      >
         <div
           style={{
-            marginTop: 8,
-            fontSize: 12.5,
-            color: 'rgba(26,26,26,0.5)',
-            maxWidth: 360,
-            lineHeight: 1.7,
-            marginBottom: 20,
+            width: '100%',
+            maxWidth: 440,
+            background: '#FFFFFF',
+            border: '1px solid #E5DDD0',
+            borderRadius: 22,
+            padding: '30px 26px',
+            boxShadow: '0 12px 34px rgba(26,26,26,0.07)',
+            textAlign: 'center',
           }}
         >
-          {lang === 'ar'
-            ? 'حدث خطأ أثناء تجهيز التقييم. يمكنك المحاولة مجدداً بإجراء مقابلة جديدة.'
-            : 'Something went wrong while preparing the assessment. You can try again with a new interview.'}
+          <Barbaros size={24} />
+
+          <div
+            style={{
+              marginTop: 16,
+              fontFamily: SERIF,
+              fontSize: 17,
+              fontWeight: 700,
+              color: '#1A1A1A',
+            }}
+          >
+            {isArF ? 'تعذّر تجهيز التقرير حالياً' : 'Your report could not be prepared right now'}
+          </div>
+
+          <div
+            style={{
+              marginTop: 10,
+              fontSize: 12.5,
+              color: 'rgba(26,26,26,0.55)',
+              lineHeight: 1.8,
+            }}
+          >
+            {isArF
+              ? 'بيانات مقابلتك محفوظة ولم تُفقد. يمكنك إعادة المحاولة لاحقاً بفتح هذا الرابط نفسه، أو بدء مقابلة جديدة.'
+              : 'Your interview data is saved and has not been lost. You can retry later by reopening this same link, or start a new interview.'}
+          </div>
+
+          {ref && (
+            <div
+              style={{
+                marginTop: 16,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 8,
+                background: '#F5F1EB',
+                border: '0.5px solid #E5DDD0',
+                borderRadius: 10,
+                padding: '8px 14px',
+              }}
+            >
+              <span style={{ fontSize: 11, color: 'rgba(26,26,26,0.5)', fontWeight: 600 }}>
+                {isArF ? 'الرقم المرجعي' : 'Reference'}
+              </span>
+              <span
+                style={{
+                  fontSize: 12,
+                  fontWeight: 800,
+                  color: '#1A1A1A',
+                  letterSpacing: 1,
+                  fontFamily: 'ui-monospace, monospace',
+                  direction: 'ltr',
+                }}
+              >
+                {ref}
+              </span>
+            </div>
+          )}
+
+          <div style={{ marginTop: 22, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <button
+              onClick={() => window.location.reload()}
+              style={{
+                background: '#1A1A1A',
+                color: '#FFFFFF',
+                border: 'none',
+                borderRadius: 12,
+                padding: '12px 28px',
+                fontSize: 13,
+                fontWeight: 700,
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+              }}
+            >
+              {isArF ? 'إعادة المحاولة الآن' : 'Try Again Now'}
+            </button>
+
+            <button
+              onClick={() => router.push('/onboarding')}
+              style={{
+                background: 'transparent',
+                color: '#CC785C',
+                border: '1px solid #CC785C',
+                borderRadius: 12,
+                padding: '12px 28px',
+                fontSize: 13,
+                fontWeight: 700,
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+              }}
+            >
+              {isArF ? 'بدء مقابلة جديدة' : 'Start a New Interview'}
+            </button>
+          </div>
+
+          <div
+            style={{
+              marginTop: 18,
+              paddingTop: 14,
+              borderTop: '0.5px solid rgba(26,26,26,0.08)',
+              fontSize: 11,
+              color: 'rgba(26,26,26,0.38)',
+              lineHeight: 1.7,
+            }}
+          >
+            {isArF
+              ? 'احتفظ بالرقم المرجعي عند التواصل مع الدعم.'
+              : 'Keep the reference number when contacting support.'}
+          </div>
         </div>
-        <button
-          onClick={() => router.push('/onboarding')}
-          style={{
-            background: '#CC785C',
-            color: '#fff',
-            border: 'none',
-            borderRadius: 12,
-            padding: '12px 28px',
-            fontSize: 13,
-            fontWeight: 700,
-            cursor: 'pointer',
-          }}
-        >
-          {lang === 'ar' ? 'مقابلة جديدة' : 'Start a New Interview'}
-        </button>
-      </CenteredScreen>
+      </div>
     )
   }
 

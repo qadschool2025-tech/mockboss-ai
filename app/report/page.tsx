@@ -487,7 +487,7 @@ function ReportView({ data }: { data: Stored }) {
             }}
           >
             <SectionTitle>
-              {isAr ? 'نطاق التقييم' : 'Assessment Coverage'}
+              {isAr ? 'نطاق التقييم في هذه الباقة' : 'Assessment Coverage for This Package'}
             </SectionTitle>
 
             {coverage.summary && (
@@ -516,7 +516,7 @@ function ReportView({ data }: { data: Stored }) {
                     }}
                   >
                     {isAr
-                      ? 'المحاور التي تم قياسها في هذه الباقة'
+                      ? 'المحاور التي تم قياسها فعلياً في هذه الباقة'
                       : 'Measured in this package'}
                   </div>
 
@@ -557,8 +557,8 @@ function ReportView({ data }: { data: Stored }) {
                     }}
                   >
                     {isAr
-                      ? 'محاور لم تُقَس هنا — متاحة في الباقات الأعلى'
-                      : 'Not measured here · available in higher-tier plans'}
+                      ? 'محاور لم تُقَس في هذه الباقة — متاحة بتفصيل أعمق في الباقات الأعلى'
+                      : 'Not measured here · available in greater depth in higher-tier plans'}
                   </div>
 
                   <div
@@ -754,7 +754,7 @@ function ReportView({ data }: { data: Stored }) {
               <span
                 style={{ fontFamily: SERIF, fontSize: 16, fontWeight: 700 }}
               >
-                {isAr ? 'تحليل الإجابات والتدريب' : 'Answer Analysis & Coaching'}
+                {isAr ? 'تحليل المقابلة' : 'Interview Analysis'}
               </span>
 
               <span
@@ -766,11 +766,11 @@ function ReportView({ data }: { data: Stored }) {
               >
                 {showReplay
                   ? isAr
-                    ? 'إخفاء ▲'
-                    : 'Hide ▲'
+                    ? 'إخفاء التحليل ▲'
+                    : 'Hide Analysis ▲'
                   : isAr
-                    ? 'عرض ▼'
-                    : 'Show ▼'}
+                    ? 'عرض التحليل ▼'
+                    : 'Show Analysis ▼'}
               </span>
             </button>
 

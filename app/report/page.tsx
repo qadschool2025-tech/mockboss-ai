@@ -290,6 +290,190 @@ function hasCoverage(coverage?: AssessmentCoverage): coverage is AssessmentCover
   )
 }
 
+/* ---------- Performance path across interview questions ---------- */
+/* Frontend-only: derived from replay[].score order. No timestamps exist. */
+
+function PerformancePath({ replay, isAr }: { replay: ReplayItem[]; isAr: boolean }) {
+  const scores = replay
+    .map(item => item.score)
+    .filter(v => typeof v === 'number' && !Number.isNaN(v))
+
+  if (scores.length < 2) return null
+
+  const n = scores.length
+  const max = Math.max(...scores)
+  const min = Math.min(...scores)
+  const avg = Math.round(scores.reduce((a, b) => a + b, 0) / n)
+  const peakIdx = scores.indexOf(max)
+  const lowIdx = scores.indexOf(min)
+
+  // Trend: compare average of second half vs first half.
+  const half = Math.floor(n / 2)
+  const firstAvg = scores.slice(0, half).reduce((a, b) => a + b, 0) / half
+  const secondAvg = scores.slice(n - half).reduce((a, b) => a + b, 0) / half
+  const delta = secondAvg - firstAvg
+  const trend: 'up' | 'down' | 'flat' = delta >= 5 ? 'up' : delta <= -5 ? 'down' : 'flat'
+
+  const trendLabel = isAr
+    ? trend === 'up'
+      ? 'الاتجاه العام: أداء يتحسن مع تقدم المقابلة'
+      : trend === 'down'
+        ? 'الاتجاه العام: أداء يتراجع مع تقدم المقابلة'
+        : 'الاتجاه العام: أداء مستقر عبر المقابلة'
+    : trend === 'up'
+      ? 'Overall trend: performance improved as the interview progressed'
+      : trend === 'down'
+        ? 'Overall trend: performance declined as the interview progressed'
+        : 'Overall trend: performance remained stable across the interview'
+
+  const trendColor = trend === 'up' ? '#3F6B5E' : trend === 'down' ? '#A14234' : '#86591D'
+
+  // SVG geometry
+  const W = 640
+  const H = 200
+  const padX = 36
+  const padTop = 26
+  const padBottom = 40
+  const innerW = W - padX * 2
+  const innerH = H - padTop - padBottom
+
+  const x = (i: number) => padX + (n === 1 ? innerW / 2 : (innerW * i) / (n - 1))
+  const y = (v: number) => padTop + innerH * (1 - Math.max(0, Math.min(100, v)) / 100)
+
+  const points = scores.map((v, i) => `${x(i)},${y(v)}`).join(' ')
+  const areaPoints = `${x(0)},${padTop + innerH} ${points} ${x(n - 1)},${padTop + innerH}`
+
+  const statBox = (label: string, value: string, color: string) => (
+    <div
+      key={label}
+      style={{
+        background: tint(color, 0.07),
+        border: `0.5px solid ${color}40`,
+        borderRadius: 12,
+        padding: '10px 12px',
+        textAlign: 'center',
+      }}
+    >
+      <div style={{ fontSize: 10, fontWeight: 800, color: 'rgba(26,26,26,0.45)', marginBottom: 4, ...labelType(isAr) }}>
+        {label}
+      </div>
+      <div style={{ fontSize: 15, fontWeight: 900, color }}>{value}</div>
+    </div>
+  )
+
+  return (
+    <div>
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        style={{ width: '100%', height: 'auto', display: 'block' }}
+        role="img"
+        aria-label={isAr ? 'مسار الأداء عبر أسئلة المقابلة' : 'Performance path across interview questions'}
+      >
+        {[0, 25, 50, 75, 100].map(g => (
+          <g key={g}>
+            <line
+              x1={padX}
+              x2={W - padX}
+              y1={y(g)}
+              y2={y(g)}
+              stroke="#E5DDD0"
+              strokeWidth={g === 0 ? 1 : 0.5}
+              strokeDasharray={g === 0 ? undefined : '3 4'}
+            />
+            <text
+              x={padX - 8}
+              y={y(g) + 3.5}
+              textAnchor="end"
+              fontSize="9"
+              fill="rgba(26,26,26,0.35)"
+            >
+              {g}
+            </text>
+          </g>
+        ))}
+
+        <polygon points={areaPoints} fill="rgba(204,120,92,0.08)" />
+        <polyline
+          points={points}
+          fill="none"
+          stroke="#CC785C"
+          strokeWidth="2.5"
+          strokeLinejoin="round"
+          strokeLinecap="round"
+        />
+
+        {scores.map((v, i) => {
+          const isPeak = i === peakIdx
+          const isLow = i === lowIdx
+          const c = isPeak ? '#3F6B5E' : isLow ? '#A14234' : '#CC785C'
+          return (
+            <g key={i}>
+              <circle cx={x(i)} cy={y(v)} r={isPeak || isLow ? 5.5 : 3.5} fill={c} stroke="#FFFFFF" strokeWidth="1.5" />
+              <text
+                x={x(i)}
+                y={H - padBottom + 16}
+                textAnchor="middle"
+                fontSize="9.5"
+                fill="rgba(26,26,26,0.45)"
+              >
+                {isAr ? `س${i + 1}` : `Q${i + 1}`}
+              </text>
+              {(isPeak || isLow) && (
+                <text
+                  x={x(i)}
+                  y={y(v) - 10}
+                  textAnchor="middle"
+                  fontSize="10"
+                  fontWeight="800"
+                  fill={c}
+                >
+                  {v}
+                </text>
+              )}
+            </g>
+          )
+        })}
+      </svg>
+
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(3, 1fr)',
+          gap: 8,
+          marginTop: 14,
+          marginBottom: 12,
+        }}
+      >
+        {statBox(
+          isAr ? 'أعلى نقطة أداء' : 'Peak performance',
+          `${max} · ${isAr ? `س${peakIdx + 1}` : `Q${peakIdx + 1}`}`,
+          '#3F6B5E'
+        )}
+        {statBox(
+          isAr ? 'أدنى نقطة أداء' : 'Lowest point',
+          `${min} · ${isAr ? `س${lowIdx + 1}` : `Q${lowIdx + 1}`}`,
+          '#A14234'
+        )}
+        {statBox(isAr ? 'متوسط الأداء' : 'Average', `${avg}`, '#CC785C')}
+      </div>
+
+      <div
+        style={{
+          fontSize: 12,
+          fontWeight: 700,
+          color: trendColor,
+          background: tint(trendColor, 0.07),
+          border: `0.5px solid ${trendColor}33`,
+          borderRadius: 10,
+          padding: '9px 12px',
+        }}
+      >
+        {trendLabel}
+      </div>
+    </div>
+  )
+}
+
 /* ---------- Premium cover helpers ---------- */
 
 function safeText(value: string | undefined, fallback: string) {
@@ -1026,6 +1210,17 @@ function ReportView({ data }: { data: Stored }) {
                 </div>
               </div>
             ))}
+          </Section>
+        )}
+
+        {/* 4.5 PERFORMANCE PATH — derived from replay scores (question order, not time) */}
+        {Array.isArray(r.replay) && r.replay.length >= 2 && (
+          <Section lang={lang}>
+            <SectionTitle>
+              {isAr ? 'مسار الأداء عبر أسئلة المقابلة' : 'Performance Path Across Interview Questions'}
+            </SectionTitle>
+
+            <PerformancePath replay={r.replay} isAr={isAr} />
           </Section>
         )}
 

@@ -1,4 +1,5 @@
 // lib/barbaros/report/generate-report-data.ts
+
 // Barbaros report data generator (Next-independent, reusable).
 // Logic extracted verbatim from app/api/generate-report/route.ts.
 

@@ -914,45 +914,63 @@ const GENERATION_STAGES: Record<PlanTier, Record<'ar' | 'en', readonly string[]>
       'قراءة المقابلة',
       'تحليل الإجابات الأساسية',
       'قياس الجاهزية العامة',
-      'إعداد التقرير المختصر',
+      'إعداد ملخص التقرير',
+      'تجهيز التقرير النهائي',
     ],
     en: [
       'Reading the interview',
       'Analyzing core answers',
       'Measuring overall readiness',
-      'Preparing the summary report',
+      'Preparing the report summary',
+      'Finalizing the report',
     ],
   },
   pro: {
     ar: [
       'قراءة المقابلة الكاملة',
+      'فرز الإجابات حسب محاور التقييم',
       'تحليل السلوك والكفاءات',
       'قياس الاتساق والوضوح',
+      'رصد نقاط القوة والمخاطر',
       'بناء خطة التحسين',
-      'إعداد تقرير Pro',
+      'إعداد تحليل الإجابات',
+      'تجهيز تقرير Pro النهائي',
     ],
     en: [
       'Reading the full interview',
+      'Mapping answers to assessment areas',
       'Analyzing behavior and competencies',
       'Measuring consistency and clarity',
+      'Identifying strengths and risks',
       'Building your improvement plan',
-      'Preparing your Pro report',
+      'Preparing answer analysis',
+      'Finalizing your Pro report',
     ],
   },
   expert: {
     ar: [
       'قراءة المقابلة الكاملة',
+      'فرز الإجابات حسب محاور التقييم',
       'تحليل أدوار اللجنة',
       'تقييم الضغط والحكم المهني',
-      'بناء الرؤية التنفيذية',
-      'إعداد تقرير Expert',
+      'قياس التفكير الاستراتيجي',
+      'رصد الأنماط السلوكية العميقة',
+      'مراجعة نقاط القوة والمخاطر التنفيذية',
+      'بناء تحليل الإجابات المتقدم',
+      'صياغة التوصيات بمستوى قرار التوظيف',
+      'تجهيز تقرير Expert النهائي',
     ],
     en: [
       'Reading the full interview',
+      'Mapping answers to assessment areas',
       'Analyzing panel role dynamics',
       'Evaluating pressure and professional judgment',
-      'Building the executive view',
-      'Preparing your Expert report',
+      'Measuring strategic thinking',
+      'Detecting deeper behavioral patterns',
+      'Reviewing executive strengths and risks',
+      'Building advanced answer analysis',
+      'Drafting decision-grade recommendations',
+      'Finalizing your Expert report',
     ],
   },
 } as const
@@ -972,19 +990,64 @@ const GENERATION_WAIT_NOTICE: Record<PlanTier, Record<'ar' | 'en', string>> = {
   },
 } as const
 
+/* Presentational pacing per tier. Stage cadence mirrors the honest duration
+   each plan communicates (Go under ~2 min, Pro a few, Expert several), so the
+   checklist reaches its final stage roughly in step with real generation —
+   but completion itself is driven solely by polling, never by this timer. */
+const TIER_STAGE_INTERVAL_MS: Record<PlanTier, number> = {
+  go: 9000,
+  pro: 16000,
+  expert: 20000,
+}
+
+/* After this threshold the live-status line switches to a calmer long-wait
+   reassurance. Truthful by construction: the page really does poll /status
+   every few seconds. */
+const TIER_LONG_WAIT_MS: Record<PlanTier, number> = {
+  go: 120000,
+  pro: 240000,
+  expert: 360000,
+}
+
+const LIVE_STATUS_TEXT: Record<'ar' | 'en', string> = {
+  ar: 'يتم التحقق من جاهزية تقريرك تلقائياً كل بضع ثوانٍ.',
+  en: 'Your report status is checked automatically every few seconds.',
+}
+
+const LONG_WAIT_TEXT: Record<'ar' | 'en', string> = {
+  ar: 'ما زال التحليل جارياً، وبعض المقابلات تستغرق وقتاً أطول قليلاً. لا حاجة لتحديث الصفحة — سيظهر التقرير هنا فور اكتماله.',
+  en: 'Analysis is still in progress — some interviews take a little longer. No need to refresh; your report will appear here the moment it is ready.',
+}
+
+const TIER_CHIP: Record<PlanTier, { label: string; fg: string; bg: string; border: string }> = {
+  go:     { label: 'GO',     fg: '#CC785C', bg: 'rgba(204,120,92,0.08)', border: 'rgba(204,120,92,0.30)' },
+  pro:    { label: 'PRO',    fg: '#CC785C', bg: 'rgba(204,120,92,0.14)', border: 'rgba(204,120,92,0.45)' },
+  expert: { label: 'EXPERT', fg: '#A85A42', bg: 'rgba(168,90,66,0.10)',  border: 'rgba(168,90,66,0.45)' },
+}
+
 function GeneratingScreen({ lang, tier }: { lang: Lang; tier: PlanTier }) {
   const isAr = lang === 'ar'
   const stages = GENERATION_STAGES[tier][isAr ? 'ar' : 'en']
+  const chip = TIER_CHIP[tier]
   const [stage, setStage] = useState(0)
+  const [longWait, setLongWait] = useState(false)
 
   useEffect(() => {
-    // Advance through stages on a fixed cadence, hold on the last one.
+    // Advance through stages on a per-tier cadence, hold on the last one.
     const t = setInterval(() => {
       setStage(prev => (prev < stages.length - 1 ? prev + 1 : prev))
-    }, 7000)
+    }, TIER_STAGE_INTERVAL_MS[tier])
     return () => clearInterval(t)
-  }, [stages.length])
+  }, [stages.length, tier])
 
+  useEffect(() => {
+    // Swap the live-status line for the long-wait reassurance once the
+    // tier's expected window has clearly passed.
+    const t = setTimeout(() => setLongWait(true), TIER_LONG_WAIT_MS[tier])
+    return () => clearTimeout(t)
+  }, [tier])
+
+  // UI-only progress. Capped below 100 on purpose: it paces, it never claims.
   const progress = Math.min(92, Math.round(((stage + 1) / stages.length) * 100))
 
   return (
@@ -1009,29 +1072,51 @@ function GeneratingScreen({ lang, tier }: { lang: Lang; tier: PlanTier }) {
           0% { background-position: 200% 0; }
           100% { background-position: -200% 0; }
         }
+        @keyframes barbarosBeat {
+          0%, 100% { transform: scale(1); opacity: 1; }
+          50% { transform: scale(1.45); opacity: 0.55; }
+        }
       `}</style>
 
       <div
         style={{
           width: '100%',
-          maxWidth: 440,
+          maxWidth: 560,
           background: '#FFFFFF',
           border: '1px solid #E5DDD0',
-          borderRadius: 22,
-          padding: '30px 26px',
-          boxShadow: '0 12px 34px rgba(26,26,26,0.07)',
+          borderRadius: 24,
+          padding: '38px 36px 30px',
+          boxShadow: '0 16px 44px rgba(26,26,26,0.08)',
           textAlign: 'center',
         }}
       >
         <div style={{ animation: 'barbarosPulse 2.4s ease-in-out infinite', display: 'inline-block' }}>
-          <Barbaros size={26} />
+          <Barbaros size={30} />
+        </div>
+
+        <div style={{ marginTop: 14 }}>
+          <span
+            style={{
+              display: 'inline-block',
+              padding: '4px 14px',
+              borderRadius: 999,
+              fontSize: 10.5,
+              fontWeight: 900,
+              letterSpacing: 2,
+              color: chip.fg,
+              background: chip.bg,
+              border: `1px solid ${chip.border}`,
+            }}
+          >
+            {chip.label}
+          </span>
         </div>
 
         <div
           style={{
-            marginTop: 14,
+            marginTop: 12,
             fontFamily: SERIF,
-            fontSize: 17,
+            fontSize: 19,
             fontWeight: 700,
             color: '#1A1A1A',
           }}
@@ -1041,10 +1126,13 @@ function GeneratingScreen({ lang, tier }: { lang: Lang; tier: PlanTier }) {
 
         <div
           style={{
-            marginTop: 6,
-            fontSize: 12,
+            marginTop: 7,
+            fontSize: 12.5,
             color: 'rgba(26,26,26,0.5)',
             lineHeight: 1.7,
+            maxWidth: 440,
+            marginLeft: 'auto',
+            marginRight: 'auto',
           }}
         >
           {GENERATION_WAIT_NOTICE[tier][isAr ? 'ar' : 'en']}
@@ -1052,8 +1140,8 @@ function GeneratingScreen({ lang, tier }: { lang: Lang; tier: PlanTier }) {
 
         <div
           style={{
-            marginTop: 20,
-            height: 7,
+            marginTop: 22,
+            height: 8,
             background: '#F5F1EB',
             borderRadius: 6,
             overflow: 'hidden',
@@ -1073,6 +1161,33 @@ function GeneratingScreen({ lang, tier }: { lang: Lang; tier: PlanTier }) {
           />
         </div>
 
+        <div
+          style={{
+            marginTop: 12,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 8,
+            fontSize: 11.5,
+            color: 'rgba(26,26,26,0.48)',
+            lineHeight: 1.6,
+          }}
+        >
+          <span
+            style={{
+              width: 7,
+              height: 7,
+              borderRadius: '50%',
+              background: '#3F6B5E',
+              flexShrink: 0,
+              animation: 'barbarosBeat 1.5s ease-in-out infinite',
+            }}
+          />
+          <span style={{ maxWidth: 430 }}>
+            {longWait ? LONG_WAIT_TEXT[isAr ? 'ar' : 'en'] : LIVE_STATUS_TEXT[isAr ? 'ar' : 'en']}
+          </span>
+        </div>
+
         <div style={{ marginTop: 22, textAlign: isAr ? 'right' : 'left' }}>
           {stages.map((label, i) => {
             const done = i < stage
@@ -1085,9 +1200,9 @@ function GeneratingScreen({ lang, tier }: { lang: Lang; tier: PlanTier }) {
                 style={{
                   display: 'flex',
                   alignItems: 'center',
-                  gap: 10,
-                  padding: '7px 0',
-                  fontSize: 12.5,
+                  gap: 11,
+                  padding: '7.5px 0',
+                  fontSize: 13,
                   fontWeight: active ? 800 : 600,
                   color,
                   transition: 'color 0.4s ease',
@@ -1095,14 +1210,14 @@ function GeneratingScreen({ lang, tier }: { lang: Lang; tier: PlanTier }) {
               >
                 <span
                   style={{
-                    width: 18,
-                    height: 18,
+                    width: 20,
+                    height: 20,
                     borderRadius: '50%',
                     flexShrink: 0,
                     display: 'inline-flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    fontSize: 10,
+                    fontSize: 10.5,
                     fontWeight: 900,
                     color: done || active ? '#FFFFFF' : 'rgba(26,26,26,0.35)',
                     background: done
@@ -1123,8 +1238,8 @@ function GeneratingScreen({ lang, tier }: { lang: Lang; tier: PlanTier }) {
 
         <div
           style={{
-            marginTop: 18,
-            paddingTop: 14,
+            marginTop: 20,
+            paddingTop: 15,
             borderTop: '0.5px solid rgba(26,26,26,0.08)',
             fontSize: 11,
             color: 'rgba(26,26,26,0.38)',

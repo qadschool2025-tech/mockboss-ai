@@ -1,37 +1,6 @@
 // lib/barbaros/engine.ts
 // Barbaros V4, Main Orchestrator.
 // Consumed by: app/api/interview/route.ts, single import point.
-//
-// FIXES APPLIED:
-// - updateTopicMemory          -> recordTopicsFromText       (topic-memory.ts)
-// - updateCompetencyTracker    -> matchCompetenciesInText
-//                                + applyEvidenceDelta       (competency-tracker.ts)
-// - updateContradictionTracker -> detectContradictions
-//                                + applyContradictionPatch  (contradiction-tracker.ts)
-// - computeAggregateScore      -> aggregateScores            (score-aggregator.ts)
-//
-// PHASE BOOKKEEPING:
-// The phase decision uses the real state with the real config reconciled in,
-// via evaluatePhaseTransition.
-//
-// DIRECTOR INTEGRATION:
-// After state patches and before prompt assembly, the Director decides the
-// single tactical move for the next turn.
-//
-// FIRST-TURN FIX:
-// On the first message the opening greeting is returned directly. Claude takes
-// over from the second turn onward.
-//
-// SCORE-TAG STRIP:
-// stripScoreTag removes both closed and dangling <score> blocks so JSON never
-// reaches the candidate or TTS.
-//
-// END-OF-SESSION HARDENING:
-// Snapshot and longitudinal updates are guarded so the session closes cleanly.
-//
-// ESSENTIAL COVERAGE:
-// End-of-session now resolves covered Essential Assessment axes once, then uses
-// the same coverage for the farewell and downstream report handoff.
 
 import type { InterviewConfig, Message, CandidateProfile } from './types'
 import type { SessionState } from './state/session-state'
@@ -74,12 +43,20 @@ import { computeSessionDelta } from './longitudinal/session-delta'
 import { decideNextMove, createInterventionBudget } from './director'
 import type { DirectorContext, InterventionBudget } from './director'
 
+import { resolvePanelForConfig } from './panel/panel-roles'
+import type { PanelRoleId } from './panel/panel-roles'
+import {
+  createPanelTurnState,
+  evaluatePanelHandover,
+} from './panel/panel-rotation'
+import type { PanelTurnState } from './panel/panel-rotation'
+
 import { buildPrompt } from './prompt/prompt-builder'
 import { buildClosingMessage } from './prompt/personality'
 import { callClaude } from './llm/claude-client'
 import { synthesizeSpeech } from './llm/tts'
 
-// ─── Engine Input / Output ────────────────────────────────────────────────────
+// Engine Input / Output
 
 export interface EngineInput {
   config:           InterviewConfig
@@ -93,21 +70,23 @@ export interface EngineInput {
 }
 
 export interface EngineOutput {
-  content:         string
-  audioBase64:     string | null
-  score:           ReturnType<typeof aggregateScores> | null
-  statePatch:      Partial<SessionState>
-  weaknessPatch:   WeaknessTrackerState
-  growthPatch:     GrowthTrackerState
-  isEndOfSession:  boolean
-  phaseChanged:    boolean
-  snapshot:        SessionSnapshot | null
-  promptCharCount: number
-  truncated:       boolean
-  coveredAreas:    EssentialAxis[]
+  content:          string
+  audioBase64:      string | null
+  score:            ReturnType<typeof aggregateScores> | null
+  statePatch:       Partial<SessionState>
+  weaknessPatch:    WeaknessTrackerState
+  growthPatch:      GrowthTrackerState
+  isEndOfSession:   boolean
+  phaseChanged:     boolean
+  snapshot:         SessionSnapshot | null
+  promptCharCount:  number
+  truncated:        boolean
+  coveredAreas:     EssentialAxis[]
+  activeRoleId?:    PanelRoleId | null
+  activeRoleTitle?: string | null
 }
 
-// ─── Time Limits ──────────────────────────────────────────────────────────────
+// Time Limits
 
 const TIME_LIMITS: Record<string, number> = {
   free:   15 * 60,
@@ -129,7 +108,7 @@ const NEUTRAL_CANDIDATE_PROFILE = {
   lastUpdatedAt:   0,
 }
 
-// ─── Score Tag Helper ─────────────────────────────────────────────────────────
+// Score Tag Helper
 
 function stripScoreTag(content: string): string {
   return content
@@ -139,7 +118,7 @@ function stripScoreTag(content: string): string {
     .trim()
 }
 
-// ─── Main Engine Function ─────────────────────────────────────────────────────
+// Main Engine Function
 
 export async function runEngine(input: EngineInput): Promise<EngineOutput> {
   const {
@@ -158,13 +137,13 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
   const elapsedMinutes = elapsedSeconds / 60
   const totalMinutes   = totalSeconds / 60
 
-  // ── 1. Session end check ────────────────────────────────────────────────────
+  // 1. Session end check
 
   if (elapsedSeconds >= totalSeconds || isSessionComplete({ ...state, config })) {
     return buildEndOfSessionOutput(input, elapsedMinutes, totalMinutes, now)
   }
 
-  // ── 1b. First-turn short-circuit ────────────────────────────────────────────
+  // 1b. First-turn short-circuit
 
   const isFirstMessage = messages.length === 0
 
@@ -194,22 +173,24 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
     }
 
     return {
-      content:         openingText,
-      audioBase64:     openingAudio,
-      score:           null,
-      statePatch:      {},
-      weaknessPatch:   weaknessState,
-      growthPatch:     growthState,
-      isEndOfSession:  false,
-      phaseChanged:    false,
-      snapshot:        null,
-      promptCharCount: built.charCount,
-      truncated:       built.truncated,
-      coveredAreas:    [],
+      content:          openingText,
+      audioBase64:      openingAudio,
+      score:            null,
+      statePatch:       {},
+      weaknessPatch:    weaknessState,
+      growthPatch:      growthState,
+      isEndOfSession:   false,
+      phaseChanged:     false,
+      snapshot:         null,
+      promptCharCount:  built.charCount,
+      truncated:        built.truncated,
+      coveredAreas:     [],
+      activeRoleId:     null,
+      activeRoleTitle:  null,
     }
   }
 
-  // ── 2. Phase advancement ────────────────────────────────────────────────────
+  // 2. Phase advancement
 
   const stateForPhase: SessionState = { ...state, config }
   const transition = evaluatePhaseTransition(stateForPhase)
@@ -218,7 +199,7 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
 
   const stateWithPhase: SessionState = { ...state, config, phase: newPhase }
 
-  // ── 2b. Engine-local behavior/pressure carry-over ───────────────────────────
+  // 2b. Engine-local behavior/pressure carry-over
 
   const carry = stateWithPhase as unknown as {
     silenceRisk?:                 'low' | 'medium' | 'high'
@@ -240,7 +221,7 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
     ((stateWithPhase as any).directorBudget as InterventionBudget | undefined)
     ?? createInterventionBudget(config.plan)
 
-  // ── 3. Behavior pipeline ────────────────────────────────────────────────────
+  // 3. Behavior pipeline
 
   const behaviorContext = {
     runtime: {
@@ -288,7 +269,7 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
       ? (behaviorResult as any).activeRisks
       : []
 
-  // ── 4. State patches ────────────────────────────────────────────────────────
+  // 4. State patches
 
   const lastUserMsg = [...messages].reverse().find(m => m.role === 'user')
   const updatedTopics = lastUserMsg
@@ -360,7 +341,7 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
     },
   }
 
-  // ── 5. Score + candidate profile ────────────────────────────────────────────
+  // 5. Score + candidate profile
 
   let score: ReturnType<typeof aggregateScores> | null = null
 
@@ -421,7 +402,7 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
     }))
   }
 
-  // ── 5b. Director ────────────────────────────────────────────────────────────
+  // 5b. Director
 
   const missingCompetencies = Object.entries(stateAfterCompetency.competencyCoverage)
     .filter(([, cov]) => (cov as { coverage: number }).coverage < 50)
@@ -458,7 +439,37 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
     })
   }
 
-  // ── 6. Prompt assembly ──────────────────────────────────────────────────────
+  // 5c. Panel
+
+  const panel = resolvePanelForConfig(config)
+  let activePanelMember: (typeof panel.members)[number] | null = null
+
+  if (panel.enabled) {
+    const priorPanelTurnState: PanelTurnState =
+      ((stateWithPhase as any).panelTurnState as PanelTurnState | undefined)
+      ?? createPanelTurnState()
+
+    const mergedStateForPanel = { ...stateWithPhase, ...statePatch } as SessionState
+
+    const panelDecision = evaluatePanelHandover({
+      panel,
+      turnState: priorPanelTurnState,
+      state: mergedStateForPanel,
+      config,
+      messages,
+      elapsedMinutes,
+      totalMinutes,
+    })
+
+    activePanelMember = panelDecision.member
+
+    ;(statePatch as Record<string, unknown>).panelTurnState = {
+      ...panelDecision.turnState,
+      questionsAskedByActive: panelDecision.turnState.questionsAskedByActive + 1,
+    }
+  }
+
+  // 6. Prompt assembly
 
   const activeWeaknesses = weaknessState.weaknesses.filter(
     w => w.status === 'active' || w.status === 'improving'
@@ -468,28 +479,31 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
     g => g.strength !== 'emerging' && g.status === 'active'
   )
 
-  const built = buildPrompt(
-    {
-      config,
-      state:          { ...stateWithPhase, ...statePatch } as SessionState,
-      weaknesses:     activeWeaknesses,
-      growthSignals:  confirmedGrowth,
-      elapsedMinutes,
-      totalMinutes,
-      isFirstSession: previousSnapshot === null,
-      directorDecision,
-    },
-    false
-  )
+  const promptInput: Parameters<typeof buildPrompt>[0] = {
+    config,
+    state:          { ...stateWithPhase, ...statePatch } as SessionState,
+    weaknesses:     activeWeaknesses,
+    growthSignals:  confirmedGrowth,
+    elapsedMinutes,
+    totalMinutes,
+    isFirstSession: previousSnapshot === null,
+    directorDecision,
+  }
 
-  // ── 7. LLM call ─────────────────────────────────────────────────────────────
+  if (activePanelMember) {
+    promptInput.panelMember = activePanelMember
+  }
+
+  const built = buildPrompt(promptInput, false)
+
+  // 7. LLM call
 
   const content = await callClaude({
     systemPrompt: built.systemPrompt,
     messages,
   })
 
-  // ── 8. TTS ──────────────────────────────────────────────────────────────────
+  // 8. TTS
 
   let audioBase64: string | null = null
 
@@ -503,7 +517,7 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
     audioBase64 = null
   }
 
-  // ── 9. Longitudinal updates ─────────────────────────────────────────────────
+  // 9. Longitudinal updates
 
   const sessionId = (stateWithPhase as any).sessionId ?? 'unknown'
   let weaknessPatch = weaknessState
@@ -533,10 +547,12 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
     promptCharCount: built.charCount,
     truncated:       built.truncated,
     coveredAreas:    [],
+    activeRoleId:    activePanelMember?.id ?? null,
+    activeRoleTitle: activePanelMember?.displayTitle ?? null,
   }
 }
 
-// ─── End of Session ───────────────────────────────────────────────────────────
+// End of Session
 
 async function buildEndOfSessionOutput(
   input:          EngineInput,
@@ -623,10 +639,12 @@ async function buildEndOfSessionOutput(
     promptCharCount: 0,
     truncated:       false,
     coveredAreas,
+    activeRoleId:    null,
+    activeRoleTitle: null,
   }
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// Helpers
 
 function buildCoverageStateForEnd(
   state:    SessionState,

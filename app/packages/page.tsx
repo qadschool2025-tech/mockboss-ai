@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 
 const PLANS = [
   {
+    id: 'go',
     name: 'GO',
     price: '$4.99',
     period: '/session',
@@ -34,6 +35,7 @@ const PLANS = [
     ctaColor: '#fff',
   },
   {
+    id: 'pro',
     name: 'Pro',
     price: '$19.99',
     period: '/mo',
@@ -61,6 +63,7 @@ const PLANS = [
     ctaColor: '#fff',
   },
   {
+    id: 'expert',
     name: 'Expert',
     price: '$59',
     period: '/mo',
@@ -226,7 +229,7 @@ export default function PackagesPage() {
 
               {/* CTA */}
               <button
-                onClick={() => router.push('/onboarding')}
+                onClick={() => router.push(`/onboarding?plan=${plan.id}`)}
                 style={{
                   width: '100%',
                   padding: '15px',

@@ -150,33 +150,30 @@ export async function POST(req: NextRequest) {
       sessions.delete(sessionId)
     }
 
-   ```
-return new NextResponse(
-  JSON.stringify({
-    success:         true,
-    content:         cleanContent,
-    audioBase64:     output.audioBase64,
-    score,
-    isEndOfSession:  output.isEndOfSession,
-    phaseChanged:    output.phaseChanged,
-    coveredAreas:    output.coveredAreas,
-    activeRoleId:    output.activeRoleId ?? null,
-    activeRoleTitle: output.activeRoleTitle ?? null,
-    _debug: process.env.NODE_ENV === 'development' ? {
-      promptCharCount: output.promptCharCount,
-      truncated:       output.truncated,
-      phase:           store.state.phase,
-    } : undefined,
-  }),
-  {
-    status: 200,
-    headers: {
-      'Content-Type': 'application/json; charset=utf-8',
-    },
-  }
-)
-```
-)
+    return new NextResponse(
+      JSON.stringify({
+        success:         true,
+        content:         cleanContent,
+        audioBase64:     output.audioBase64,
+        score,
+        isEndOfSession:  output.isEndOfSession,
+        phaseChanged:    output.phaseChanged,
+        coveredAreas:    output.coveredAreas,
+        activeRoleId:    output.activeRoleId ?? null,
+        activeRoleTitle: output.activeRoleTitle ?? null,
+        _debug: process.env.NODE_ENV === 'development' ? {
+          promptCharCount: output.promptCharCount,
+          truncated:       output.truncated,
+          phase:           store.state.phase,
+        } : undefined,
+      }),
+      {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json; charset=utf-8',
+        },
+      }
+    )
 
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error'

@@ -158,7 +158,10 @@ export async function POST(req: NextRequest) {
         score,
         isEndOfSession: output.isEndOfSession,
         phaseChanged:   output.phaseChanged,
-        coveredAreas:   output.coveredAreas,
+              coveredAreas:     output.coveredAreas,
+        activeRoleId:     output.activeRoleId ?? null,
+        activeRoleTitle:  output.activeRoleTitle ?? null,
+        _debug: process.env.NODE_ENV === 'development' ? {
         _debug: process.env.NODE_ENV === 'development' ? {
           promptCharCount: output.promptCharCount,
           truncated:       output.truncated,

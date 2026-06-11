@@ -131,7 +131,7 @@ buildIdentityLayer(),
 buildResponseStyleLayer(),
 buildSessionContextLayer(config),
 
-```
+
 // CV source context only.
 // This gives Barbaros access to CV facts and job requirements,
 // without changing his identity, tone, pressure style, voice, or closing flow.

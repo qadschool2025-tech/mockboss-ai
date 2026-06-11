@@ -338,13 +338,31 @@ SCORING RULES
 ═══════════════════════════════
 REPLAY REVIEW RULES
 ═══════════════════════════════
-- Select only the 3–5 MOST important questions.
+- Select only the 3–5 MOST important questions. A replay with more than 5 items is INVALID and will be rejected.
 - Choose the questions that reveal strength, weakness, contradiction, role fit, or readiness risk.
 - Do NOT review every question.
+- "answer" must NOT copy a long answer in full. If the candidate's answer is long, use a short, representative excerpt that preserves their actual wording.
+- "analysis": 1–2 sentences only.
+- "weakened": 1–2 sentences only, or an empty string if nothing weakened the answer.
+- "stronger": a realistic improved answer, 3–5 sentences MAXIMUM, or an empty string if the answer was already strong.
 - Never label answers "correct" or "wrong".
 - Use interviewer framing.
 - "stronger" must sound realistic and human, not like a perfect textbook answer.
 - When suggesting a stronger answer, improve structure and evidence without making the candidate sound artificial.
+
+═══════════════════════════════
+REPORT LENGTH DISCIPLINE
+═══════════════════════════════
+The report must be focused and professional, never bloated. Hard limits:
+- verdict: 2–3 sentences only.
+- barbarosAssessment: 2–3 sentences only.
+- hiddenWeakness: 2–3 sentences only.
+- behavioralPatterns: 2–4 sentences only.
+- recommendation: 2–3 sentences only.
+- Do NOT add any sections or keys outside the schema below.
+- Do NOT repeat the same observation in more than one field. Each field must add NEW information.
+- Do NOT write any explanation, commentary, or notes outside the JSON object.
+- Brevity must come from FOCUS, not from poverty: keep the strongest evidence and the sharpest observation, drop everything redundant. A short generic report is just as invalid as a long one.
 
 ═══════════════════════════════
 LANGUAGE
@@ -512,6 +530,26 @@ function isScoreNumber(value: unknown): boolean {
   return typeof value === 'number' && Number.isFinite(value)
 }
 
+// Hard length ceilings (characters). The prompt's length discipline is a
+// soft constraint; these make it enforceable: an oversized report is NEVER
+// persisted — it fails validation and goes to the worker retry so Claude
+// regenerates a more focused report. No programmatic trimming, ever.
+const MAX_FIELD_CHARS: Record<string, number> = {
+  verdict: 900,
+  barbarosAssessment: 900,
+  hiddenWeakness: 900,
+  behavioralPatterns: 1200,
+  recommendation: 900,
+}
+
+const MAX_REPLAY_ITEM_CHARS: Record<string, number> = {
+  question: 700,
+  answer: 900,
+  analysis: 800,
+  weakened: 800,
+  stronger: 1400,
+}
+
 function validateReportData(report: Record<string, unknown>): string[] {
   const problems: string[] = []
 
@@ -530,6 +568,62 @@ function validateReportData(report: Record<string, unknown>): string[] {
 
   if (!Array.isArray(report.replay) || report.replay.length === 0) {
     problems.push('replay')
+  } else if (report.replay.length > 5) {
+    // More than 5 replay items is a length-discipline violation: reject and
+    // let the worker retry regenerate a focused report instead of persisting
+    // bloat. Fewer than 3 items is intentionally NOT rejected.
+    problems.push('replay (more than 5 items)')
+  }
+
+  // ── Hard length checks (top-level fields) ──
+  for (const [field, max] of Object.entries(MAX_FIELD_CHARS)) {
+    const value = report[field]
+    if (typeof value === 'string' && value.length > max) {
+      problems.push(`${field} too long`)
+    }
+  }
+
+ // ── Hard validation + length checks (each replay item) ──
+  if (Array.isArray(report.replay)) {
+    report.replay.forEach((item, index) => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) {
+        problems.push(`replay[${index}]`)
+        return
+      }
+
+      const replayItem = item as Record<string, unknown>
+
+      if (!isNonEmptyString(replayItem.question)) {
+        problems.push(`replay[${index}].question`)
+      }
+
+      if (!isNonEmptyString(replayItem.answer)) {
+        problems.push(`replay[${index}].answer`)
+      }
+
+      if (!isScoreNumber(replayItem.score)) {
+        problems.push(`replay[${index}].score`)
+      }
+
+      if (!isNonEmptyString(replayItem.analysis)) {
+        problems.push(`replay[${index}].analysis`)
+      }
+
+      if (typeof replayItem.weakened !== 'string') {
+        problems.push(`replay[${index}].weakened`)
+      }
+
+      if (typeof replayItem.stronger !== 'string') {
+        problems.push(`replay[${index}].stronger`)
+      }
+
+      for (const [field, max] of Object.entries(MAX_REPLAY_ITEM_CHARS)) {
+        const value = replayItem[field]
+        if (typeof value === 'string' && value.length > max) {
+          problems.push(`replay[${index}].${field} too long`)
+        }
+      }
+    })
   }
 
   return problems

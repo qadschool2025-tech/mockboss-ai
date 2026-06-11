@@ -510,10 +510,24 @@ function safeText(value: string | undefined, fallback: string) {
 
 function displayPlanName(plan: string) {
   const key = (plan || '').toLowerCase()
+  if (key.includes('expert')) return 'Expert Interview'
   if (key.includes('executive')) return 'Executive Interview'
   if (key.includes('professional') || key.includes('pro')) return 'Professional Interview'
   if (key.includes('essential') || key.includes('basic') || key.includes('free')) return 'Essential Interview'
+  if (key.includes('go')) return 'Go Interview'
   return 'Barbaros Interview'
+}
+
+/* Plan tier resolution (client-safe mirror of the server resolver in
+   lib/barbaros/report/generate-report-data.ts — kept local because that
+   module instantiates the Anthropic client and is server-only). */
+type PlanTier = 'go' | 'pro' | 'expert'
+
+function resolvePlanTier(plan: string): PlanTier {
+  const key = (plan || '').toLowerCase()
+  if (key.includes('expert') || key.includes('executive')) return 'expert'
+  if (key.includes('professional') || key.includes('pro')) return 'pro'
+  return 'go'
 }
 
 function shortReference(value: string | undefined) {
@@ -894,28 +908,73 @@ function ReportCover({
 /* ---------- Premium generating screen (UI-only staged progress) ---------- */
 /* Stages are presentational pacing; completion is driven solely by polling. */
 
-const GENERATION_STAGES = {
-  ar: [
-    'قراءة المقابلة كاملة',
-    'تحليل الإجابات والأدلة',
-    'قياس الكفاءات الست',
-    'رصد الأنماط السلوكية',
-    'بناء التوصيات',
-    'إخراج التقرير النهائي',
-  ],
-  en: [
-    'Reading the full interview',
-    'Analyzing answers and evidence',
-    'Measuring the six competencies',
-    'Detecting behavioral patterns',
-    'Building recommendations',
-    'Finalizing your report',
-  ],
+const GENERATION_STAGES: Record<PlanTier, Record<'ar' | 'en', readonly string[]>> = {
+  go: {
+    ar: [
+      'قراءة المقابلة',
+      'تحليل الإجابات الأساسية',
+      'قياس الجاهزية العامة',
+      'إعداد التقرير المختصر',
+    ],
+    en: [
+      'Reading the interview',
+      'Analyzing core answers',
+      'Measuring overall readiness',
+      'Preparing the summary report',
+    ],
+  },
+  pro: {
+    ar: [
+      'قراءة المقابلة الكاملة',
+      'تحليل السلوك والكفاءات',
+      'قياس الاتساق والوضوح',
+      'بناء خطة التحسين',
+      'إعداد تقرير Pro',
+    ],
+    en: [
+      'Reading the full interview',
+      'Analyzing behavior and competencies',
+      'Measuring consistency and clarity',
+      'Building your improvement plan',
+      'Preparing your Pro report',
+    ],
+  },
+  expert: {
+    ar: [
+      'قراءة المقابلة الكاملة',
+      'تحليل أدوار اللجنة',
+      'تقييم الضغط والحكم المهني',
+      'بناء الرؤية التنفيذية',
+      'إعداد تقرير Expert',
+    ],
+    en: [
+      'Reading the full interview',
+      'Analyzing panel role dynamics',
+      'Evaluating pressure and professional judgment',
+      'Building the executive view',
+      'Preparing your Expert report',
+    ],
+  },
 } as const
 
-function GeneratingScreen({ lang }: { lang: Lang }) {
+const GENERATION_WAIT_NOTICE: Record<PlanTier, Record<'ar' | 'en', string>> = {
+  go: {
+    ar: 'يُرجى إبقاء هذه الصفحة مفتوحة. عادةً يستغرق تقرير Go أقل من دقيقتين.',
+    en: 'Please keep this page open. Go reports usually take under two minutes.',
+  },
+  pro: {
+    ar: 'يُرجى إبقاء هذه الصفحة مفتوحة. قد يستغرق تقرير Pro بضع دقائق بسبب تحليل السلوك والكفاءات.',
+    en: 'Please keep this page open. Pro reports may take a few minutes because behavioral and competency analysis is being prepared.',
+  },
+  expert: {
+    ar: 'يُرجى إبقاء هذه الصفحة مفتوحة. قد يستغرق تقرير Expert عدة دقائق بسبب تحليل اللجنة والضغط والحكم التنفيذي.',
+    en: 'Please keep this page open. Expert reports may take several minutes because panel dynamics, pressure response, and executive judgment are being analyzed.',
+  },
+} as const
+
+function GeneratingScreen({ lang, tier }: { lang: Lang; tier: PlanTier }) {
   const isAr = lang === 'ar'
-  const stages = GENERATION_STAGES[isAr ? 'ar' : 'en']
+  const stages = GENERATION_STAGES[tier][isAr ? 'ar' : 'en']
   const [stage, setStage] = useState(0)
 
   useEffect(() => {
@@ -988,9 +1047,7 @@ function GeneratingScreen({ lang }: { lang: Lang }) {
             lineHeight: 1.7,
           }}
         >
-          {isAr
-            ? 'يُرجى إبقاء هذه الصفحة مفتوحة. عادةً تستغرق العملية دقيقة إلى دقيقتين.'
-            : 'Please keep this page open. This usually takes one to two minutes.'}
+          {GENERATION_WAIT_NOTICE[tier][isAr ? 'ar' : 'en']}
         </div>
 
         <div
@@ -1950,6 +2007,7 @@ function ReportContent() {
   const [phase, setPhase] = useState<Phase>('loading')
   const [data, setData] = useState<Stored | null>(null)
   const [lang, setLang] = useState<Lang>('en')
+  const [planTier, setPlanTier] = useState<PlanTier>('go')
 
   useEffect(() => {
     if (!reportJobId) return
@@ -1967,6 +2025,9 @@ function ReportContent() {
     const readLang = (cfg: Record<string, unknown>) => {
       if (cfg && typeof cfg.language === 'string') {
         setLang(cfg.language === 'ar' ? 'ar' : 'en')
+      }
+      if (cfg && typeof cfg.plan === 'string') {
+        setPlanTier(resolvePlanTier(cfg.plan))
       }
     }
 
@@ -2229,7 +2290,7 @@ function ReportContent() {
   }
 
   // loading (pending | processing | initial)
-  return <GeneratingScreen lang={lang} />
+  return <GeneratingScreen lang={lang} tier={planTier} />
 }
 
 /* ---------- Page export: Suspense wrapper required for useSearchParams ---------- */

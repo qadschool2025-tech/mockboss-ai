@@ -57,23 +57,85 @@ export class ReportGenerationError extends Error {
 
 // ─── Assessment Coverage ─────────────────────────────────────────────────────
 
+// Plan tiers. Resolution is defensive: legacy plan names map onto the three
+// tiers, and any unknown value falls back to 'go' so the report never
+// over-promises coverage it cannot stand behind.
+export type PlanTier = 'go' | 'pro' | 'expert'
+
+export function resolvePlanTier(plan: string): PlanTier {
+  const key = (plan || '').toLowerCase()
+  if (key.includes('expert') || key.includes('executive')) return 'expert'
+  if (key.includes('professional') || key.includes('pro')) return 'pro'
+  return 'go'
+}
+
+// Dimensions shown to Go candidates as locked. Deliberately identical to the
+// names Pro/Expert claim as covered, so the tier narrative is one coherent
+// ladder: what Go marks as locked is exactly what higher tiers unlock.
 const DEEPER_ASSESSMENT_LABELS: Record<'en' | 'ar', string[]> = {
   en: [
-    'Advanced technical depth',
-    'Leadership judgment',
-    'Scenario-based pressure',
-    'Strategic thinking',
-    'Long-form behavioral analysis',
-    'Multiple role simulations',
+    'Behavioral Consistency',
+    'Competency Mapping',
+    'Pressure Response',
+    'Leadership Judgment',
+    'Strategic Thinking',
+    'Panel Role Simulation',
   ],
   ar: [
-    'عمق تقني متقدّم',
-    'حُكم قيادي',
-    'ضغط قائم على السيناريوهات',
-    'تفكير استراتيجي',
-    'تحليل سلوكي مطوّل',
-    'محاكاة أدوار متعددة',
+    'الاتساق السلوكي',
+    'خريطة الكفاءات',
+    'الاستجابة للضغط',
+    'الحُكم القيادي',
+    'التفكير الاستراتيجي',
+    'محاكاة أدوار لجنة المقابلة',
   ],
+}
+
+// Extended dimensions credited as covered per tier, appended after the
+// evidence-resolved essential axes. Static product text: exempt from
+// transcript evidence anchoring by design.
+const TIER_EXTENDED_COVERAGE: Record<PlanTier, Record<'en' | 'ar', string[]>> = {
+  go: { en: [], ar: [] },
+  pro: {
+    en: [
+      'Behavioral Consistency',
+      'Competency Mapping',
+      'Pressure Response',
+      'Leadership Judgment',
+      'Improvement Priorities',
+    ],
+    ar: [
+      'الاتساق السلوكي',
+      'خريطة الكفاءات',
+      'الاستجابة للضغط',
+      'الحُكم القيادي',
+      'أولويات التحسين',
+    ],
+  },
+  expert: {
+    en: [
+      'Behavioral Analysis',
+      'Competency Mapping',
+      'Scenario-Based Pressure',
+      'Leadership Judgment',
+      'Strategic Thinking',
+      'Executive Judgment',
+      'Panel Role Simulation',
+      'Long-Form Behavioral Analysis',
+      'Decision-Grade Recommendations',
+    ],
+    ar: [
+      'التحليل السلوكي',
+      'خريطة الكفاءات',
+      'الضغط القائم على السيناريوهات',
+      'الحُكم القيادي',
+      'التفكير الاستراتيجي',
+      'الحُكم التنفيذي',
+      'محاكاة أدوار لجنة المقابلة',
+      'التحليل السلوكي المُطوَّل',
+      'توصيات بمستوى قرار التوظيف',
+    ],
+  },
 }
 
 const AR_READINESS_LEVELS: Record<string, string> = {
@@ -131,10 +193,53 @@ function joinAr(parts: string[]): string {
 
 function buildAssessmentCoverage(
   coveredAreas: EssentialAxis[],
-  language: string
+  language: string,
+  plan: string
 ): AssessmentCoverage {
   const lang = reportLang(language)
-  const coveredLabels = coveredAreas.map(axis => ESSENTIAL_AXIS_LABELS[axis][lang])
+  const tier = resolvePlanTier(plan)
+  const essentialLabels = coveredAreas.map(axis => ESSENTIAL_AXIS_LABELS[axis][lang])
+  const title =
+    lang === 'ar' ? 'نطاق التقييم في هذه الباقة' : 'Assessment scope for this package'
+
+  // ── Pro: extended professional coverage, nothing presented as unmeasured ──
+  if (tier === 'pro') {
+    return {
+      title,
+      summary:
+        lang === 'ar'
+          ? 'يعرض هذا القسم النطاق المهني الكامل للتقييم المُنجز في هذه الباقة.'
+          : 'This section outlines the full professional scope of evaluation completed in this plan.',
+      coveredAreaKeys: coveredAreas,
+      coveredAreas: [...essentialLabels, ...TIER_EXTENDED_COVERAGE.pro[lang]],
+      recommendedForDeeperAssessment: [],
+      upgradeNote:
+        lang === 'ar'
+          ? 'ضمن هذه الباقة، تم دمج المحاور المهنية الموسّعة أعلاه — الاتساق السلوكي، وخريطة الكفاءات، والاستجابة للضغط، والحُكم القيادي، وأولويات التحسين — مباشرةً في درجاتك وتوصياتك، وبالعمق المهني الذي صُمِّمت له باقة Pro. أمّا باقة Expert فتأخذ التقييم نفسه إلى المستوى التنفيذي، مضيفةً محاكاة أدوار لجنة المقابلة، والحُكم الاستراتيجي والتنفيذي، وتوصيات بمستوى قرار التوظيف.'
+          : 'In this plan, the extended professional dimensions above — behavioral consistency, competency mapping, pressure response, leadership judgment, and improvement priorities — were integrated directly into your scoring and recommendations, at the professional depth Pro is designed for. The Expert plan carries the same evaluation further into executive territory, adding panel role simulation, strategic and executive judgment, and decision-grade recommendations.',
+    }
+  }
+
+  // ── Expert: comprehensive coverage, zero upsell ───────────────────────────
+  if (tier === 'expert') {
+    return {
+      title,
+      summary:
+        lang === 'ar'
+          ? 'يؤكد هذا القسم النطاق الشامل للتقييم التنفيذي المُنجز في هذه الباقة.'
+          : 'This section confirms the comprehensive, executive-level scope of evaluation completed in this plan.',
+      coveredAreaKeys: coveredAreas,
+      coveredAreas: [...essentialLabels, ...TIER_EXTENDED_COVERAGE.expert[lang]],
+      recommendedForDeeperAssessment: [],
+      upgradeNote:
+        lang === 'ar'
+          ? 'هذا أشمل تقييم نقدّمه. كل المحاور أعلاه — من ملاءمة الدور الأساسية إلى محاكاة أدوار لجنة المقابلة والتفكير الاستراتيجي والحُكم التنفيذي — قِيست ضمن تقييم واحد بمستوى قرار التوظيف. لا توجد درجة تقييم أعلى من هذا التقرير.'
+          : 'This is the most comprehensive assessment we produce. Every dimension above — from core role fit through panel role simulation, strategic thinking, and executive judgment — was measured within a single decision-grade evaluation. There is no higher assessment tier beyond this report.',
+    }
+  }
+
+  // ── Go: baseline readiness, locked dimensions remain visible ──────────────
+  const coveredLabels = essentialLabels
 
   const upgradeNote =
     lang === 'ar'
@@ -142,7 +247,7 @@ function buildAssessmentCoverage(
       : `In this package, only the following core areas were assessed: ${joinEn(coveredLabels)}. The advanced areas listed below were not measured in this session; they are available in greater depth in higher-tier plans. Professionally, this does not mean your report is incomplete; it means this package measures your baseline interview readiness, while higher-tier plans reveal a fuller picture of your performance, leadership judgment, strategic thinking, and ability to perform under realistic interview pressure.`
 
   return {
-    title: lang === 'ar' ? 'نطاق التقييم في هذه الباقة' : 'Assessment scope for this package',
+    title,
     summary:
       lang === 'ar'
         ? 'يعرض هذا القسم نطاق التقييم المُنجز في هذه الباقة، والمحاور المتاحة بتفصيل أعمق في الباقات الأعلى.'
@@ -223,6 +328,17 @@ function buildReportPrompt(
   const coverageRule = isArabic
     ? `Assessment Coverage تم تحديده مسبقاً من محرك المقابلة. لا تضف محاور، لا تحذف محاور، لا تغيّر الأسماء، ولا تعيد تفسيرها. استخدم هذا الكائن كما هو:\n${JSON.stringify(assessmentCoverage, null, 2)}`
     : `Assessment Coverage has already been resolved by the interview engine. Do not add, remove, rename, or reinterpret covered areas. Use this exact object:\n${JSON.stringify(assessmentCoverage, null, 2)}`
+
+  // Plan-aware integrity rule. Go keeps its candid locked-dimensions framing;
+  // Pro/Expert must never be narrated as missing or partial coverage.
+  const planTier = resolvePlanTier(config.plan)
+  const coverageIntegrityRule =
+    planTier === 'go'
+      ? `The upgradeNote is intentional. Keep it professional, clear, and not pushy.
+Make it clear that the advanced areas listed in recommendedForDeeperAssessment were NOT measured in this package.`
+      : `The upgradeNote is intentional. Keep it professional and confident.
+Never describe any dimension listed in coveredAreas as unmeasured, missing, partial, or reserved for a higher plan.
+recommendedForDeeperAssessment is intentionally empty for this plan; do not populate it.`
 
   const audienceRule = isArabic
     ? `هذا التقرير يُعرض مباشرة للمرشح، وليس لصاحب العمل. اكتب بصيغة تخاطب المرشح مباشرة: "أداؤك"، "إجابتك"، "تحتاج إلى"، "قبل مقابلتك القادمة". لا تستخدم "المرشح" أو "المرشحة" كصياغة أساسية داخل verdict أو hiddenWeakness أو behavioralPatterns أو recommendation. كن صارماً وواضحاً، لكن اجعل التقرير موجهاً لصاحب الأداء نفسه.`
@@ -319,8 +435,7 @@ ASSESSMENT COVERAGE
 ${coverageRule}
 
 The assessmentCoverage object must appear in the final JSON exactly with the same values.
-The upgradeNote is intentional. Keep it professional, clear, and not pushy.
-Make it clear that the advanced areas listed in recommendedForDeeperAssessment were NOT measured in this package.
+${coverageIntegrityRule}
 
 ═══════════════════════════════
 SCORING RULES
@@ -725,7 +840,8 @@ export async function generateReportData(
 
   const assessmentCoverage = buildAssessmentCoverage(
     coveredAreas,
-    config.language
+    config.language,
+    config.plan
   )
 
   const systemPrompt = buildReportPrompt(config, assessmentCoverage)

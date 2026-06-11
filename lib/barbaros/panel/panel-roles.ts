@@ -178,9 +178,13 @@ export interface ResolvedPanel {
   members: ResolvedPanelMember[]
 }
 
+// Exact-match allowlist. 'go' and legacy/internal values like 'free' must
+// never enable the panel. Substring matching is forbidden here: it silently
+// admits unknown plan strings, and plan gating must be deterministic.
+const PANEL_PLANS = new Set(['professional', 'executive', 'pro', 'expert'])
+
 export function isPanelPlan(plan: string): boolean {
-  const p = (plan || '').toLowerCase()
-  return p.includes('professional') || p.includes('executive') || p === 'pro'
+  return PANEL_PLANS.has((plan || '').trim().toLowerCase())
 }
 
 /**

@@ -40,6 +40,7 @@ interface Report {
   behavioralPatterns: string
   replay: ReplayItem[]
   recommendation: string
+  interviewIncomplete?: boolean
 }
 
 interface Stored {
@@ -79,6 +80,7 @@ const AR_READINESS_LEVELS: Record<string, string> = {
   'Maybe Hire':        'قابل للتوصية بحذر',
   'Risky Candidate':   'مخاطرة عالية',
   'Not Recommended':   'غير جاهز حالياً',
+  'Interview Incomplete': 'المقابلة غير مكتملة',
 }
 
 const AR_COMPETENCY_NAMES: Record<string, string> = {
@@ -587,6 +589,8 @@ function ReportCover({
   summaryLine: string
   assessment: string
 }) {
+  const incomplete = data.report.interviewIncomplete === true
+
   return (
     <section
       className="report-cover"
@@ -635,7 +639,13 @@ function ReportCover({
                 ...labelType(isAr),
               }}
             >
-              {isAr ? 'منهجية تقييم مقابلات قائمة على الكفاءات' : 'Competency-Based Interview Assessment'}
+              {incomplete
+                ? isAr
+                  ? 'سجل جلسة المقابلة'
+                  : 'Interview Session Record'
+                : isAr
+                  ? 'منهجية تقييم مقابلات قائمة على الكفاءات'
+                  : 'Competency-Based Interview Assessment'}
             </div>
           </div>
 
@@ -674,7 +684,13 @@ function ReportCover({
                 ...labelType(isAr),
               }}
             >
-              {isAr ? 'تقرير تقييم المقابلة' : 'Interview Assessment Report'}
+              {incomplete
+                ? isAr
+                  ? 'تقرير جلسة المقابلة'
+                  : 'Interview Session Report'
+                : isAr
+                  ? 'تقرير تقييم المقابلة'
+                  : 'Interview Assessment Report'}
             </div>
 
             <h1
@@ -701,7 +717,13 @@ function ReportCover({
             }}
           >
             <div style={{ fontSize: 10, color: '#D8C7BD', fontWeight: 800, marginBottom: 7, ...labelType(isAr) }}>
-              {isAr ? 'الحكم المهني' : 'Professional Verdict'}
+              {incomplete
+                ? isAr
+                  ? 'حالة التقرير'
+                  : 'Report Status'
+                : isAr
+                  ? 'الحكم المهني'
+                  : 'Professional Verdict'}
             </div>
             <div style={{ fontFamily: SERIF, fontSize: 18, fontWeight: 800, lineHeight: 1.35 }}>
               {readinessLabel}
@@ -745,8 +767,22 @@ function ReportCover({
           />
           <MetaItem
             isAr={isAr}
-            label={isAr ? 'النتيجة الإجمالية' : 'Overall Score'}
-            value={`${data.report.finalScore} / 100`}
+            label={
+              incomplete
+                ? isAr
+                  ? 'حالة التقرير'
+                  : 'Report Status'
+                : isAr
+                  ? 'النتيجة الإجمالية'
+                  : 'Overall Score'
+            }
+            value={
+              incomplete
+                ? isAr
+                  ? 'المقابلة غير مكتملة'
+                  : 'Interview Incomplete'
+                : `${data.report.finalScore} / 100`
+            }
           />
         </div>
 
@@ -767,7 +803,13 @@ function ReportCover({
               ...labelType(isAr),
             }}
           >
-            {isAr ? 'الخلاصة التقييمية' : 'Executive Summary'}
+            {incomplete
+              ? isAr
+                ? 'ملخص الحالة'
+                : 'Status Summary'
+              : isAr
+                ? 'الخلاصة التقييمية'
+                : 'Executive Summary'}
           </div>
 
           <div
@@ -856,7 +898,13 @@ function ReportCover({
                   ...labelType(isAr),
                 }}
               >
-                {isAr ? 'لمحة تنفيذية سريعة' : 'Executive Glance'}
+                {incomplete
+                  ? isAr
+                    ? 'لمحة عن حالة التقرير'
+                    : 'Report Status at a Glance'
+                  : isAr
+                    ? 'لمحة تنفيذية سريعة'
+                    : 'Executive Glance'}
               </div>
 
               <div
@@ -869,11 +917,23 @@ function ReportCover({
               >
                 <GlanceCard
                   accent="#5A463E"
-                  label={isAr ? 'الحكم المهني النهائي' : 'Final Professional Verdict'}
-                  value={`${readinessLabel} · ${r.finalScore}/100`}
+                  label={
+                    incomplete
+                      ? isAr
+                        ? 'حالة التقرير'
+                        : 'Report Status'
+                      : isAr
+                        ? 'الحكم المهني النهائي'
+                        : 'Final Professional Verdict'
+                  }
+                  value={
+                    incomplete
+                      ? readinessLabel
+                      : `${readinessLabel} · ${r.finalScore}/100`
+                  }
                 />
 
-                {top && (
+                {!incomplete && top && (
                   <GlanceCard
                     accent="#3F6B5E"
                     label={isAr ? 'أقوى ميزة في أدائك' : 'Your Strongest Asset'}
@@ -881,7 +941,7 @@ function ReportCover({
                   />
                 )}
 
-                {risk && (
+                {!incomplete && risk && (
                   <GlanceCard
                     accent="#A14234"
                     label={isAr ? 'أكبر نقطة خطر' : 'Primary Risk'}
@@ -892,7 +952,15 @@ function ReportCover({
                 {action && (
                   <GlanceCard
                     accent="#CC785C"
-                    label={isAr ? 'أول إجراء مطلوب للتحسن' : 'First Action to Improve'}
+                    label={
+                      incomplete
+                        ? isAr
+                          ? 'الخطوة التالية'
+                          : 'Next Step'
+                        : isAr
+                          ? 'أول إجراء مطلوب للتحسن'
+                          : 'First Action to Improve'
+                    }
                     value={action}
                   />
                 )}
@@ -914,140 +982,62 @@ const GENERATION_STAGES: Record<PlanTier, Record<'ar' | 'en', readonly string[]>
       'قراءة المقابلة',
       'تحليل الإجابات الأساسية',
       'قياس الجاهزية العامة',
-      'إعداد ملخص التقرير',
-      'تجهيز التقرير النهائي',
+      'إعداد التقرير المختصر',
     ],
     en: [
       'Reading the interview',
       'Analyzing core answers',
       'Measuring overall readiness',
-      'Preparing the report summary',
-      'Finalizing the report',
+      'Preparing the summary report',
     ],
   },
   pro: {
     ar: [
       'قراءة المقابلة الكاملة',
-      'فرز الإجابات حسب محاور التقييم',
       'تحليل السلوك والكفاءات',
       'قياس الاتساق والوضوح',
-      'رصد نقاط القوة والمخاطر',
       'بناء خطة التحسين',
-      'إعداد تحليل الإجابات',
-      'تجهيز تقرير Pro النهائي',
+      'إعداد تقرير Pro',
     ],
     en: [
       'Reading the full interview',
-      'Mapping answers to assessment areas',
       'Analyzing behavior and competencies',
       'Measuring consistency and clarity',
-      'Identifying strengths and risks',
       'Building your improvement plan',
-      'Preparing answer analysis',
-      'Finalizing your Pro report',
+      'Preparing your Pro report',
     ],
   },
   expert: {
     ar: [
       'قراءة المقابلة الكاملة',
-      'فرز الإجابات حسب محاور التقييم',
       'تحليل أدوار اللجنة',
       'تقييم الضغط والحكم المهني',
-      'قياس التفكير الاستراتيجي',
-      'رصد الأنماط السلوكية العميقة',
-      'مراجعة نقاط القوة والمخاطر التنفيذية',
-      'بناء تحليل الإجابات المتقدم',
-      'صياغة التوصيات بمستوى قرار التوظيف',
-      'تجهيز تقرير Expert النهائي',
+      'بناء الرؤية التنفيذية',
+      'إعداد تقرير Expert',
     ],
     en: [
       'Reading the full interview',
-      'Mapping answers to assessment areas',
       'Analyzing panel role dynamics',
       'Evaluating pressure and professional judgment',
-      'Measuring strategic thinking',
-      'Detecting deeper behavioral patterns',
-      'Reviewing executive strengths and risks',
-      'Building advanced answer analysis',
-      'Drafting decision-grade recommendations',
-      'Finalizing your Expert report',
+      'Building the executive view',
+      'Preparing your Expert report',
     ],
   },
 } as const
-
-const GENERATION_WAIT_NOTICE: Record<PlanTier, Record<'ar' | 'en', string>> = {
-  go: {
-    ar: 'يُرجى إبقاء هذه الصفحة مفتوحة. عادةً يستغرق تقرير Go أقل من دقيقتين.',
-    en: 'Please keep this page open. Go reports usually take under two minutes.',
-  },
-  pro: {
-    ar: 'يُرجى إبقاء هذه الصفحة مفتوحة. قد يستغرق تقرير Pro بضع دقائق بسبب تحليل السلوك والكفاءات.',
-    en: 'Please keep this page open. Pro reports may take a few minutes because behavioral and competency analysis is being prepared.',
-  },
-  expert: {
-    ar: 'يُرجى إبقاء هذه الصفحة مفتوحة. قد يستغرق تقرير Expert عدة دقائق بسبب تحليل اللجنة والضغط والحكم التنفيذي.',
-    en: 'Please keep this page open. Expert reports may take several minutes because panel dynamics, pressure response, and executive judgment are being analyzed.',
-  },
-} as const
-
-/* Presentational pacing per tier. Stage cadence mirrors the honest duration
-   each plan communicates (Go under ~2 min, Pro a few, Expert several), so the
-   checklist reaches its final stage roughly in step with real generation —
-   but completion itself is driven solely by polling, never by this timer. */
-const TIER_STAGE_INTERVAL_MS: Record<PlanTier, number> = {
-  go: 9000,
-  pro: 16000,
-  expert: 20000,
-}
-
-/* After this threshold the live-status line switches to a calmer long-wait
-   reassurance. Truthful by construction: the page really does poll /status
-   every few seconds. */
-const TIER_LONG_WAIT_MS: Record<PlanTier, number> = {
-  go: 120000,
-  pro: 240000,
-  expert: 360000,
-}
-
-const LIVE_STATUS_TEXT: Record<'ar' | 'en', string> = {
-  ar: 'يتم التحقق من جاهزية تقريرك تلقائياً كل بضع ثوانٍ.',
-  en: 'Your report status is checked automatically every few seconds.',
-}
-
-const LONG_WAIT_TEXT: Record<'ar' | 'en', string> = {
-  ar: 'ما زال التحليل جارياً، وبعض المقابلات تستغرق وقتاً أطول قليلاً. لا حاجة لتحديث الصفحة — سيظهر التقرير هنا فور اكتماله.',
-  en: 'Analysis is still in progress — some interviews take a little longer. No need to refresh; your report will appear here the moment it is ready.',
-}
-
-const TIER_CHIP: Record<PlanTier, { label: string; fg: string; bg: string; border: string }> = {
-  go:     { label: 'GO',     fg: '#CC785C', bg: 'rgba(204,120,92,0.08)', border: 'rgba(204,120,92,0.30)' },
-  pro:    { label: 'PRO',    fg: '#CC785C', bg: 'rgba(204,120,92,0.14)', border: 'rgba(204,120,92,0.45)' },
-  expert: { label: 'EXPERT', fg: '#A85A42', bg: 'rgba(168,90,66,0.10)',  border: 'rgba(168,90,66,0.45)' },
-}
 
 function GeneratingScreen({ lang, tier }: { lang: Lang; tier: PlanTier }) {
   const isAr = lang === 'ar'
   const stages = GENERATION_STAGES[tier][isAr ? 'ar' : 'en']
-  const chip = TIER_CHIP[tier]
   const [stage, setStage] = useState(0)
-  const [longWait, setLongWait] = useState(false)
 
   useEffect(() => {
-    // Advance through stages on a per-tier cadence, hold on the last one.
+    // Advance through stages on a fixed cadence, hold on the last one.
     const t = setInterval(() => {
       setStage(prev => (prev < stages.length - 1 ? prev + 1 : prev))
-    }, TIER_STAGE_INTERVAL_MS[tier])
+    }, 7000)
     return () => clearInterval(t)
-  }, [stages.length, tier])
+  }, [stages.length])
 
-  useEffect(() => {
-    // Swap the live-status line for the long-wait reassurance once the
-    // tier's expected window has clearly passed.
-    const t = setTimeout(() => setLongWait(true), TIER_LONG_WAIT_MS[tier])
-    return () => clearTimeout(t)
-  }, [tier])
-
-  // UI-only progress. Capped below 100 on purpose: it paces, it never claims.
   const progress = Math.min(92, Math.round(((stage + 1) / stages.length) * 100))
 
   return (
@@ -1072,51 +1062,29 @@ function GeneratingScreen({ lang, tier }: { lang: Lang; tier: PlanTier }) {
           0% { background-position: 200% 0; }
           100% { background-position: -200% 0; }
         }
-        @keyframes barbarosBeat {
-          0%, 100% { transform: scale(1); opacity: 1; }
-          50% { transform: scale(1.45); opacity: 0.55; }
-        }
       `}</style>
 
       <div
         style={{
           width: '100%',
-          maxWidth: 560,
+          maxWidth: 440,
           background: '#FFFFFF',
           border: '1px solid #E5DDD0',
-          borderRadius: 24,
-          padding: '38px 36px 30px',
-          boxShadow: '0 16px 44px rgba(26,26,26,0.08)',
+          borderRadius: 22,
+          padding: '30px 26px',
+          boxShadow: '0 12px 34px rgba(26,26,26,0.07)',
           textAlign: 'center',
         }}
       >
         <div style={{ animation: 'barbarosPulse 2.4s ease-in-out infinite', display: 'inline-block' }}>
-          <Barbaros size={30} />
-        </div>
-
-        <div style={{ marginTop: 14 }}>
-          <span
-            style={{
-              display: 'inline-block',
-              padding: '4px 14px',
-              borderRadius: 999,
-              fontSize: 10.5,
-              fontWeight: 900,
-              letterSpacing: 2,
-              color: chip.fg,
-              background: chip.bg,
-              border: `1px solid ${chip.border}`,
-            }}
-          >
-            {chip.label}
-          </span>
+          <Barbaros size={26} />
         </div>
 
         <div
           style={{
-            marginTop: 12,
+            marginTop: 14,
             fontFamily: SERIF,
-            fontSize: 19,
+            fontSize: 17,
             fontWeight: 700,
             color: '#1A1A1A',
           }}
@@ -1126,22 +1094,21 @@ function GeneratingScreen({ lang, tier }: { lang: Lang; tier: PlanTier }) {
 
         <div
           style={{
-            marginTop: 7,
-            fontSize: 12.5,
+            marginTop: 6,
+            fontSize: 12,
             color: 'rgba(26,26,26,0.5)',
             lineHeight: 1.7,
-            maxWidth: 440,
-            marginLeft: 'auto',
-            marginRight: 'auto',
           }}
         >
-          {GENERATION_WAIT_NOTICE[tier][isAr ? 'ar' : 'en']}
+          {isAr
+            ? 'يُرجى إبقاء هذه الصفحة مفتوحة. عادةً تستغرق العملية دقيقة إلى دقيقتين.'
+            : 'Please keep this page open. This usually takes one to two minutes.'}
         </div>
 
         <div
           style={{
-            marginTop: 22,
-            height: 8,
+            marginTop: 20,
+            height: 7,
             background: '#F5F1EB',
             borderRadius: 6,
             overflow: 'hidden',
@@ -1161,33 +1128,6 @@ function GeneratingScreen({ lang, tier }: { lang: Lang; tier: PlanTier }) {
           />
         </div>
 
-        <div
-          style={{
-            marginTop: 12,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 8,
-            fontSize: 11.5,
-            color: 'rgba(26,26,26,0.48)',
-            lineHeight: 1.6,
-          }}
-        >
-          <span
-            style={{
-              width: 7,
-              height: 7,
-              borderRadius: '50%',
-              background: '#3F6B5E',
-              flexShrink: 0,
-              animation: 'barbarosBeat 1.5s ease-in-out infinite',
-            }}
-          />
-          <span style={{ maxWidth: 430 }}>
-            {longWait ? LONG_WAIT_TEXT[isAr ? 'ar' : 'en'] : LIVE_STATUS_TEXT[isAr ? 'ar' : 'en']}
-          </span>
-        </div>
-
         <div style={{ marginTop: 22, textAlign: isAr ? 'right' : 'left' }}>
           {stages.map((label, i) => {
             const done = i < stage
@@ -1200,9 +1140,9 @@ function GeneratingScreen({ lang, tier }: { lang: Lang; tier: PlanTier }) {
                 style={{
                   display: 'flex',
                   alignItems: 'center',
-                  gap: 11,
-                  padding: '7.5px 0',
-                  fontSize: 13,
+                  gap: 10,
+                  padding: '7px 0',
+                  fontSize: 12.5,
                   fontWeight: active ? 800 : 600,
                   color,
                   transition: 'color 0.4s ease',
@@ -1210,14 +1150,14 @@ function GeneratingScreen({ lang, tier }: { lang: Lang; tier: PlanTier }) {
               >
                 <span
                   style={{
-                    width: 20,
-                    height: 20,
+                    width: 18,
+                    height: 18,
                     borderRadius: '50%',
                     flexShrink: 0,
                     display: 'inline-flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    fontSize: 10.5,
+                    fontSize: 10,
                     fontWeight: 900,
                     color: done || active ? '#FFFFFF' : 'rgba(26,26,26,0.35)',
                     background: done
@@ -1238,8 +1178,8 @@ function GeneratingScreen({ lang, tier }: { lang: Lang; tier: PlanTier }) {
 
         <div
           style={{
-            marginTop: 20,
-            paddingTop: 15,
+            marginTop: 18,
+            paddingTop: 14,
             borderTop: '0.5px solid rgba(26,26,26,0.08)',
             fontSize: 11,
             color: 'rgba(26,26,26,0.38)',
@@ -1290,10 +1230,15 @@ function ReportView({ data }: { data: Stored }) {
   const readinessLabel = displayReadinessLevel(r.readinessLevel, isAr)
   const v = verdictStyle(readinessLabel)
   const coverage = r.assessmentCoverage
+  const incomplete = r.interviewIncomplete === true
 
-  const footerText = isAr
-    ? 'تم إعداد هذا التقرير وفق منهجية تقييم منظمة قائمة على الكفاءات، ومتوافقة مع ممارسات التوظيف الحديثة المستخدمة في الجهات الحكومية، والمؤسسات العالمية، والشركات الرائدة في القطاع الخاص.'
-    : 'Generated through a structured, competency-based evaluation methodology aligned with modern hiring practices used across government entities, global organizations, and leading private-sector companies.'
+  const footerText = incomplete
+    ? isAr
+      ? 'يسجل هذا التقرير جلسة مقابلة غير مكتملة، ولم يصدر عنها حكم على الأداء أو الكفاءة.'
+      : 'This report records an incomplete interview session and does not issue a judgment on performance or ability.'
+    : isAr
+      ? 'تم إعداد هذا التقرير وفق منهجية تقييم منظمة قائمة على الكفاءات، ومتوافقة مع ممارسات التوظيف الحديثة المستخدمة في الجهات الحكومية، والمؤسسات العالمية، والشركات الرائدة في القطاع الخاص.'
+      : 'Generated through a structured, competency-based evaluation methodology aligned with modern hiring practices used across government entities, global organizations, and leading private-sector companies.'
 
   return (
     <div
@@ -1417,19 +1362,50 @@ function ReportView({ data }: { data: Stored }) {
           reportDate={formatReportDate(data.reportDate, isAr)}
           reference={shortReference(data.reportReference)}
           summaryLine={
-            (isAr
-              ? `حصل المرشّح على ${r.finalScore} من 100 ضمن مستوى «${readinessLabel}»`
-              : `Overall score of ${r.finalScore} out of 100 — readiness level: “${readinessLabel}”`) +
-            (typeof r.hireProbability === 'number'
+            incomplete
               ? isAr
-                ? `، باحتمالية توظيف ${r.hireProbability}%.`
-                : `, with a ${r.hireProbability}% probability of hire.`
-              : '.')
+                ? 'المقابلة غير مكتملة — لم تتضمن هذه الجلسة أدلة كافية لإصدار تقييم كامل.'
+                : 'Interview incomplete — this session did not include enough evidence to issue a full assessment.'
+              : (isAr
+                  ? `حصل المرشّح على ${r.finalScore} من 100 ضمن مستوى «${readinessLabel}»`
+                  : `Overall score of ${r.finalScore} out of 100 — readiness level: “${readinessLabel}”`) +
+                (typeof r.hireProbability === 'number'
+                  ? isAr
+                    ? `، باحتمالية توظيف ${r.hireProbability}%.`
+                    : `, with a ${r.hireProbability}% probability of hire.`
+                  : '.')
           }
           assessment={r.barbarosAssessment || ''}
         />
 
+        {incomplete && (
+          <Section
+            lang={lang}
+            style={{
+              background: '#FFFFFF',
+              border: '1px solid rgba(26,26,26,0.14)',
+              borderInlineStart: '4px solid #5A463E',
+            }}
+          >
+            <SectionTitle>
+              {isAr ? 'المقابلة غير مكتملة' : 'Interview Incomplete'}
+            </SectionTitle>
+            <div
+              style={{
+                fontSize: 13,
+                color: '#1A1A1A',
+                lineHeight: 1.9,
+              }}
+            >
+              {isAr
+                ? 'لم يتم إصدار تقييم كامل لأن الجلسة لم تتضمن ثلاث إجابات فعلية على الأقل. هذا ليس حكماً على أدائك أو كفاءتك، بل يعني فقط أن المقابلة لم تكتمل. أكمل مقابلة كاملة للحصول على تقييمك الكامل.'
+                : 'No full assessment was issued because the session did not include at least three substantive answers. This is not a judgment of your performance or ability; it only means the interview was not completed. Complete a full interview to receive your full assessment.'}
+            </div>
+          </Section>
+        )}
+
         {/* 1. SCORE */}
+        {!incomplete && (
         <Section lang={lang} style={{ textAlign: 'center' }}>
           <ScoreRing score={r.finalScore} />
 
@@ -1467,9 +1443,10 @@ function ReportView({ data }: { data: Stored }) {
             </div>
           )}
         </Section>
+        )}
 
         {/* 2. VERDICT */}
-        {r.verdict && (
+        {!incomplete && r.verdict && (
           <Section lang={lang} style={{ background: v.bg, border: `1px solid ${v.border}` }}>
             <div
               style={{
@@ -1502,7 +1479,13 @@ function ReportView({ data }: { data: Stored }) {
             }}
           >
             <SectionTitle>
-              {isAr ? 'نطاق التقييم في هذه الباقة' : 'Assessment Coverage for This Package'}
+              {incomplete
+                ? isAr
+                  ? 'نطاق التقييم في هذه الجلسة'
+                  : 'Assessment Coverage for This Session'
+                : isAr
+                  ? 'نطاق التقييم في هذه الباقة'
+                  : 'Assessment Coverage for This Package'}
             </SectionTitle>
 
             {coverage.summary && (
@@ -1620,9 +1603,13 @@ function ReportView({ data }: { data: Stored }) {
                 style={{
                   fontSize: 12,
                   lineHeight: 1.8,
-                  color: '#6B2D1F',
-                  background: 'rgba(204,120,92,0.08)',
-                  border: '0.5px solid rgba(204,120,92,0.22)',
+                  color: incomplete ? '#1A1A1A' : '#6B2D1F',
+                  background: incomplete
+                    ? 'rgba(26,26,26,0.035)'
+                    : 'rgba(204,120,92,0.08)',
+                  border: incomplete
+                    ? '0.5px solid rgba(26,26,26,0.10)'
+                    : '0.5px solid rgba(204,120,92,0.22)',
                   borderRadius: 12,
                   padding: '12px 14px',
                   fontWeight: 600,
@@ -1635,7 +1622,7 @@ function ReportView({ data }: { data: Stored }) {
         )}
 
         {/* 4. COMPETENCIES */}
-        {Array.isArray(r.competencies) && r.competencies.length > 0 && (
+        {!incomplete && Array.isArray(r.competencies) && r.competencies.length > 0 && (
           <Section lang={lang}>
             <SectionTitle>
               {isAr ? 'مصفوفة الكفاءات' : 'Competency Breakdown'}
@@ -1710,7 +1697,7 @@ function ReportView({ data }: { data: Stored }) {
         )}
 
         {/* 4.5 PERFORMANCE PATH — derived from replay scores (question order, not time) */}
-        {Array.isArray(r.replay) && r.replay.length >= 2 && (
+        {!incomplete && Array.isArray(r.replay) && r.replay.length >= 2 && (
           <Section lang={lang}>
             <SectionTitle>
               {isAr ? 'مسار الأداء عبر أسئلة المقابلة' : 'Performance Path Across Interview Questions'}
@@ -1721,7 +1708,7 @@ function ReportView({ data }: { data: Stored }) {
         )}
 
         {/* 5. HIDDEN WEAKNESS */}
-        {r.hiddenWeakness && (
+        {!incomplete && r.hiddenWeakness && (
           <Section
             lang={lang}
             style={{
@@ -1741,7 +1728,7 @@ function ReportView({ data }: { data: Stored }) {
         )}
 
         {/* 6. BEHAVIORAL PATTERNS */}
-        {r.behavioralPatterns && (
+        {!incomplete && r.behavioralPatterns && (
           <Section lang={lang}>
             <SectionTitle>
               {isAr ? 'الأنماط السلوكية' : 'Behavioral Patterns'}
@@ -1781,7 +1768,13 @@ function ReportView({ data }: { data: Stored }) {
               <span
                 style={{ fontFamily: SERIF, fontSize: 16, fontWeight: 700 }}
               >
-                {isAr ? 'تحليل الإجابات والتدريب' : 'Interview Analysis'}
+                {incomplete
+                  ? isAr
+                    ? 'سجل الجلسة'
+                    : 'Session Record'
+                  : isAr
+                    ? 'تحليل الإجابات والتدريب'
+                    : 'Interview Analysis'}
               </span>
 
               <span
@@ -1810,9 +1803,13 @@ function ReportView({ data }: { data: Stored }) {
                 marginBottom: 16,
               }}
             >
-              {isAr
-                ? 'يراجع هذا القسم إجاباتك كما قُدّمت، ويوضح سبب التقييم، وما أضعف كل إجابة، وكيف يمكن صياغتها بصورة أقوى.'
-                : 'This section reviews your submitted answers, explains the score, identifies what weakened each response, and shows how to strengthen it.'}
+              {incomplete
+                ? isAr
+                  ? 'يعرض هذا القسم التبادلات التي حدثت فعلياً في الجلسة دون درجات أو حكم على الأداء.'
+                  : 'This section records the exchanges that actually occurred, without scores or performance judgment.'
+                : isAr
+                  ? 'يراجع هذا القسم إجاباتك كما قُدّمت، ويوضح سبب التقييم، وما أضعف كل إجابة، وكيف يمكن صياغتها بصورة أقوى.'
+                  : 'This section reviews your submitted answers, explains the score, identifies what weakened each response, and shows how to strengthen it.'}
             </div>
 
             {showReplay && (
@@ -1840,7 +1837,7 @@ function ReportView({ data }: { data: Stored }) {
                           width: 26,
                           height: 26,
                           borderRadius: '50%',
-                          background: '#CC785C',
+                          background: incomplete ? '#5A463E' : '#CC785C',
                           color: '#fff',
                           display: 'flex',
                           alignItems: 'center',
@@ -1853,17 +1850,19 @@ function ReportView({ data }: { data: Stored }) {
                         {i + 1}
                       </div>
 
-                      <span
-                        style={{
-                          fontSize: 12,
-                          fontWeight: 900,
-                          color: scoreColor(item.score),
-                          marginLeft: isAr ? 0 : 'auto',
-                          marginRight: isAr ? 'auto' : 0,
-                        }}
-                      >
-                        {item.score}/100
-                      </span>
+                      {!incomplete && (
+                        <span
+                          style={{
+                            fontSize: 12,
+                            fontWeight: 900,
+                            color: scoreColor(item.score),
+                            marginLeft: isAr ? 0 : 'auto',
+                            marginRight: isAr ? 'auto' : 0,
+                          }}
+                        >
+                          {item.score}/100
+                        </span>
+                      )}
                     </div>
 
                     <div style={{ marginBottom: 10 }}>
@@ -1876,7 +1875,13 @@ function ReportView({ data }: { data: Stored }) {
                           ...labelType(isAr),
                         }}
                       >
-                        {isAr ? 'السؤال محل التقييم' : 'Evaluated Question'}
+                        {incomplete
+                          ? isAr
+                            ? 'السؤال'
+                            : 'Question'
+                          : isAr
+                            ? 'السؤال محل التقييم'
+                            : 'Evaluated Question'}
                       </div>
 
                       <div
@@ -1914,7 +1919,9 @@ function ReportView({ data }: { data: Stored }) {
                           lineHeight: 1.7,
                           padding: '10px 14px',
                           background: 'rgba(204,120,92,0.06)',
-                          border: `0.5px solid ${scoreColor(item.score)}33`,
+                          border: incomplete
+                            ? '0.5px solid rgba(26,26,26,0.12)'
+                            : `0.5px solid ${scoreColor(item.score)}33`,
                           borderRadius: 10,
                         }}
                       >
@@ -1933,17 +1940,27 @@ function ReportView({ data }: { data: Stored }) {
                             ...labelType(isAr),
                           }}
                         >
-                          {isAr ? 'تحليل الأداء' : 'Performance Analysis'}
+                          {incomplete
+                            ? isAr
+                              ? 'ملاحظة الجلسة'
+                              : 'Session Note'
+                            : isAr
+                              ? 'تحليل الأداء'
+                              : 'Performance Analysis'}
                         </div>
 
                         <div
                           style={{
                             fontSize: 12,
-                            color: '#86591D',
+                            color: incomplete ? 'rgba(26,26,26,0.70)' : '#86591D',
                             lineHeight: 1.7,
                             padding: '10px 14px',
-                            background: tint('#B07A2E', 0.07),
-                            border: '0.5px solid rgba(176,122,46,0.25)',
+                            background: incomplete
+                              ? 'rgba(26,26,26,0.035)'
+                              : tint('#B07A2E', 0.07),
+                            border: incomplete
+                              ? '0.5px solid rgba(26,26,26,0.10)'
+                              : '0.5px solid rgba(176,122,46,0.25)',
                             borderRadius: 10,
                           }}
                         >
@@ -1952,7 +1969,7 @@ function ReportView({ data }: { data: Stored }) {
                       </div>
                     )}
 
-                    {item.weakened && (
+                    {!incomplete && item.weakened && (
                       <div style={{ marginBottom: 10 }}>
                         <div
                           style={{
@@ -1982,7 +1999,7 @@ function ReportView({ data }: { data: Stored }) {
                       </div>
                     )}
 
-                    {item.stronger && (
+                    {!incomplete && item.stronger && (
                       <div>
                         <div
                           style={{
@@ -2028,7 +2045,13 @@ function ReportView({ data }: { data: Stored }) {
             }}
           >
             <SectionTitle>
-              {isAr ? 'التوصية الختامية' : 'Your Next Step'}
+              {incomplete
+                ? isAr
+                  ? 'الخطوة التالية'
+                  : 'Next Step'
+                : isAr
+                  ? 'التوصية الختامية'
+                  : 'Your Next Step'}
             </SectionTitle>
 
             <div style={{ fontSize: 13, color: '#1A1A1A', lineHeight: 1.9 }}>

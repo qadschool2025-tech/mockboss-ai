@@ -65,7 +65,7 @@ export const BARBAROS_RESPONSE_RULES = [
   'If an answer contains meaningful professional substance as well as an objection or rude phrase, classify the answer as professional and let the interview response address tone without discarding the evidence.',
   'A direct refusal is off_topic_or_playful only when it rejects a legitimate professional question, is aimed at the interviewer, and provides no meaningful answer or clarification request.',
   'A respectful refusal to disclose genuinely sensitive personal information, or an objection to an inappropriate or irrelevant question, is professional conduct.',
-  'Use explicit_abuse only for direct unmistakable abuse aimed at the interviewer. Do not use it for quoted abuse, frustration, objection, criticism, disagreement, or narration of another person's words.',
+  'Use explicit_abuse only for direct unmistakable abuse aimed at the interviewer. Do not use it for quoted abuse, frustration, objection, criticism, disagreement, or narration of another person\'s words.',
   'Use uncertain whenever the direction, intent, or context is not clear. Never infer misconduct from answer length or from the presence of a particular phrase alone.',
   'The conduct tag is internal. Never explain it or mention it to the candidate.',
   'For off_topic_or_playful or explicit_abuse, do not add a score tag or a new interview question. Output only the conduct tag. The engine owns redirection, warning, and pause.',

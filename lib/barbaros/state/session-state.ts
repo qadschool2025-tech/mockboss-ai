@@ -138,6 +138,14 @@ export function createInitialState(
     scores: [],
     interviewProgress: 0,
     isComplete: false,
+    sessionPaused: false,
+    pauseReason: null,
+    conductState: {
+      redirected: false,
+      warned: false,
+      violationsAfterWarning: 0,
+      pendingQuestion: null,
+    },
   };
 }
 

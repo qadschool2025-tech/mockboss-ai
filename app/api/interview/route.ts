@@ -1,6 +1,8 @@
 // app/api/interview/route.ts
 // Barbaros V4 — Interview API Route.
-// Thin adapter: HTTP ↔ engine. Session storage remains in-memory for this batch.
+// Thin adapter: HTTP ↔ engine.
+// Runtime state is mirrored into an encrypted client-carried session token so
+// Vercel instance changes do not destroy pause/resume continuity.
 //
 // FIXES PRESERVED:
 // - technical_depth → domain_expertise normalization
@@ -13,7 +15,12 @@
 // - exact duplicate requests share/cached the same engine result
 // - conduct metadata never reaches the candidate
 
-import { createHash } from 'node:crypto'
+import {
+  createCipheriv,
+  createDecipheriv,
+  createHash,
+  randomBytes,
+} from 'node:crypto'
 import { NextRequest, NextResponse } from 'next/server'
 import {
   runEngine,
@@ -31,11 +38,13 @@ import type {
   EngineOutput,
 } from '@/lib/barbaros'
 
-// ─── In-Memory Session Store ──────────────────────────────────────────────────
+export const runtime = 'nodejs'
+
+// ─── Runtime Cache + Encrypted Session Continuity ──────────────────────────────────────────────────
 
 type ControlAction = 'resume'
 
-type InterviewResponsePayload = {
+type InterviewResponsePayloadCore = {
   success: true
   content: string
   audioBase64: string | null
@@ -65,14 +74,33 @@ interface SessionStore {
   previousSnapshot: SessionSnapshot | null
   sessionStartTime: number
   lastRequestFingerprint?: string
-  lastResponsePayload?: InterviewResponsePayload
+  lastResponsePayload?: InterviewResponsePayloadCore
   inFlight?: {
     fingerprint: string
-    promise: Promise<InterviewResponsePayload>
+    promise: Promise<InterviewResponsePayloadCore>
   }
 }
 
 const sessions = new Map<string, SessionStore>()
+
+type InterviewResponsePayload = InterviewResponsePayloadCore & {
+  sessionToken: string | null
+}
+
+type PersistedSessionStore = Omit<SessionStore, 'inFlight'>
+
+interface SessionTokenEnvelope {
+  version: 1
+  sessionId: string
+  expiresAt: number
+  store: PersistedSessionStore
+}
+
+const SESSION_TOKEN_VERSION = 'v1'
+const SESSION_TOKEN_AAD = Buffer.from('barbaros-interview-session-v1')
+const SESSION_TOKEN_MAX_LENGTH = 3_000_000
+const SESSION_TOKEN_MAX_PLAINTEXT_BYTES = 2_000_000
+const SESSION_TOKEN_GRACE_MS = 2 * 60 * 60 * 1000
 
 const SESSION_LIMIT_SECONDS: Record<string, number> = {
   free: 15 * 60,
@@ -92,10 +120,10 @@ function getCurrentRemainingSeconds(
 }
 
 function refreshRemainingSeconds(
-  payload: InterviewResponsePayload,
+  payload: InterviewResponsePayloadCore,
   store: SessionStore,
   config: InterviewConfig
-): InterviewResponsePayload {
+): InterviewResponsePayloadCore {
   if (payload.isEndOfSession) return { ...payload, remainingSeconds: 0 }
 
   return {
@@ -104,6 +132,195 @@ function refreshRemainingSeconds(
       config.plan,
       store.sessionStartTime
     ),
+  }
+}
+
+
+function getSessionTokenKey(): Buffer {
+  const secret =
+    process.env.INTERVIEW_SESSION_SECRET ??
+    process.env.SUPABASE_SERVICE_ROLE_KEY ??
+    process.env.ANTHROPIC_API_KEY
+
+  if (!secret) {
+    throw new Error(
+      'Missing INTERVIEW_SESSION_SECRET, SUPABASE_SERVICE_ROLE_KEY, and ANTHROPIC_API_KEY'
+    )
+  }
+
+  return createHash('sha256')
+    .update('barbaros-interview-session-key-v1\0')
+    .update(secret)
+    .digest()
+}
+
+function toBase64Url(value: Buffer): string {
+  return value.toString('base64url')
+}
+
+function fromBase64Url(value: string): Buffer {
+  return Buffer.from(value, 'base64url')
+}
+
+function getSessionTokenExpiry(
+  store: SessionStore,
+  config: InterviewConfig
+): number {
+  const totalSeconds =
+    SESSION_LIMIT_SECONDS[config.plan] ?? SESSION_LIMIT_SECONDS.free
+
+  return store.sessionStartTime + totalSeconds * 1000 + SESSION_TOKEN_GRACE_MS
+}
+
+function createSessionToken(
+  sessionId: string,
+  store: SessionStore,
+  config: InterviewConfig
+): string {
+  const persistedStore: PersistedSessionStore = {
+    state: store.state,
+    weaknessState: store.weaknessState,
+    growthState: store.growthState,
+    previousSnapshot: store.previousSnapshot,
+    sessionStartTime: store.sessionStartTime,
+    lastRequestFingerprint: store.lastRequestFingerprint,
+    lastResponsePayload: store.lastResponsePayload
+      ? { ...store.lastResponsePayload, audioBase64: null }
+      : undefined,
+  }
+
+  const envelope: SessionTokenEnvelope = {
+    version: 1,
+    sessionId,
+    expiresAt: getSessionTokenExpiry(store, config),
+    store: persistedStore,
+  }
+
+  const plaintext = Buffer.from(JSON.stringify(envelope), 'utf8')
+
+  if (plaintext.length > SESSION_TOKEN_MAX_PLAINTEXT_BYTES) {
+    throw new Error('Interview session state exceeds the safe token size')
+  }
+
+  const iv = randomBytes(12)
+  const cipher = createCipheriv('aes-256-gcm', getSessionTokenKey(), iv)
+  cipher.setAAD(SESSION_TOKEN_AAD)
+
+  const encrypted = Buffer.concat([
+    cipher.update(plaintext),
+    cipher.final(),
+  ])
+  const authTag = cipher.getAuthTag()
+
+  return [
+    SESSION_TOKEN_VERSION,
+    toBase64Url(iv),
+    toBase64Url(encrypted),
+    toBase64Url(authTag),
+  ].join('.')
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function isRestorableSessionStore(value: unknown): value is PersistedSessionStore {
+  if (!isRecord(value)) return false
+
+  return (
+    isRecord(value.state) &&
+    isRecord(value.weaknessState) &&
+    isRecord(value.growthState) &&
+    typeof value.sessionStartTime === 'number' &&
+    Number.isFinite(value.sessionStartTime) &&
+    (value.previousSnapshot === null || isRecord(value.previousSnapshot)) &&
+    (value.lastRequestFingerprint === undefined ||
+      typeof value.lastRequestFingerprint === 'string') &&
+    (value.lastResponsePayload === undefined ||
+      isRecord(value.lastResponsePayload))
+  )
+}
+
+function restoreSessionStore(
+  token: string,
+  expectedSessionId: string,
+  now: number
+): SessionStore | null {
+  if (!token || token.length > SESSION_TOKEN_MAX_LENGTH) return null
+
+  try {
+    const [version, ivPart, encryptedPart, authTagPart, ...extra] = token.split('.')
+
+    if (
+      version !== SESSION_TOKEN_VERSION ||
+      !ivPart ||
+      !encryptedPart ||
+      !authTagPart ||
+      extra.length > 0
+    ) {
+      return null
+    }
+
+    const iv = fromBase64Url(ivPart)
+    const encrypted = fromBase64Url(encryptedPart)
+    const authTag = fromBase64Url(authTagPart)
+
+    if (
+      iv.length !== 12 ||
+      authTag.length !== 16 ||
+      encrypted.length > SESSION_TOKEN_MAX_PLAINTEXT_BYTES
+    ) {
+      return null
+    }
+
+    const decipher = createDecipheriv(
+      'aes-256-gcm',
+      getSessionTokenKey(),
+      iv
+    )
+    decipher.setAAD(SESSION_TOKEN_AAD)
+    decipher.setAuthTag(authTag)
+
+    const json = Buffer.concat([
+      decipher.update(encrypted),
+      decipher.final(),
+    ]).toString('utf8')
+    const parsed = JSON.parse(json) as unknown
+
+    if (!isRecord(parsed)) return null
+    if (parsed.version !== 1) return null
+    if (parsed.sessionId !== expectedSessionId) return null
+    if (
+      typeof parsed.expiresAt !== 'number' ||
+      !Number.isFinite(parsed.expiresAt) ||
+      parsed.expiresAt < now
+    ) {
+      return null
+    }
+    if (!isRestorableSessionStore(parsed.store)) return null
+
+    return {
+      ...parsed.store,
+      inFlight: undefined,
+    }
+  } catch {
+    return null
+  }
+}
+
+function withSessionToken(
+  payload: InterviewResponsePayloadCore,
+  sessionId: string,
+  store: SessionStore,
+  config: InterviewConfig
+): InterviewResponsePayload {
+  const refreshed = refreshRemainingSeconds(payload, store, config)
+
+  return {
+    ...refreshed,
+    sessionToken: refreshed.isEndOfSession
+      ? null
+      : createSessionToken(sessionId, store, config),
   }
 }
 
@@ -205,10 +422,21 @@ function createRequestFingerprint(
   sessionId: string,
   config: InterviewConfig,
   rawMessages: unknown,
-  controlAction: ControlAction | undefined
+  controlAction: ControlAction | undefined,
+  sessionToken: string | undefined
 ): string {
+  const sessionTokenHash = sessionToken
+    ? createHash('sha256').update(sessionToken).digest('hex')
+    : null
+
   return createHash('sha256')
-    .update(JSON.stringify({ sessionId, config, messages: rawMessages, controlAction }))
+    .update(JSON.stringify({
+      sessionId,
+      config,
+      messages: rawMessages,
+      controlAction,
+      sessionTokenHash,
+    }))
     .digest('hex')
 }
 
@@ -229,7 +457,24 @@ export async function POST(req: NextRequest) {
     const config = body.config
     const sessionId = body.sessionId
     const rawMessages = body.messages
+    const rawSessionToken = body.sessionToken
     const controlAction = parseControlAction(body.controlAction)
+
+    if (
+      rawSessionToken !== undefined &&
+      rawSessionToken !== null &&
+      typeof rawSessionToken !== 'string'
+    ) {
+      return NextResponse.json(
+        { success: false, error: 'Invalid sessionToken' },
+        { status: 400 }
+      )
+    }
+
+    const sessionToken =
+      typeof rawSessionToken === 'string' && rawSessionToken.length > 0
+        ? rawSessionToken
+        : undefined
 
     if (body.controlAction !== undefined && controlAction === undefined) {
       return NextResponse.json(
@@ -254,56 +499,122 @@ export async function POST(req: NextRequest) {
 
     const now = Date.now()
     const messages = normalizeMessages(rawMessages, now)
-    let store = sessions.get(sessionId)
+    const cachedStore = sessions.get(sessionId)
+    const isContinuation = controlAction === 'resume' || messages.length > 0
 
-    if (controlAction === 'resume' && !store) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: 'Interview session not found or no longer available',
-          code: 'SESSION_NOT_FOUND',
-        },
-        { status: 409 }
+    let store: SessionStore
+    let effectiveConfig: InterviewConfig
+    let fingerprint: string
+
+    if (sessionToken) {
+      const restoredStore = restoreSessionStore(sessionToken, sessionId, now)
+
+      if (!restoredStore) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: 'Interview session not found or no longer available',
+            code: 'SESSION_NOT_FOUND',
+          },
+          { status: 409 }
+        )
+      }
+
+      effectiveConfig = restoredStore.state.config
+      fingerprint = createRequestFingerprint(
+        sessionId,
+        effectiveConfig,
+        rawMessages,
+        controlAction,
+        sessionToken
       )
-    }
 
-    if (!store) {
-      store = {
-        state: createInitialSessionState(sessionId, now),
+      // A concurrent retry on this instance may already be processing the exact
+      // same token-backed request. Reuse it before replacing the runtime cache.
+      if (
+        cachedStore?.lastRequestFingerprint === fingerprint &&
+        cachedStore.lastResponsePayload
+      ) {
+        return jsonResponse(
+          withSessionToken(
+            cachedStore.lastResponsePayload,
+            sessionId,
+            cachedStore,
+            effectiveConfig
+          )
+        )
+      }
+
+      if (cachedStore?.inFlight?.fingerprint === fingerprint) {
+        const payload = await cachedStore.inFlight.promise
+        return jsonResponse(
+          withSessionToken(payload, sessionId, cachedStore, effectiveConfig)
+        )
+      }
+
+      // The encrypted token is authoritative across Vercel instances. A local
+      // Map entry may be stale if another instance processed the previous turn.
+      store = restoredStore
+      sessions.set(sessionId, store)
+    } else {
+      if (isContinuation) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: 'Interview session not found or no longer available',
+            code: 'SESSION_NOT_FOUND',
+          },
+          { status: 409 }
+        )
+      }
+
+      store = cachedStore ?? {
+        state: createInitialSessionState(config, now),
         weaknessState: createEmptyWeaknessTrackerState(now),
         growthState: createEmptyGrowthTrackerState(now),
         previousSnapshot: null,
         sessionStartTime: now,
       }
 
-      sessions.set(sessionId, store)
-    }
+      if (!cachedStore) {
+        sessions.set(sessionId, store)
+      }
 
-    const fingerprint = createRequestFingerprint(
-      sessionId,
-      config,
-      rawMessages,
-      controlAction
-    )
-
-    if (
-      store.lastRequestFingerprint === fingerprint &&
-      store.lastResponsePayload
-    ) {
-      return jsonResponse(
-        refreshRemainingSeconds(store.lastResponsePayload, store, config)
+      effectiveConfig = store.state.config
+      fingerprint = createRequestFingerprint(
+        sessionId,
+        effectiveConfig,
+        rawMessages,
+        controlAction,
+        sessionToken
       )
-    }
 
-    if (store.inFlight?.fingerprint === fingerprint) {
-      const payload = await store.inFlight.promise
-      return jsonResponse(refreshRemainingSeconds(payload, store, config))
+      if (
+        store.lastRequestFingerprint === fingerprint &&
+        store.lastResponsePayload
+      ) {
+        return jsonResponse(
+          withSessionToken(
+            store.lastResponsePayload,
+            sessionId,
+            store,
+            effectiveConfig
+          )
+        )
+      }
+
+      if (store.inFlight?.fingerprint === fingerprint) {
+        const payload = await store.inFlight.promise
+        return jsonResponse(
+          withSessionToken(payload, sessionId, store, effectiveConfig)
+        )
+      }
     }
 
     const activeStore = store
     const promise = runStoredEngine({
       sessionId,
-      config,
+      config: effectiveConfig,
       messages,
       controlAction,
       store: activeStore,
@@ -315,7 +626,9 @@ export async function POST(req: NextRequest) {
 
     try {
       const payload = await promise
-      return jsonResponse(refreshRemainingSeconds(payload, activeStore, config))
+      return jsonResponse(
+        withSessionToken(payload, sessionId, activeStore, effectiveConfig)
+      )
     } finally {
       if (activeStore.inFlight?.fingerprint === fingerprint) {
         activeStore.inFlight = undefined
@@ -344,7 +657,7 @@ interface RunStoredEngineInput {
 
 async function runStoredEngine(
   input: RunStoredEngineInput
-): Promise<InterviewResponsePayload> {
+): Promise<InterviewResponsePayloadCore> {
   const {
     sessionId,
     config,
@@ -384,7 +697,7 @@ async function runStoredEngine(
     : extractScore(output.content)
   const cleanContent = stripInternalTags(output.content)
 
-  const payload: InterviewResponsePayload = {
+  const payload: InterviewResponsePayloadCore = {
     success: true,
     content: cleanContent,
     audioBase64: output.audioBase64,

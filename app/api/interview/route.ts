@@ -62,9 +62,6 @@ function stripScoreTag(content: string): string {
     .replace(/<score>[\s\S]*?<\/score>/g, '')
     .replace(/<score>[\s\S]*$/g, '')
     .replace(/<\/score>/g, '')
-    .replace(/<conduct>[\s\S]*?<\/conduct>/gi, '')
-    .replace(/<conduct>[\s\S]*$/gi, '')
-    .replace(/<\/conduct>/gi, '')
     .trim()
 }
 
@@ -91,11 +88,10 @@ function validateConfig(config: unknown): config is InterviewConfig {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
-    const { config, messages, sessionId, controlAction } = body as {
-      config:         unknown
-      messages:       Message[]
-      sessionId:      string
-      controlAction?: 'resume'
+    const { config, messages, sessionId } = body as {
+      config:    unknown
+      messages:  Message[]
+      sessionId: string
     }
 
     if (!validateConfig(config)) {
@@ -108,13 +104,6 @@ export async function POST(req: NextRequest) {
     if (!sessionId || typeof sessionId !== 'string') {
       return NextResponse.json(
         { success: false, error: 'Missing sessionId' },
-        { status: 400 }
-      )
-    }
-
-    if (controlAction !== undefined && controlAction !== 'resume') {
-      return NextResponse.json(
-        { success: false, error: 'Invalid controlAction' },
         { status: 400 }
       )
     }
@@ -144,7 +133,6 @@ export async function POST(req: NextRequest) {
       previousSnapshot: store.previousSnapshot,
       sessionStartTime: store.sessionStartTime,
       now,
-      controlAction,
     })
 
     store.state         = { ...store.state, ...output.statePatch }
@@ -173,16 +161,10 @@ export async function POST(req: NextRequest) {
         coveredAreas:    output.coveredAreas,
         activeRoleId:    output.activeRoleId ?? null,
         activeRoleTitle: output.activeRoleTitle ?? null,
-        sessionPaused:   output.sessionPaused,
-        pauseReason:     output.pauseReason,
-        conductAction:   output.conductAction,
-        excludeLastUserMessage: output.excludeLastUserMessage,
         _debug: process.env.NODE_ENV === 'development' ? {
           promptCharCount: output.promptCharCount,
           truncated:       output.truncated,
           phase:           store.state.phase,
-          sessionPaused:   store.state.sessionPaused ?? false,
-          pauseReason:     store.state.pauseReason ?? null,
         } : undefined,
       }),
       {

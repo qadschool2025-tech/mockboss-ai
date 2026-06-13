@@ -261,6 +261,12 @@ function InterviewRoom() {
   // report so the farewell and report use the same covered criteria.
   const coveredAreasRef = useRef<EssentialAxis[]>([])
 
+  // ENCRYPTED SESSION CONTINUITY
+  // The server remains authoritative. The browser only carries the opaque token
+  // between requests so a Vercel instance change cannot erase pause/resume state.
+  const sessionTokenRef = useRef<string | null>(null)
+  const sessionTokenStorageKey = `barbaros_interview_session:${CONFIG.sessionId}`
+
   // INTERVIEW CALL RESILIENCE
   // Holds the exact messages of the last /api/interview attempt so Retry can
   // re-send them without asking the candidate to re-type or re-record.
@@ -281,6 +287,14 @@ function InterviewRoom() {
   useEffect(() => { isSpeakingRef.current     = isSpeaking     }, [isSpeaking])
 
   useEffect(() => { setMounted(true) }, [])
+
+  useEffect(() => {
+    try {
+      sessionTokenRef.current = sessionStorage.getItem(sessionTokenStorageKey)
+    } catch {
+      sessionTokenRef.current = null
+    }
+  }, [sessionTokenStorageKey])
 
   // CLOSING FLOW FIX
   // Cleanup audio and timers on unmount.
@@ -806,6 +820,7 @@ function InterviewRoom() {
         sessionId: CONFIG.sessionId,
         config: CONFIG,
         messages: msgs,
+        sessionToken: sessionTokenRef.current,
         ...(controlAction ? { controlAction } : {}),
       }),
     })
@@ -824,6 +839,18 @@ function InterviewRoom() {
       error.code = typeof data?.code === 'string' ? data.code : undefined
       error.status = res.status
       throw error
+    }
+
+    if (typeof data.sessionToken === 'string' && data.sessionToken.length > 0) {
+      sessionTokenRef.current = data.sessionToken
+      try {
+        sessionStorage.setItem(sessionTokenStorageKey, data.sessionToken)
+      } catch {}
+    } else if (data.sessionToken === null) {
+      sessionTokenRef.current = null
+      try {
+        sessionStorage.removeItem(sessionTokenStorageKey)
+      } catch {}
     }
 
     return data
@@ -976,6 +1003,14 @@ function InterviewRoom() {
     } catch (err) {
       console.error('[interview] call failed after silent retry:', err)
       const typedError = err as Error & { code?: string }
+
+      if (typedError.code === 'SESSION_NOT_FOUND') {
+        sessionTokenRef.current = null
+        try {
+          sessionStorage.removeItem(sessionTokenStorageKey)
+        } catch {}
+      }
+
       setCallError(typedError.code === 'SESSION_NOT_FOUND' ? L.sessionMissing : L.connIssueBody)
     } finally {
       isSubmittingRef.current = false

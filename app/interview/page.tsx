@@ -1,2532 +1,1596 @@
-// app/report/page.tsx
 'use client'
 
-import { useState, useEffect, Suspense } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useState, useEffect, useRef, useCallback } from 'react'
 
-interface Competency {
-  name: string
-  score: number
-  why: string
+interface VoiceAnalysis {
+  wordsPerMinute: number
+  duration: number
+  wordCount: number
+  confidence: 'high' | 'medium' | 'low'
+  hesitation: 'high' | 'medium' | 'low'
 }
 
-interface ReplayItem {
-  question: string
-  answer: string
-  score: number
-  analysis: string
-  weakened: string
-  stronger: string
-  countsTowardPath?: boolean
+interface Message {
+  role: 'user' | 'assistant'
+  content: string
+  timestamp: number
+  score?: any
+  voiceAnalysis?: VoiceAnalysis
+  isQuestion?: boolean
+  assessmentEligible?: boolean
+  clientMessageId?: string
 }
 
-interface AssessmentCoverage {
-  title: string
-  summary: string
-  coveredAreaKeys?: string[]
-  coveredAreas: string[]
-  recommendedForDeeperAssessment: string[]
-  upgradeNote: string
+type ControlAction = 'resume'
+
+function createClientMessageId(prefix: 'user' | 'assistant'): string {
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
 }
 
-interface Report {
-  finalScore: number
-  readinessLevel: string
-  hireProbability?: number
-  verdict: string
-  barbarosAssessment: string
-  assessmentCoverage?: AssessmentCoverage
-  competencies: Competency[]
-  hiddenWeakness: string
-  behavioralPatterns: string
-  replay: ReplayItem[]
-  recommendation: string
-  interviewIncomplete?: boolean
-}
+type EssentialAxis =
+  | 'role_fit'
+  | 'cv_consistency'
+  | 'job_requirement_match'
+  | 'domain_expertise'
+  | 'communication_clarity'
+  | 'ownership_level'
 
-interface Stored {
-  report: Report
-  candidateName: string
-  jobTitle: string
-  institution: string
-  sector: string
-  yearsExperience: string
-  language: string
-  plan: string
-  reportDate: string
-  reportReference: string
-}
+const ESSENTIAL_AXIS_ORDER: readonly EssentialAxis[] = [
+  'role_fit',
+  'cv_consistency',
+  'job_requirement_match',
+  'domain_expertise',
+  'communication_clarity',
+  'ownership_level',
+] as const
 
-type Lang = 'en' | 'ar'
+function normalizeCoveredAreas(value: unknown): EssentialAxis[] {
+  if (!Array.isArray(value)) return []
 
-/* ---------- Brand + design tokens ---------- */
+  const allowed = new Set<EssentialAxis>(ESSENTIAL_AXIS_ORDER)
+  const found = new Set<EssentialAxis>()
 
-const SERIF = 'Georgia, "Times New Roman", "Noto Serif", serif'
-
-const Barbaros = ({ size = 22 }: { size?: number }) => (
-  <span style={{ fontWeight: 900, fontSize: size, letterSpacing: 0.2 }}>
-    <span style={{ color: '#1A1A1A' }}>Barbar</span>
-    <span style={{ color: '#CC785C' }}>os</span>
-  </span>
-)
-
-// Premium, brand-aligned palette (no traffic-light colors).
-const scoreColor = (s: number) =>
-  s >= 75 ? '#3F6B5E' : s >= 50 ? '#CC785C' : s >= 25 ? '#B07A2E' : '#A14234'
-
-/* ---------- Arabic label guards ---------- */
-
-const AR_READINESS_LEVELS: Record<string, string> = {
-  'Strong Readiness': 'جاهزية قوية',
-  'Moderate Readiness': 'جاهزية متوسطة',
-  'Developing Readiness': 'جاهزية قيد التطوير',
-  'Limited Readiness': 'جاهزية محدودة',
-  'Interview Incomplete': 'المقابلة غير مكتملة',
-
-  // Legacy labels remain readable for previously generated reports.
-  'Strong Hire': 'جاهز بقوة',
-  'Maybe Hire': 'قابل للتوصية بحذر',
-  'Risky Candidate': 'مخاطرة عالية',
-  'Not Recommended': 'غير جاهز حالياً',
-}
-
-const AR_COMPETENCY_NAMES: Record<string, string> = {
-  'Communication':    'التواصل المهني',
-  'Confidence':       'الحضور والاتزان',
-  'Domain Expertise': 'التمكّن المهني في المجال',
-  'Structure':        'بنية الطرح',
-  'Problem Solving':  'حل المشكلات',
-  'Clarity':          'وضوح الإجابة',
-}
-
-function displayReadinessLevel(level: string, isAr: boolean) {
-  if (!isAr) return level
-  return AR_READINESS_LEVELS[level] ?? level
-}
-
-function displayCompetencyName(name: string, isAr: boolean) {
-  if (!isAr) return name
-  return AR_COMPETENCY_NAMES[name] ?? name
-}
-
-// Format an ISO timestamp into a clean, localized report date.
-// Returns '' for missing/invalid input so the cover can hide it gracefully.
-function formatReportDate(iso: string, isAr: boolean): string {
-  if (!iso) return ''
-  const d = new Date(iso)
-  if (isNaN(d.getTime())) return ''
-  try {
-    return d.toLocaleDateString(isAr ? 'ar' : 'en-US', {
-      day: 'numeric',
-      month: 'long',
-      year: 'numeric',
-    })
-  } catch {
-    return ''
+  for (const item of value) {
+    if (typeof item === 'string' && allowed.has(item as EssentialAxis)) {
+      found.add(item as EssentialAxis)
+    }
   }
+
+  return ESSENTIAL_AXIS_ORDER.filter(axis => found.has(axis))
 }
 
-// Subtle tint from a 6-digit hex, returned as rgba() for full support.
-const tint = (hex: string, alpha = 0.07) => {
-  const h = hex.replace('#', '')
-  const r = parseInt(h.slice(0, 2), 16)
-  const g = parseInt(h.slice(2, 4), 16)
-  const b = parseInt(h.slice(4, 6), 16)
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`
-}
+// CLOSING WINDOW
+// The final assessment question must be asked before the timer reaches zero.
+// After the candidate answers that final question, the room shows the farewell
+// and then moves to report generation. The page must not cut the candidate off.
+const FINAL_QUESTION_WINDOW_SECONDS = 180
+const CLOSING_REQUEST_SECONDS = 90
+const CLOSING_FORCE_SECONDS = 0
 
-// Small uppercase labels: in Arabic, drop letter-spacing/uppercase so the
-// connected (cursive) letters are not broken apart.
-function labelType(isAr: boolean): React.CSSProperties {
+// INTERVIEW CALL RESILIENCE
+// One automatic silent retry before any error surfaces to the candidate.
+const SILENT_RETRY_DELAY_MS = 800
+
+function buildConfig() {
+  let raw: any = {}
+  if (typeof window !== 'undefined') {
+    try {
+      const stored = sessionStorage.getItem('barbaros_config')
+      if (stored) raw = JSON.parse(stored)
+    } catch {}
+  }
+
+  const parsedCv =
+    raw.parsedCv && typeof raw.parsedCv === 'object'
+      ? raw.parsedCv
+      : undefined
+
+  const hasCv = Boolean(
+    raw.hasCv ||
+    raw.cvFileName ||
+    raw.cvText ||
+    raw.cvSummary ||
+    parsedCv
+  )
+
   return {
-    letterSpacing: isAr ? 0 : 0.5,
-    textTransform: isAr ? 'none' : 'uppercase',
+    sessionId:       raw.sessionId       ?? `session_${Date.now()}`,
+    candidateName:   raw.candidateName   ?? 'Candidate',
+    jobTitle:        raw.jobTitle         ?? 'Professional',
+    institution:     raw.institution      ?? 'Organisation',
+    sector:          raw.sector           ?? 'General',
+    yearsExperience: raw.yearsExperience  ?? '3 years',
+    language:        raw.language         ?? 'en',
+    plan:            raw.plan             ?? 'go',
+    jobRequirements: raw.jobRequirements  ?? '',
+    hasCv,
+    cvFileName:      raw.cvFileName       ?? '',
+    cvMimeType:      raw.cvMimeType       ?? '',
+    cvText:          typeof raw.cvText === 'string' ? raw.cvText : '',
+    cvSummary:       typeof raw.cvSummary === 'string' ? raw.cvSummary : '',
+    parsedCv,
+    difficulty:      'standard',
   }
 }
 
-function verdictStyle(level: string) {
-  const l = level.toLowerCase()
+function scoreLabel(s: number): { text: string; color: string } {
+  if (s >= 80) return { text: 'Strong',        color: '#22C55E' }
+  if (s >= 65) return { text: 'Good',          color: '#86EFAC' }
+  if (s >= 50) return { text: 'Fair',          color: '#F59E0B' }
+  return            { text: 'Needs clarity', color: '#F87171' }
+}
 
-  if (
-    l.includes('strong readiness') ||
-    l.includes('strong hire') ||
-    level.includes('جاهزية قوية') ||
-    level.includes('جاهز بقوة')
-  ) {
-    return { color: '#2E5248', bg: '#E9EFEB', border: '#C6D8CE' }
+function isQuestionLike(content: string): boolean {
+  const clean = content.trim()
+  if (!clean) return false
+  return clean.endsWith('?') || clean.endsWith('؟')
+}
+
+// Bilingual micro-copy. Arabic only when the candidate chose Arabic.
+function t(lang: string) {
+  const ar = lang === 'ar'
+
+  return {
+    sessionActive:   ar ? 'جلسة تقييم جارية'          : 'Interview Session Active',
+    ready:           ar ? 'جاهز'                       : 'Ready',
+    readySub:        ar ? 'اضغط الميكروفون للإجابة'    : 'Press the microphone to respond',
+    listening:       ar ? 'يستمع'                      : 'Listening',
+    listeningSub:    ar ? 'يستمع إلى إجابتك...'         : 'Listening to your response...',
+    evaluating:      ar ? 'يقيّم'                       : 'Evaluating',
+    evaluatingSub:   ar ? 'يقيّم إجابتك...'             : 'Evaluating your answer...',
+    speaking:        ar ? 'يتحدّث'                      : 'Speaking',
+    speakingSub:     ar ? 'يطرح السؤال التالي...'       : 'Asking the next question...',
+    paused:          ar ? 'المقابلة متوقّفة مؤقتاً'      : 'Interview Paused',
+    pausedSub:       ar ? 'توقّفت بسبب عدم النشاط. اضغط الميكروفون للمتابعة.' : 'Interview paused due to inactivity. Press the microphone to continue.',
+    conductPausedSub: ar ? 'يمكنك استئناف المقابلة عندما تكون مستعداً للمتابعة بأسلوب مهني.' : 'Resume when you are ready to continue professionally.',
+    resume:          ar ? 'استئناف المقابلة'             : 'Resume Interview',
+    sessionMissing:  ar ? 'تعذّر استئناف هذه الجلسة لأنها لم تعد متاحة. ابدأ مقابلة جديدة.' : 'This session is no longer available. Start a new interview.',
+    focusLabel:      ar ? 'محور التقييم الحالي'          : 'Current Assessment Focus',
+    begin:           ar ? 'ابدأ المقابلة'              : 'Begin Interview',
+    readyTitle:      ar ? 'الجلسة جاهزة'                : 'Interview Session Ready',
+    transcript:      ar ? 'النصّ'                        : 'Transcript',
+    transcriptTitle: ar ? 'نصّ المقابلة'               : 'Interview Transcript',
+    end:             ar ? 'إنهاء'                       : 'End',
+    close:           ar ? 'إغلاق'                       : 'Close',
+    audioOn:         ar ? 'الصوت مفعّل'                 : 'Audio On',
+    audioMuted:      ar ? 'الصوت مكتوم'                 : 'Muted',
+    micFail:         ar ? 'تعذّر استخدام الميكروفون؟ اكتب إجابتك' : "Can't use microphone? Type your response",
+    typeHere:        ar ? 'اكتب إجابتك هنا...'           : 'Type your response here...',
+    send:            ar ? 'إرسال'                       : 'Send',
+    endTitle:        ar ? 'إنهاء المقابلة مبكراً؟'       : 'End Interview Early?',
+    endBody:         ar ? 'سيُنشأ تقرير التقييم فوراً بناءً على المقابلة المكتملة حتى الآن.' : 'Your assessment report will be generated immediately based on the interview completed so far.',
+    continueBtn:     ar ? 'متابعة المقابلة'            : 'Continue Interview',
+    endGenerate:     ar ? 'إنهاء وإنشاء التقرير'         : 'End & Generate Report',
+    complete:        ar ? 'اكتملت المقابلة'             : 'Interview Complete',
+    generating:      ar ? 'جارٍ إنشاء تقرير التقييم...'  : 'Generating Assessment Report...',
+
+    // CLOSING FLOW FIX
+    // Shown during the short farewell screen before report generation.
+    closing:         ar ? 'ينهي المقابلة'               : 'Closing',
+    closingSub:      ar ? 'رسالة ختامية قبل التقرير...' : 'Final closing message before your report...',
+
+    retry:           ar ? 'إعادة المحاولة'              : 'Retry',
+    newInterview:    ar ? 'مقابلة جديدة'                : 'Start New Interview',
+
+    // INTERVIEW CALL RESILIENCE
+    // Shown only after one silent automatic retry has already failed.
+    connIssueTitle:  ar ? 'تعذّر الوصول إلى المُقيّم'    : 'Could not reach the interviewer',
+    connIssueBody:   ar ? 'حدث انقطاع مؤقت. إجابتك محفوظة. أعد المحاولة للمتابعة.' : 'A temporary connection issue occurred. Your answer is saved. Retry to continue.',
   }
-
-  if (l.includes('moderate readiness') || level.includes('جاهزية متوسطة')) {
-    return { color: '#5A463E', bg: '#F1E8DF', border: '#D9C7B8' }
-  }
-
-  if (
-    l.includes('developing readiness') ||
-    l.includes('maybe hire') ||
-    level.includes('قيد التطوير') ||
-    level.includes('قابل')
-  ) {
-    return { color: '#8A4A2E', bg: '#F6EAE1', border: '#E7CBBA' }
-  }
-
-  return { color: '#7A2E24', bg: '#F3E3DE', border: '#DFC1B8' }
 }
 
-/* ---------- Score ring (SVG, rounded cap) ---------- */
-
-function ScoreRing({ score }: { score: number }) {
-  const r = 58
-  const c = 2 * Math.PI * r
-  const offset = c * (1 - Math.max(0, Math.min(100, score)) / 100)
-  const color = scoreColor(score)
-
-  return (
-    <div style={{ position: 'relative', width: 130, height: 130, margin: '0 auto 16px' }}>
-      <svg
-        width="130"
-        height="130"
-        viewBox="0 0 130 130"
-        style={{ transform: 'rotate(-90deg)' }}
-      >
-        <circle cx="65" cy="65" r={r} fill="none" stroke="#E5DDD0" strokeWidth="9" />
-        <circle
-          cx="65"
-          cy="65"
-          r={r}
-          fill="none"
-          stroke={color}
-          strokeWidth="9"
-          strokeLinecap="round"
-          strokeDasharray={c}
-          strokeDashoffset={offset}
-        />
-      </svg>
-
-      <div
-        style={{
-          position: 'absolute',
-          inset: 0,
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-      >
-        <div style={{ fontFamily: SERIF, fontSize: 36, fontWeight: 700, color, lineHeight: 1 }}>
-          {score}
-        </div>
-        <div style={{ fontSize: 11, color: 'rgba(26,26,26,0.35)' }}>/100</div>
-      </div>
-    </div>
-  )
-}
-
-/* ---------- Section: every section carries the Barbaros wordmark ---------- */
-
-const Section = ({
-  children,
-  style,
-  lang = 'en',
-  className,
-}: {
-  children: React.ReactNode
-  style?: React.CSSProperties
-  lang?: Lang
-  className?: string
-}) => (
-  <div
-    className={className ? `section-card ${className}` : 'section-card'}
-    style={{
-      background: '#FFFFFF',
-      border: '1px solid #E5DDD0',
-      borderRadius: 20,
-      padding: '22px',
-      marginBottom: 16,
-      boxShadow: '0 2px 12px rgba(26,26,26,0.05)',
-      ...style,
-    }}
-  >
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 8,
-        marginBottom: 16,
-        paddingBottom: 12,
-        borderBottom: '0.5px solid rgba(26,26,26,0.08)',
-      }}
-    >
-      <Barbaros size={12} />
-      <span
-        style={{
-          fontSize: 8.5,
-          fontWeight: 700,
-          letterSpacing: lang === 'ar' ? 0 : 1.4,
-          textTransform: lang === 'ar' ? 'none' : 'uppercase',
-          color: 'rgba(26,26,26,0.30)',
-        }}
-      >
-        {lang === 'ar' ? 'ذكاء المقابلات' : 'Interview Intelligence'}
-      </span>
-    </div>
-
-    {children}
-  </div>
-)
-
-const SectionTitle = ({
-  children,
-  color = '#1A1A1A',
-}: {
-  children: React.ReactNode
-  color?: string
-}) => (
-  <div
-    style={{
-      fontFamily: SERIF,
-      fontSize: 16,
-      fontWeight: 700,
-      marginBottom: 16,
-      color,
-      letterSpacing: 0.2,
-    }}
-  >
-    {children}
-  </div>
-)
-
-function hasCoverage(coverage?: AssessmentCoverage): coverage is AssessmentCoverage {
-  if (!coverage) return false
-
-  return Boolean(
-    coverage.summary ||
-      coverage.upgradeNote ||
-      (Array.isArray(coverage.coveredAreas) && coverage.coveredAreas.length > 0) ||
-      (
-        Array.isArray(coverage.recommendedForDeeperAssessment) &&
-        coverage.recommendedForDeeperAssessment.length > 0
-      )
-  )
-}
-
-/* ---------- Performance path across interview questions ---------- */
-/* Frontend-only: derived from replay[].score order. No timestamps exist. */
-
-function PerformancePath({ replay, isAr }: { replay: ReplayItem[]; isAr: boolean }) {
-  const pathItems = replay
-    .map((item, originalIndex) => ({ ...item, originalIndex }))
-    .filter(item => item.countsTowardPath !== false)
-    .filter(item => typeof item.score === 'number' && !Number.isNaN(item.score))
-
-  if (pathItems.length < 2) return null
-
-  const scores = pathItems.map(item => item.score)
-  const n = scores.length
-  const max = Math.max(...scores)
-  const min = Math.min(...scores)
-  const avg = Math.round(scores.reduce((a, b) => a + b, 0) / n)
-  const peakIdx = scores.indexOf(max)
-  const lowIdx = scores.indexOf(min)
-  const range = max - min
-
-  const deltas = scores.slice(1).map((score, index) => score - scores[index])
-  const meaningfulDirections = deltas
-    .map(delta => (Math.abs(delta) < 5 ? 0 : Math.sign(delta)))
-    .filter(direction => direction !== 0)
-
-  let directionChanges = 0
-  for (let i = 1; i < meaningfulDirections.length; i++) {
-    if (meaningfulDirections[i] !== meaningfulDirections[i - 1]) {
-      directionChanges++
-    }
-  }
-
-  const biggestDrop = Math.min(0, ...deltas)
-  const biggestRise = Math.max(0, ...deltas)
-  const xMean = (n - 1) / 2
-  const yMean = scores.reduce((sum, score) => sum + score, 0) / n
-  const slopeDenominator = scores.reduce(
-    (sum, _score, index) => sum + (index - xMean) ** 2,
-    0
-  )
-  const slope =
-    slopeDenominator === 0
-      ? 0
-      : scores.reduce(
-          (sum, score, index) =>
-            sum + (index - xMean) * (score - yMean),
-          0
-        ) / slopeDenominator
-
-  const volatile =
-    range >= 25 &&
-    (directionChanges >= 1 || biggestDrop <= -20 || biggestRise >= 20)
-  const lastDelta = deltas[deltas.length - 1] ?? 0
-  const trend: 'volatile' | 'up' | 'down' | 'stable' = volatile
-    ? 'volatile'
-    : slope >= 3
-      ? 'up'
-      : slope <= -3
-        ? 'down'
-        : 'stable'
-
-  const trendLabel = isAr
-    ? trend === 'volatile'
-      ? lastDelta <= -15
-        ? 'الاتجاه العام: أداء متذبذب، تحسن في بعض مراحل المقابلة ثم انخفض بوضوح في الإجابة الأخيرة'
-        : 'الاتجاه العام: أداء متذبذب بين إجابات المقابلة'
-      : trend === 'up'
-        ? 'الاتجاه العام: تحسن الأداء مع تقدم المقابلة'
-        : trend === 'down'
-          ? 'الاتجاه العام: تراجع الأداء مع تقدم المقابلة'
-          : 'الاتجاه العام: أداء متقارب عبر المقابلة دون تغير حاد'
-    : trend === 'volatile'
-      ? lastDelta <= -15
-        ? 'Overall trend: performance fluctuated, improved in parts of the interview, then dropped clearly in the final answer'
-        : 'Overall trend: performance fluctuated across the interview answers'
-      : trend === 'up'
-        ? 'Overall trend: performance improved as the interview progressed'
-        : trend === 'down'
-          ? 'Overall trend: performance declined as the interview progressed'
-          : 'Overall trend: performance remained broadly consistent without sharp changes'
-
-  const trendColor =
-    trend === 'up' ? '#3F6B5E' : trend === 'down' ? '#A14234' : '#86591D'
-
-  // SVG geometry
-  const W = 640
-  const H = 200
-  const padX = 36
-  const padTop = 26
-  const padBottom = 40
-  const innerW = W - padX * 2
-  const innerH = H - padTop - padBottom
-
-  const x = (i: number) => padX + (n === 1 ? innerW / 2 : (innerW * i) / (n - 1))
-  const y = (v: number) => padTop + innerH * (1 - Math.max(0, Math.min(100, v)) / 100)
-
-  const points = scores.map((v, i) => `${x(i)},${y(v)}`).join(' ')
-  const areaPoints = `${x(0)},${padTop + innerH} ${points} ${x(n - 1)},${padTop + innerH}`
-
-  const questionLabel = (pathIndex: number) => {
-    const originalNumber = pathItems[pathIndex].originalIndex + 1
-    return isAr ? `س${originalNumber}` : `Q${originalNumber}`
-  }
-
-  const statBox = (label: string, value: string, color: string) => (
-    <div
-      key={label}
-      style={{
-        background: tint(color, 0.07),
-        border: `0.5px solid ${color}40`,
-        borderRadius: 12,
-        padding: '10px 12px',
-        textAlign: 'center',
-      }}
-    >
-      <div style={{ fontSize: 10, fontWeight: 800, color: 'rgba(26,26,26,0.45)', marginBottom: 4, ...labelType(isAr) }}>
-        {label}
-      </div>
-      <div style={{ fontSize: 15, fontWeight: 900, color }}>{value}</div>
-    </div>
-  )
-
-  return (
-    <div>
-      <svg
-        viewBox={`0 0 ${W} ${H}`}
-        style={{ width: '100%', height: 'auto', display: 'block' }}
-        role="img"
-        aria-label={isAr ? 'مسار الأداء عبر أسئلة المقابلة' : 'Performance path across interview questions'}
-      >
-        {[0, 25, 50, 75, 100].map(g => (
-          <g key={g}>
-            <line
-              x1={padX}
-              x2={W - padX}
-              y1={y(g)}
-              y2={y(g)}
-              stroke="#E5DDD0"
-              strokeWidth={g === 0 ? 1 : 0.5}
-              strokeDasharray={g === 0 ? undefined : '3 4'}
-            />
-            <text
-              x={padX - 8}
-              y={y(g) + 3.5}
-              textAnchor="end"
-              fontSize="9"
-              fill="rgba(26,26,26,0.35)"
-            >
-              {g}
-            </text>
-          </g>
-        ))}
-
-        <polygon points={areaPoints} fill="rgba(204,120,92,0.08)" />
-        <polyline
-          points={points}
-          fill="none"
-          stroke="#CC785C"
-          strokeWidth="2.5"
-          strokeLinejoin="round"
-          strokeLinecap="round"
-        />
-
-        {scores.map((v, i) => {
-          const isPeak = i === peakIdx
-          const isLow = i === lowIdx
-          const c = isPeak ? '#3F6B5E' : isLow ? '#A14234' : '#CC785C'
-          return (
-            <g key={i}>
-              <circle cx={x(i)} cy={y(v)} r={isPeak || isLow ? 5.5 : 3.5} fill={c} stroke="#FFFFFF" strokeWidth="1.5" />
-              <text
-                x={x(i)}
-                y={H - padBottom + 16}
-                textAnchor="middle"
-                fontSize="9.5"
-                fill="rgba(26,26,26,0.45)"
-              >
-                {questionLabel(i)}
-              </text>
-              {(isPeak || isLow) && (
-                <text
-                  x={x(i)}
-                  y={y(v) - 10}
-                  textAnchor="middle"
-                  fontSize="10"
-                  fontWeight="800"
-                  fill={c}
-                >
-                  {v}
-                </text>
-              )}
-            </g>
-          )
-        })}
-      </svg>
-
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(3, 1fr)',
-          gap: 8,
-          marginTop: 14,
-          marginBottom: 12,
-        }}
-      >
-        {statBox(
-          isAr ? 'أعلى نقطة أداء' : 'Peak performance',
-          `${max} · ${questionLabel(peakIdx)}`,
-          '#3F6B5E'
-        )}
-        {statBox(
-          isAr ? 'أدنى نقطة أداء' : 'Lowest point',
-          `${min} · ${questionLabel(lowIdx)}`,
-          '#A14234'
-        )}
-        {statBox(isAr ? 'متوسط الأداء' : 'Average', `${avg}`, '#CC785C')}
-      </div>
-
-      <div
-        style={{
-          fontSize: 12,
-          fontWeight: 700,
-          color: trendColor,
-          background: tint(trendColor, 0.07),
-          border: `0.5px solid ${trendColor}33`,
-          borderRadius: 10,
-          padding: '9px 12px',
-        }}
-      >
-        {trendLabel}
-      </div>
-    </div>
-  )
-}
-
-/* ---------- Executive glance helpers (derive-only, no invented values) ---------- */
-
-// First complete sentence, word-safe capped at ~140 chars.
-function firstSentence(text: string | undefined): string {
-  const t = typeof text === 'string' ? text.trim() : ''
-  if (!t) return ''
-
-  const m = t.match(/^[^.!?؟۔]+[.!?؟۔]?/)
-  let out = (m ? m[0] : t).trim()
-
-  if (out.length > 140) {
-    out = out.slice(0, 140)
-    const cut = out.lastIndexOf(' ')
-    if (cut > 80) out = out.slice(0, cut)
-    out = out.trimEnd() + '…'
-  }
-
-  return out
-}
-
-function topCompetency(list: Competency[] | undefined): Competency | null {
-  if (!Array.isArray(list) || list.length === 0) return null
-  return list.reduce((best, c) =>
-    typeof c.score === 'number' && c.score > best.score ? c : best
-  , list[0])
-}
-
-/* ---------- Premium cover helpers ---------- */
-
-function safeText(value: string | undefined, fallback: string) {
-  const v = typeof value === 'string' ? value.trim() : ''
-  return v || fallback
-}
-
-function formatYearsExperience(value: string, isAr: boolean): string {
-  const clean = typeof value === 'string' ? value.trim() : ''
-  if (!clean) return ''
-
-  const normalized = clean.toLowerCase().replace(/\s+/g, ' ')
-  const match = normalized.match(
-    /^(?:years?\s*)?\+?\s*(\d+)\s*\+?(?:\s*years?)?$/
-  )
-
-  if (match && clean.includes('+')) {
-    const years = Number(match[1])
-    return isAr ? `أكثر من ${years} سنوات` : `More than ${years} years`
-  }
-
-  return clean
-}
-
-function displayPlanName(plan: string) {
-  const key = (plan || '').toLowerCase()
-  if (key.includes('expert')) return 'Expert Interview'
-  if (key.includes('executive')) return 'Executive Interview'
-  if (key.includes('professional') || key.includes('pro')) return 'Professional Interview'
-  if (key.includes('essential') || key.includes('basic') || key.includes('free')) return 'Essential Interview'
-  if (key.includes('go')) return 'Go Interview'
-  return 'Barbaros Interview'
-}
-
-/* Plan tier resolution (client-safe mirror of the server resolver in
-   lib/barbaros/report/generate-report-data.ts — kept local because that
-   module instantiates the Anthropic client and is server-only). */
-type PlanTier = 'go' | 'pro' | 'expert'
-
-function resolvePlanTier(plan: string): PlanTier {
-  const key = (plan || '').toLowerCase()
-  if (key.includes('expert') || key.includes('executive')) return 'expert'
-  if (key.includes('professional') || key.includes('pro')) return 'pro'
-  return 'go'
-}
-
-function shortReference(value: string | undefined) {
-  if (!value) return ''
-  return value.replace(/-/g, '').slice(0, 10).toUpperCase()
-}
-
-const MetaItem = ({
-  label,
-  value,
-  isAr,
-}: {
-  label: string
-  value: React.ReactNode
-  isAr: boolean
-}) => (
-  <div
-    style={{
-      background: 'rgba(255,255,255,0.72)',
-      border: '0.5px solid rgba(229,221,208,0.9)',
-      borderRadius: 14,
-      padding: '12px 14px',
-      minHeight: 64,
-    }}
-  >
-    <div
-      style={{
-        fontSize: 10,
-        fontWeight: 800,
-        color: 'rgba(26,26,26,0.42)',
-        marginBottom: 6,
-        ...labelType(isAr),
-      }}
-    >
-      {label}
-    </div>
-    <div style={{ fontSize: 13, fontWeight: 800, color: '#1A1A1A', lineHeight: 1.5 }}>
-      {value}
-    </div>
-  </div>
-)
-
-function ReportCover({
-  data,
-  isAr,
-  readinessLabel,
-  reportDate,
-  reference,
-  summaryLine,
-  assessment,
-}: {
-  data: Stored
-  isAr: boolean
-  readinessLabel: string
-  reportDate: string
-  reference: string
-  summaryLine: React.ReactNode
-  assessment: string
-}) {
-  const incomplete = data.report.interviewIncomplete === true
-
-  return (
-    <section
-      className="report-cover"
-      style={{
-        position: 'relative',
-        overflow: 'hidden',
-        background: 'linear-gradient(135deg, #FFFFFF 0%, #F8EFE7 52%, #F1E4D5 100%)',
-        border: '1px solid rgba(204,120,92,0.25)',
-        borderRadius: 26,
-        padding: '28px',
-        marginBottom: 18,
-        boxShadow: '0 12px 34px rgba(26,26,26,0.08)',
-      }}
-    >
-      <div
-        aria-hidden="true"
-        style={{
-          position: 'absolute',
-          width: 220,
-          height: 220,
-          borderRadius: '50%',
-          background: 'rgba(204,120,92,0.10)',
-          top: -86,
-          insetInlineEnd: -78,
-        }}
-      />
-
-      <div style={{ position: 'relative' }}>
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'flex-start',
-            gap: 16,
-            marginBottom: 24,
-          }}
-        >
-          <div>
-            <Barbaros size={26} />
-            <div
-              style={{
-                marginTop: 8,
-                fontSize: 10.5,
-                fontWeight: 800,
-                color: 'rgba(26,26,26,0.45)',
-                ...labelType(isAr),
-              }}
-            >
-              {incomplete
-                ? isAr
-                  ? 'سجل جلسة المقابلة'
-                  : 'Interview Session Record'
-                : isAr
-                  ? 'منهجية تقييم مقابلات قائمة على الكفاءات'
-                  : 'Competency-Based Interview Assessment'}
-            </div>
-          </div>
-
-          <div
-            style={{
-              background: '#1A1A1A',
-              color: '#FFFFFF',
-              borderRadius: 999,
-              padding: '8px 14px',
-              fontSize: 11,
-              fontWeight: 800,
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {displayPlanName(data.plan)}
-          </div>
-        </div>
-
-        <div
-          className="cover-title-grid"
-          style={{
-            display: 'grid',
-            gridTemplateColumns: '1.4fr 0.8fr',
-            gap: 18,
-            alignItems: 'end',
-            marginBottom: 22,
-          }}
-        >
-          <div>
-            <div
-              style={{
-                fontSize: 12,
-                fontWeight: 800,
-                color: '#CC785C',
-                marginBottom: 8,
-                ...labelType(isAr),
-              }}
-            >
-              {incomplete
-                ? isAr
-                  ? 'تقرير جلسة المقابلة'
-                  : 'Interview Session Report'
-                : isAr
-                  ? 'تقرير تقييم المقابلة'
-                  : 'Interview Assessment Report'}
-            </div>
-
-            <h1
-              style={{
-                fontFamily: SERIF,
-                fontSize: 34,
-                lineHeight: 1.12,
-                color: '#1A1A1A',
-                margin: 0,
-                letterSpacing: -0.4,
-              }}
-            >
-              {safeText(data.candidateName, isAr ? 'الاسم غير متاح' : 'Name not available')}
-            </h1>
-          </div>
-
-          <div
-            style={{
-              background: 'linear-gradient(135deg, #5A463E 0%, #3F322D 100%)',
-              borderRadius: 18,
-              padding: '16px 18px',
-              color: '#FFFFFF',
-              textAlign: isAr ? 'right' : 'left',
-            }}
-          >
-            <div style={{ fontSize: 10, color: '#D8C7BD', fontWeight: 800, marginBottom: 7, ...labelType(isAr) }}>
-              {incomplete
-                ? isAr
-                  ? 'حالة التقرير'
-                  : 'Report Status'
-                : isAr
-                  ? 'مؤشر جاهزية الجلسة'
-                  : 'Session Readiness'}
-            </div>
-            <div style={{ fontFamily: SERIF, fontSize: 18, fontWeight: 800, lineHeight: 1.35 }}>
-              {readinessLabel}
-            </div>
-          </div>
-        </div>
-
-        <div
-          className="cover-meta-grid"
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(3, 1fr)',
-            gap: 10,
-            marginBottom: 18,
-          }}
-        >
-          <MetaItem
-            isAr={isAr}
-            label={isAr ? 'المسمى المستهدف' : 'Target Role'}
-            value={safeText(data.jobTitle, isAr ? 'غير محدد' : 'Not provided')}
-          />
-          <MetaItem
-            isAr={isAr}
-            label={isAr ? 'الجهة أو القطاع' : 'Institution or Sector'}
-            value={safeText(data.institution || data.sector, isAr ? 'غير محدد' : 'Not provided')}
-          />
-          <MetaItem
-            isAr={isAr}
-            label={isAr ? 'سنوات الخبرة' : 'Years of Experience'}
-            value={safeText(
-              formatYearsExperience(data.yearsExperience, isAr),
-              isAr ? 'غير محدد' : 'Not provided'
-            )}
-          />
-          <MetaItem
-            isAr={isAr}
-            label={isAr ? 'تاريخ التقرير' : 'Report Date'}
-            value={reportDate || (isAr ? 'غير متاح' : 'Not available')}
-          />
-          <MetaItem
-            isAr={isAr}
-            label={isAr ? 'مرجع التقرير' : 'Report Reference'}
-            value={reference || (isAr ? 'غير متاح' : 'Not available')}
-          />
-          <MetaItem
-            isAr={isAr}
-            label={
-              incomplete
-                ? isAr
-                  ? 'حالة التقرير'
-                  : 'Report Status'
-                : isAr
-                  ? 'النتيجة الإجمالية'
-                  : 'Overall Score'
-            }
-            value={
-              incomplete
-                ? isAr
-                  ? 'المقابلة غير مكتملة'
-                  : 'Interview Incomplete'
-                : (
-                  <bdi dir="ltr">{data.report.finalScore} / 100</bdi>
-                )
-            }
-          />
-        </div>
-
-        <div
-          style={{
-            padding: '16px 18px',
-            background: 'rgba(255,255,255,0.78)',
-            border: '0.5px solid rgba(229,221,208,0.9)',
-            borderRadius: 14,
-          }}
-        >
-          <div
-            style={{
-              fontSize: 10,
-              fontWeight: 800,
-              color: '#CC785C',
-              marginBottom: 10,
-              ...labelType(isAr),
-            }}
-          >
-            {incomplete
-              ? isAr
-                ? 'ملخص الحالة'
-                : 'Status Summary'
-              : isAr
-                ? 'الخلاصة التقييمية'
-                : 'Executive Summary'}
-          </div>
-
-          <div
-            style={{
-              fontSize: 13,
-              color: '#1A1A1A',
-              lineHeight: 1.9,
-              marginBottom: assessment ? 12 : 0,
-            }}
-          >
-            {summaryLine}
-          </div>
-
-          {assessment && (
-            <div
-              style={{
-                fontSize: 12.5,
-                color: '#1A1A1A',
-                lineHeight: 1.9,
-                fontStyle: 'italic',
-                paddingTop: 12,
-                borderTop: '0.5px solid rgba(26,26,26,0.08)',
-              }}
-            >
-              "{assessment}"
-            </div>
-          )}
-        </div>
-
-        {(() => {
-          const r = data.report
-          const top = topCompetency(r.competencies)
-          const risk = firstSentence(r.hiddenWeakness)
-          const action = firstSentence(r.recommendation)
-
-          const GlanceCard = ({
-            label,
-            value,
-            sub,
-            accent,
-          }: {
-            label: string
-            value: React.ReactNode
-            sub?: string
-            accent: string
-          }) => (
-            <div
-              style={{
-                background: 'rgba(255,255,255,0.78)',
-                border: `0.5px solid ${accent}40`,
-                borderInlineStart: `3px solid ${accent}`,
-                borderRadius: 14,
-                padding: '12px 14px',
-              }}
-            >
-              <div
-                style={{
-                  fontSize: 10,
-                  fontWeight: 800,
-                  color: accent,
-                  marginBottom: 6,
-                  ...labelType(isAr),
-                }}
-              >
-                {label}
-              </div>
-              <div style={{ fontSize: 13, fontWeight: 800, color: '#1A1A1A', lineHeight: 1.55 }}>
-                {value}
-              </div>
-              {sub && (
-                <div style={{ fontSize: 11.5, color: 'rgba(26,26,26,0.55)', lineHeight: 1.6, marginTop: 3 }}>
-                  {sub}
-                </div>
-              )}
-            </div>
-          )
-
-          return (
-            <div style={{ marginTop: 18 }}>
-              <div
-                style={{
-                  fontSize: 10,
-                  fontWeight: 800,
-                  color: 'rgba(26,26,26,0.42)',
-                  marginBottom: 10,
-                  ...labelType(isAr),
-                }}
-              >
-                {incomplete
-                  ? isAr
-                    ? 'لمحة عن حالة التقرير'
-                    : 'Report Status at a Glance'
-                  : isAr
-                    ? 'لمحة تنفيذية سريعة'
-                    : 'Executive Glance'}
-              </div>
-
-              <div
-                className="cover-glance-grid"
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(2, 1fr)',
-                  gap: 10,
-                }}
-              >
-                <GlanceCard
-                  accent="#5A463E"
-                  label={
-                    incomplete
-                      ? isAr
-                        ? 'حالة التقرير'
-                        : 'Report Status'
-                      : isAr
-                        ? 'الجاهزية في هذه الجلسة'
-                        : 'Session Readiness'
-                  }
-                  value={
-                    incomplete
-                      ? readinessLabel
-                      : (
-                          <>
-                            {readinessLabel} · <bdi dir="ltr">{r.finalScore} / 100</bdi>
-                          </>
-                        )
-                  }
-                />
-
-                {!incomplete && top && (
-                  <GlanceCard
-                    accent="#3F6B5E"
-                    label={isAr ? 'أقوى ميزة في أدائك' : 'Your Strongest Asset'}
-                    value={
-                      <>
-                        {isAr ? AR_COMPETENCY_NAMES[top.name] ?? top.name : top.name}
-                        {' · '}
-                        <bdi dir="ltr">{top.score} / 100</bdi>
-                      </>
-                    }
-                  />
-                )}
-
-                {!incomplete && risk && (
-                  <GlanceCard
-                    accent="#A14234"
-                    label={isAr ? 'أولوية التحسين الأساسية' : 'Primary Improvement Priority'}
-                    value={risk}
-                  />
-                )}
-
-                {action && (
-                  <GlanceCard
-                    accent="#CC785C"
-                    label={
-                      incomplete
-                        ? isAr
-                          ? 'الخطوة التالية'
-                          : 'Next Step'
-                        : isAr
-                          ? 'أول إجراء مطلوب للتحسن'
-                          : 'First Action to Improve'
-                    }
-                    value={action}
-                  />
-                )}
-              </div>
-            </div>
-          )
-        })()}
-      </div>
-    </section>
-  )
-}
-
-/* ---------- Premium generating screen (UI-only staged progress) ---------- */
-/* Stages are presentational pacing; completion is driven solely by polling. */
-
-const GENERATION_STAGES: Record<PlanTier, Record<'ar' | 'en', readonly string[]>> = {
-  go: {
-    ar: [
-      'قراءة المقابلة',
-      'تحليل الإجابات الأساسية',
-      'قياس الجاهزية العامة',
-      'إعداد التقرير المختصر',
-    ],
-    en: [
-      'Reading the interview',
-      'Analyzing core answers',
-      'Measuring overall readiness',
-      'Preparing the summary report',
-    ],
-  },
-  pro: {
-    ar: [
-      'قراءة المقابلة الكاملة',
-      'تحليل السلوك والكفاءات',
-      'قياس الاتساق والوضوح',
-      'بناء خطة التحسين',
-      'إعداد تقرير Pro',
-    ],
-    en: [
-      'Reading the full interview',
-      'Analyzing behavior and competencies',
-      'Measuring consistency and clarity',
-      'Building your improvement plan',
-      'Preparing your Pro report',
-    ],
-  },
-  expert: {
-    ar: [
-      'قراءة المقابلة الكاملة',
-      'تحليل أدوار اللجنة',
-      'تقييم الضغط والحكم المهني',
-      'بناء الرؤية التنفيذية',
-      'إعداد تقرير Expert',
-    ],
-    en: [
-      'Reading the full interview',
-      'Analyzing panel role dynamics',
-      'Evaluating pressure and professional judgment',
-      'Building the executive view',
-      'Preparing your Expert report',
-    ],
-  },
-} as const
-
-function GeneratingScreen({ lang, tier }: { lang: Lang; tier: PlanTier }) {
-  const isAr = lang === 'ar'
-  const stages = GENERATION_STAGES[tier][isAr ? 'ar' : 'en']
-  const [stage, setStage] = useState(0)
+function InterviewRoom() {
+  const [CONFIG] = useState(() => buildConfig())
+  const L = t(CONFIG.language)
+
+  const [messages, setMessages]             = useState<Message[]>([])
+  const [input, setInput]                   = useState('')
+  const [isLoading, setIsLoading]           = useState(false)
+  const [timeLeft, setTimeLeft]             = useState(() => {
+    const limits: Record<string, number> = { go: 15*60, pro: 30*60, expert: 45*60 }
+    return limits[CONFIG.plan] ?? 15*60
+  })
+  const [serverTimerStarted, setServerTimerStarted] = useState(false)
+  const [questionCount, setQuestionCount]   = useState(1)
+  const [isEnded, setIsEnded]               = useState(false)
+
+  // CLOSING FLOW FIX
+  // isClosing separates the farewell screen from the report generation screen.
+  const [isClosing, setIsClosing]           = useState(false)
+
+  const [isMuted, setIsMuted]               = useState(false)
+  const [isRecording, setIsRecording]       = useState(false)
+  const [isTranscribing, setIsTranscribing] = useState(false)
+  const [audioReady, setAudioReady]         = useState(false)
+  const [pendingAudio, setPendingAudio]     = useState<string | null>(null)
+  const [micError, setMicError]             = useState<string | null>(null)
+  const [isGenerating, setIsGenerating]     = useState(false)
+  const [genStep, setGenStep]               = useState(0)
+  const [genError, setGenError]             = useState<string | null>(null)
+  const [mounted, setMounted]               = useState(false)
+
+  // INTERVIEW CALL RESILIENCE
+  // callError surfaces ONLY after the silent retry also fails. It never enters messages.
+  const [callError, setCallError]           = useState<string | null>(null)
+
+  // Executive Room additions
+  const [isPaused, setIsPaused]             = useState(false)
+  const [pauseReason, setPauseReason]       = useState<'inactivity' | 'conduct' | null>(null)
+  const [pauseMessage, setPauseMessage]     = useState<string | null>(null)
+  const [conductNoticeKind, setConductNoticeKind] = useState<'redirect' | 'warning' | 'pause' | null>(null)
+  const [isSpeaking, setIsSpeaking]         = useState(false)
+  const [showTranscript, setShowTranscript] = useState(false)
+  const [showTextInput, setShowTextInput]   = useState(false)
+  const [showEndModal, setShowEndModal]     = useState(false)
+  const [currentFocus, setCurrentFocus]     = useState<string | null>(null)
+  const [isAwaitingFinalAnswer, setIsAwaitingFinalAnswer] = useState(false)
+
+  const chatRef           = useRef<HTMLDivElement>(null)
+  const inputRef          = useRef<HTMLTextAreaElement>(null)
+  const silenceTimer      = useRef<any>(null)
+  const messagesRef       = useRef<Message[]>([])
+  const isLoadingRef      = useRef(false)
+  const isEndedRef        = useRef(false)
+  const isClosingRef      = useRef(false)
+  const isRecordingRef    = useRef(false)
+  const isTranscribingRef = useRef(false)
+  const isPausedRef       = useRef(false)
+  const pauseReasonRef     = useRef<'inactivity' | 'conduct' | null>(null)
+  const isSpeakingRef     = useRef(false)
+  const audioRef          = useRef<HTMLAudioElement | null>(null)
+  const isMutedRef        = useRef(false)
+  const audioReadyRef     = useRef(false)
+  const mediaRecorderRef  = useRef<MediaRecorder | null>(null)
+  const audioChunksRef    = useRef<Blob[]>([])
+
+  // CLOSING FLOW FIX
+  // Prevent duplicate closing timers and avoid cutting active speech unless forced.
+  const closingTimerRef        = useRef<any>(null)
+  const pendingClosingRef      = useRef(false)
+  const pendingClosingMessage  = useRef<string | null>(null)
+  const pendingClosingAudio    = useRef<string | null>(null)
+
+  // FINAL ANSWER FLOW
+  // Once Barbaros has asked the final assessment question, the page waits for
+  // the candidate's answer. It does not jump to the report at 0:00.
+  const finalQuestionAskedRef   = useRef(false)
+  const awaitingFinalAnswerRef  = useRef(false)
+
+  // ASSESSMENT COVERAGE HANDOFF
+  // Captured from the backend at end-of-session and passed unchanged to the
+  // report so the farewell and report use the same covered criteria.
+  const coveredAreasRef = useRef<EssentialAxis[]>([])
+
+  // ENCRYPTED SESSION CONTINUITY
+  // The server remains authoritative. The browser only carries the opaque token
+  // between requests so a Vercel instance change cannot erase pause/resume state.
+  const sessionTokenRef = useRef<string | null>(null)
+  const sessionTokenStorageKey = `barbaros_interview_session:${CONFIG.sessionId}`
+
+  // INTERVIEW CALL RESILIENCE
+  // Holds the exact messages of the last /api/interview attempt so Retry can
+  // re-send them without asking the candidate to re-type or re-record.
+  const lastAttemptedCallRef = useRef<{
+    messages: Message[]
+    controlAction?: ControlAction
+  } | null>(null)
+  const isSubmittingRef = useRef(false)
+
+  useEffect(() => { messagesRef.current       = messages       }, [messages])
+  useEffect(() => { isLoadingRef.current      = isLoading      }, [isLoading])
+  useEffect(() => { isEndedRef.current        = isEnded        }, [isEnded])
+  useEffect(() => { isClosingRef.current      = isClosing      }, [isClosing])
+  useEffect(() => { isRecordingRef.current    = isRecording    }, [isRecording])
+  useEffect(() => { isTranscribingRef.current = isTranscribing }, [isTranscribing])
+  useEffect(() => { isPausedRef.current       = isPaused       }, [isPaused])
+  useEffect(() => { pauseReasonRef.current     = pauseReason     }, [pauseReason])
+  useEffect(() => { isSpeakingRef.current     = isSpeaking     }, [isSpeaking])
+
+  useEffect(() => { setMounted(true) }, [])
 
   useEffect(() => {
-    // Advance through stages on a fixed cadence, hold on the last one.
-    const t = setInterval(() => {
-      setStage(prev => (prev < stages.length - 1 ? prev + 1 : prev))
-    }, 7000)
-    return () => clearInterval(t)
-  }, [stages.length])
-
-  const progress = Math.min(92, Math.round(((stage + 1) / stages.length) * 100))
-
-  return (
-    <div
-      dir={isAr ? 'rtl' : 'ltr'}
-      style={{
-        minHeight: '100vh',
-        background: '#F5F1EB',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        fontFamily: 'system-ui, sans-serif',
-        padding: 24,
-      }}
-    >
-      <style>{`
-        @keyframes barbarosPulse {
-          0%, 100% { transform: scale(1); opacity: 1; }
-          50% { transform: scale(1.06); opacity: 0.85; }
-        }
-        @keyframes barbarosSheen {
-          0% { background-position: 200% 0; }
-          100% { background-position: -200% 0; }
-        }
-      `}</style>
-
-      <div
-        style={{
-          width: '100%',
-          maxWidth: 440,
-          background: '#FFFFFF',
-          border: '1px solid #E5DDD0',
-          borderRadius: 22,
-          padding: '30px 26px',
-          boxShadow: '0 12px 34px rgba(26,26,26,0.07)',
-          textAlign: 'center',
-        }}
-      >
-        <div style={{ animation: 'barbarosPulse 2.4s ease-in-out infinite', display: 'inline-block' }}>
-          <Barbaros size={26} />
-        </div>
-
-        <div
-          style={{
-            marginTop: 14,
-            fontFamily: SERIF,
-            fontSize: 17,
-            fontWeight: 700,
-            color: '#1A1A1A',
-          }}
-        >
-          {isAr ? 'يجري إعداد تقريرك الآن' : 'Your report is being prepared'}
-        </div>
-
-        <div
-          style={{
-            marginTop: 6,
-            fontSize: 12,
-            color: 'rgba(26,26,26,0.5)',
-            lineHeight: 1.7,
-          }}
-        >
-          {isAr
-            ? 'يُرجى إبقاء هذه الصفحة مفتوحة. عادةً تستغرق العملية دقيقة إلى دقيقتين.'
-            : 'Please keep this page open. This usually takes one to two minutes.'}
-        </div>
-
-        <div
-          style={{
-            marginTop: 20,
-            height: 7,
-            background: '#F5F1EB',
-            borderRadius: 6,
-            overflow: 'hidden',
-          }}
-        >
-          <div
-            style={{
-              height: '100%',
-              width: `${progress}%`,
-              borderRadius: 6,
-              background:
-                'linear-gradient(90deg, #CC785C 25%, #E2A088 50%, #CC785C 75%)',
-              backgroundSize: '200% 100%',
-              animation: 'barbarosSheen 2.2s linear infinite',
-              transition: 'width 1.2s ease',
-            }}
-          />
-        </div>
-
-        <div style={{ marginTop: 22, textAlign: isAr ? 'right' : 'left' }}>
-          {stages.map((label, i) => {
-            const done = i < stage
-            const active = i === stage
-            const color = done ? '#3F6B5E' : active ? '#CC785C' : 'rgba(26,26,26,0.30)'
-
-            return (
-              <div
-                key={label}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 10,
-                  padding: '7px 0',
-                  fontSize: 12.5,
-                  fontWeight: active ? 800 : 600,
-                  color,
-                  transition: 'color 0.4s ease',
-                }}
-              >
-                <span
-                  style={{
-                    width: 18,
-                    height: 18,
-                    borderRadius: '50%',
-                    flexShrink: 0,
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontSize: 10,
-                    fontWeight: 900,
-                    color: done || active ? '#FFFFFF' : 'rgba(26,26,26,0.35)',
-                    background: done
-                      ? '#3F6B5E'
-                      : active
-                        ? '#CC785C'
-                        : '#EDE6D8',
-                    animation: active ? 'barbarosPulse 1.6s ease-in-out infinite' : undefined,
-                  }}
-                >
-                  {done ? '✓' : i + 1}
-                </span>
-                <span>{label}</span>
-              </div>
-            )
-          })}
-        </div>
-
-        <div
-          style={{
-            marginTop: 18,
-            paddingTop: 14,
-            borderTop: '0.5px solid rgba(26,26,26,0.08)',
-            fontSize: 11,
-            color: 'rgba(26,26,26,0.38)',
-            lineHeight: 1.7,
-          }}
-        >
-          {isAr
-            ? 'يُبنى كل قسم في تقريرك على أدلة فعلية من إجاباتك في المقابلة.'
-            : 'Every section of your report is built on actual evidence from your interview answers.'}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-/* ---------- Shared centered screen for non-report states ---------- */
-
-
-function CenteredScreen({ children }: { children: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        minHeight: '100vh',
-        background: '#F5F1EB',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        fontFamily: 'system-ui, sans-serif',
-        padding: 24,
-        textAlign: 'center',
-      }}
-    >
-      {children}
-    </div>
-  )
-}
-
-/* ---------- Report view (premium restyle, fed by props) ---------- */
-
-function ReportView({ data }: { data: Stored }) {
-  const router = useRouter()
-  const [showReplay, setShowReplay] = useState(true)
-
-  const isAr = data.language === 'ar'
-  const lang: Lang = isAr ? 'ar' : 'en'
-  const r = data.report
-  const readinessLabel = displayReadinessLevel(r.readinessLevel, isAr)
-  const v = verdictStyle(readinessLabel)
-  const coverage = r.assessmentCoverage
-  const incomplete = r.interviewIncomplete === true
-
-  const footerText = incomplete
-    ? isAr
-      ? 'يسجل هذا التقرير جلسة مقابلة غير مكتملة، ولم يصدر عنها حكم على الأداء أو الكفاءة.'
-      : 'This report records an incomplete interview session and does not issue a judgment on performance or ability.'
-    : isAr
-      ? 'تم إعداد هذا التقرير وفق مبادئ التقييم المنظم القائم على الكفاءات.'
-      : 'This report was prepared using structured, competency-based assessment principles.'
-
-  return (
-    <div
-      dir={isAr ? 'rtl' : 'ltr'}
-      className="report-root"
-      style={{
-        fontFamily: 'system-ui, sans-serif',
-        background: '#F5F1EB',
-        color: '#1A1A1A',
-        minHeight: '100vh',
-      }}
-    >
-      {/* Print styles */}
-      <style>{`
-        @media print {
-          .no-print { display: none !important; }
-          .print-show { display: block !important; }
-          .print-header { display: flex !important; }
-          body { background: #F5F1EB !important; }
-          html, body, .report-root, .section-card {
-            -webkit-print-color-adjust: exact !important;
-            print-color-adjust: exact !important;
-          }
-          .report-shell {
-            max-width: 100% !important;
-            padding: 0 !important;
-          }
-          .section-card {
-            break-inside: avoid;
-            page-break-inside: avoid;
-            box-shadow: none !important;
-          }
-          .report-cover {
-            break-after: page;
-            page-break-after: always;
-            break-inside: avoid;
-            page-break-inside: avoid;
-            box-shadow: none !important;
-          }
-          .cover-title-grid { grid-template-columns: 1.35fr 0.85fr !important; }
-          .cover-meta-grid { grid-template-columns: repeat(3, 1fr) !important; }
-          @page { margin: 16mm; }
-        }
-        @media screen {
-          .print-header { display: none; }
-        }
-        @media screen and (max-width: 720px) {
-          .report-shell { padding: 20px 14px 80px !important; }
-          .report-cover { border-radius: 22px !important; padding: 22px !important; }
-          .cover-title-grid { grid-template-columns: 1fr !important; }
-          .cover-meta-grid { grid-template-columns: 1fr 1fr !important; }
-          .cover-glance-grid { grid-template-columns: 1fr !important; }
-        }
-      `}</style>
-
-      {/* Print-only header */}
-      <div
-        className="print-header"
-        style={{
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          marginBottom: 16,
-          paddingBottom: 12,
-          borderBottom: '1px solid #E5DDD0',
-        }}
-      >
-        <Barbaros size={20} />
-        <div style={{ fontSize: 12, color: 'rgba(26,26,26,0.45)' }}>
-          {isAr ? 'تقرير المقابلة' : 'Interview Report'}
-        </div>
-      </div>
-      <nav
-        className="no-print"
-        style={{
-          background: '#F5F1EB',
-          borderBottom: '0.5px solid #E5DDD0',
-          padding: '14px 20px',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-        }}
-      >
-        <Barbaros size={20} />
-
-        <div
-          style={{
-            fontSize: 13,
-            fontWeight: 700,
-            color: '#CC785C',
-          }}
-        >
-          {isAr ? 'تقرير المقابلة' : 'Interview Report'}
-        </div>
-
-        <button
-          onClick={() => router.push('/')}
-          style={{
-            background: '#FFFFFF',
-            border: '0.5px solid #E5DDD0',
-            borderRadius: 8,
-            padding: '6px 14px',
-            fontSize: 12,
-            fontWeight: 600,
-            cursor: 'pointer',
-            color: '#1A1A1A',
-            fontFamily: 'inherit',
-          }}
-        >
-          {isAr ? 'الرئيسية' : 'Home'}
-        </button>
-      </nav>
-
-      <div
-        className="report-shell"
-        style={{ maxWidth: 780, margin: '0 auto', padding: '24px 16px 80px' }}
-      >
-        <ReportCover
-          data={data}
-          isAr={isAr}
-          readinessLabel={readinessLabel}
-          reportDate={formatReportDate(data.reportDate, isAr)}
-          reference={shortReference(data.reportReference)}
-          summaryLine={
-            incomplete
-              ? isAr
-                ? 'المقابلة غير مكتملة — لم تتضمن هذه الجلسة أدلة كافية لإصدار تقييم كامل.'
-                : 'Interview incomplete — this session did not include enough evidence to issue a full assessment.'
-              : isAr
-                ? (
-                    <>
-                      حصلت في هذه الجلسة على <bdi dir="ltr">{r.finalScore} / 100</bdi>{' '}
-                      ضمن مستوى «{readinessLabel}».
-                    </>
-                  )
-                : (
-                    <>
-                      Your score in this session is <bdi dir="ltr">{r.finalScore} / 100</bdi>{' '}
-                      with a “{readinessLabel}” level.
-                    </>
-                  )
-          }
-          assessment={r.barbarosAssessment || ''}
-        />
-
-        {incomplete && (
-          <Section
-            lang={lang}
-            style={{
-              background: '#FFFFFF',
-              border: '1px solid rgba(26,26,26,0.14)',
-              borderInlineStart: '4px solid #5A463E',
-            }}
-          >
-            <SectionTitle>
-              {isAr ? 'المقابلة غير مكتملة' : 'Interview Incomplete'}
-            </SectionTitle>
-            <div
-              style={{
-                fontSize: 13,
-                color: '#1A1A1A',
-                lineHeight: 1.9,
-              }}
-            >
-              {isAr
-                ? 'لم يتم إصدار تقييم كامل لأن الجلسة لم تتضمن ثلاث إجابات فعلية على الأقل. هذا ليس حكماً على أدائك أو كفاءتك، بل يعني فقط أن المقابلة لم تكتمل. أكمل مقابلة كاملة للحصول على تقييمك الكامل.'
-                : 'No full assessment was issued because the session did not include at least three substantive answers. This is not a judgment of your performance or ability; it only means the interview was not completed. Complete a full interview to receive your full assessment.'}
-            </div>
-          </Section>
-        )}
-
-        {/* 1. SCORE */}
-        {!incomplete && (
-        <Section lang={lang} style={{ textAlign: 'center' }}>
-          <ScoreRing score={r.finalScore} />
-        </Section>
-        )}
-
-        {/* 2. VERDICT */}
-        {!incomplete && r.verdict && (
-          <Section lang={lang} style={{ background: v.bg, border: `1px solid ${v.border}` }}>
-            <div
-              style={{
-                fontFamily: SERIF,
-                fontSize: 17,
-                fontWeight: 700,
-                color: v.color,
-                marginBottom: 10,
-              }}
-            >
-              {readinessLabel}
-            </div>
-
-            <div style={{ fontSize: 13, color: v.color, lineHeight: 1.8 }}>
-              {r.verdict}
-            </div>
-          </Section>
-        )}
-
-        {/* 3. ASSESSMENT COVERAGE
-            - background: gradient واضح من أبيض إلى برتقالي كريمي دافئ
-            - عنوان "محاور لم تُقَس" أغمق بوضوح
-        */}
-        {hasCoverage(coverage) && (
-          <Section
-            lang={lang}
-            style={{
-              background: 'linear-gradient(160deg, #FFFFFF 0%, #FDEEE4 100%)',
-              border: '1px solid rgba(204,120,92,0.28)',
-            }}
-          >
-            <SectionTitle>
-              {incomplete
-                ? isAr
-                  ? 'نطاق التقييم في هذه الجلسة'
-                  : 'Assessment Coverage for This Session'
-                : isAr
-                  ? 'نطاق التقييم في هذه الجلسة'
-                  : 'Assessment Coverage for This Session'}
-            </SectionTitle>
-
-            {coverage.summary && (
-              <div
-                style={{
-                  fontSize: 13,
-                  lineHeight: 1.8,
-                  color: '#1A1A1A',
-                  marginBottom: 14,
-                }}
-              >
-                {coverage.summary}
-              </div>
-            )}
-
-            {Array.isArray(coverage.coveredAreas) &&
-              coverage.coveredAreas.length > 0 && (
-                <div style={{ marginBottom: 16 }}>
-                  <div
-                    style={{
-                      fontSize: 11,
-                      fontWeight: 800,
-                      color: 'rgba(26,26,26,0.5)',
-                      marginBottom: 8,
-                      ...labelType(isAr),
-                    }}
-                  >
-                    {isAr
-                      ? 'الأبعاد المقاسة فعلياً في هذه الجلسة'
-                      : 'Measured in this session'}
-                  </div>
-
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                    {coverage.coveredAreas.map((area, i) => (
-                      <span
-                        key={`${area}-${i}`}
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          borderRadius: 999,
-                          padding: '7px 11px',
-                          background: 'rgba(204,120,92,0.09)',
-                          border: '0.5px solid rgba(204,120,92,0.28)',
-                          color: '#8A3F2B',
-                          fontSize: 11,
-                          fontWeight: 700,
-                          lineHeight: 1,
-                        }}
-                      >
-                        {area}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-            {Array.isArray(coverage.recommendedForDeeperAssessment) &&
-              coverage.recommendedForDeeperAssessment.length > 0 && (
-                <div style={{ marginBottom: 16 }}>
-                  <div
-                    style={{
-                      fontSize: 11,
-                      fontWeight: 800,
-                      color: 'rgba(26,26,26,0.62)',
-                      marginBottom: 8,
-                      ...labelType(isAr),
-                    }}
-                  >
-                    {isAr
-                      ? 'محاور متقدمة متاحة بعمق أكبر في الباقات الأعلى'
-                      : 'Advanced areas available in greater depth in higher-tier plans'}
-                  </div>
-
-                  <div
-                    style={{
-                      display: 'grid',
-                      gridTemplateColumns: '1fr',
-                      gap: 7,
-                    }}
-                  >
-                    {coverage.recommendedForDeeperAssessment.map((item, i) => (
-                      <div
-                        key={`${item}-${i}`}
-                        style={{
-                          display: 'flex',
-                          alignItems: 'flex-start',
-                          gap: 8,
-                          fontSize: 12,
-                          lineHeight: 1.6,
-                          color: '#1A1A1A',
-                          background: 'rgba(26,26,26,0.025)',
-                          border: '0.5px solid rgba(26,26,26,0.06)',
-                          borderRadius: 10,
-                          padding: '8px 10px',
-                        }}
-                      >
-                        <span
-                          style={{
-                            color: '#CC785C',
-                            fontWeight: 900,
-                            flexShrink: 0,
-                          }}
-                        >
-                          +
-                        </span>
-                        <span>{item}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-            {coverage.upgradeNote && (
-              <div
-                style={{
-                  fontSize: 12,
-                  lineHeight: 1.8,
-                  color: incomplete ? '#1A1A1A' : '#6B2D1F',
-                  background: incomplete
-                    ? 'rgba(26,26,26,0.035)'
-                    : 'rgba(204,120,92,0.08)',
-                  border: incomplete
-                    ? '0.5px solid rgba(26,26,26,0.10)'
-                    : '0.5px solid rgba(204,120,92,0.22)',
-                  borderRadius: 12,
-                  padding: '12px 14px',
-                  fontWeight: 600,
-                }}
-              >
-                {coverage.upgradeNote}
-              </div>
-            )}
-          </Section>
-        )}
-
-        {/* 4. COMPETENCIES */}
-        {!incomplete && Array.isArray(r.competencies) && r.competencies.length > 0 && (
-          <Section lang={lang}>
-            <SectionTitle>
-              {isAr ? 'مصفوفة الكفاءات' : 'Competency Breakdown'}
-            </SectionTitle>
-
-            {r.competencies.map((c, i) => (
-              <div
-                key={i}
-                style={{
-                  marginBottom: 20,
-                  paddingBottom: 20,
-                  borderBottom:
-                    i < r.competencies.length - 1 ? '0.5px solid #F5F1EB' : 'none',
-                }}
-              >
-                <div
-                  style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    marginBottom: 8,
-                  }}
-                >
-                  <span style={{ fontSize: 13, fontWeight: 800 }}>{displayCompetencyName(c.name, isAr)}</span>
-
-                  <span
-                    style={{
-                      fontSize: 13,
-                      fontWeight: 900,
-                      color: scoreColor(c.score),
-                    }}
-                  >
-                    <bdi dir="ltr">{c.score} / 100</bdi>
-                  </span>
-                </div>
-
-                <div
-                  style={{
-                    height: 6,
-                    background: '#F5F1EB',
-                    borderRadius: 4,
-                    overflow: 'hidden',
-                    marginBottom: 8,
-                  }}
-                >
-                  <div
-                    style={{
-                      height: '100%',
-                      borderRadius: 4,
-                      width: `${c.score}%`,
-                      background: scoreColor(c.score),
-                    }}
-                  />
-                </div>
-
-                <div
-                  style={{
-                    fontSize: 12,
-                    color: '#1A1A1A',
-                    lineHeight: 1.7,
-                    padding: '8px 12px',
-                    background: tint(scoreColor(c.score), 0.07),
-                    borderRadius: 8,
-                    borderLeft: isAr ? 'none' : `3px solid ${scoreColor(c.score)}`,
-                    borderRight: isAr ? `3px solid ${scoreColor(c.score)}` : 'none',
-                  }}
-                >
-                  {c.why}
-                </div>
-              </div>
-            ))}
-          </Section>
-        )}
-
-        {/* 4.5 PERFORMANCE PATH — derived from replay scores (question order, not time) */}
-        {!incomplete && Array.isArray(r.replay) && r.replay.length >= 2 && (
-          <Section lang={lang}>
-            <SectionTitle>
-              {isAr ? 'مسار الأداء عبر أسئلة المقابلة' : 'Performance Path Across Interview Questions'}
-            </SectionTitle>
-
-            <PerformancePath replay={r.replay} isAr={isAr} />
-
-            <div
-              style={{
-                marginTop: 12,
-                fontSize: 11.5,
-                lineHeight: 1.7,
-                color: 'rgba(26,26,26,0.55)',
-              }}
-            >
-              {isAr
-                ? 'النتيجة الإجمالية محسوبة من درجات الكفاءات الست. أما متوسط مسار الأداء فيعكس درجات الإجابات المختارة عبر تسلسل المقابلة، لذلك قد يختلف الرقمان.'
-                : 'The overall score is calculated from the six competency scores. The performance-path average reflects selected answer scores across the interview sequence, so the two figures may differ.'}
-            </div>
-          </Section>
-        )}
-
-        {/* 5. HIDDEN WEAKNESS */}
-        {!incomplete && r.hiddenWeakness && (
-          <Section
-            lang={lang}
-            style={{
-              background: tint('#A14234', 0.07),
-              border: '1px solid rgba(161,66,52,0.22)',
-              borderInlineStart: '4px solid #A14234',
-            }}
-          >
-            <SectionTitle color="#A14234">
-              {isAr ? 'أولوية التحسين الأساسية' : 'Primary Improvement Priority'}
-            </SectionTitle>
-
-            <div style={{ fontSize: 13, color: '#7A2E24', lineHeight: 1.8 }}>
-              {r.hiddenWeakness}
-            </div>
-          </Section>
-        )}
-
-        {/* 6. BEHAVIORAL PATTERNS */}
-        {!incomplete && r.behavioralPatterns && (
-          <Section lang={lang}>
-            <SectionTitle>
-              {isAr ? 'الأنماط السلوكية' : 'Behavioral Patterns'}
-            </SectionTitle>
-
-            <div
-              style={{
-                fontSize: 13,
-                color: '#1A1A1A',
-                lineHeight: 1.8,
-                fontStyle: 'italic',
-              }}
-            >
-              {r.behavioralPatterns}
-            </div>
-          </Section>
-        )}
-
-        {/* 7. INTERVIEW REPLAY */}
-        {Array.isArray(r.replay) && r.replay.length > 0 && (
-          <Section lang={lang}>
-            <button
-              className="no-print"
-              onClick={() => setShowReplay(p => !p)}
-              style={{
-                width: '100%',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                background: 'none',
-                border: 'none',
-                cursor: 'pointer',
-                padding: 0,
-                fontFamily: 'inherit',
-              }}
-            >
-              <span
-                style={{ fontFamily: SERIF, fontSize: 16, fontWeight: 700 }}
-              >
-                {incomplete
-                  ? isAr
-                    ? 'سجل الجلسة'
-                    : 'Session Record'
-                  : isAr
-                    ? 'تحليل الإجابات والتدريب'
-                    : 'Interview Analysis'}
-              </span>
-
-              <span
-                style={{
-                  fontSize: 12,
-                  color: '#CC785C',
-                  fontWeight: 700,
-                }}
-              >
-                {showReplay
-                  ? isAr
-                    ? 'إخفاء التحليل ▲'
-                    : 'Hide Analysis ▲'
-                  : isAr
-                    ? 'عرض التحليل ▼'
-                    : 'Show Analysis ▼'}
-              </span>
-            </button>
-
-            <div
-              style={{
-                fontSize: 12,
-                color: 'rgba(26,26,26,0.52)',
-                lineHeight: 1.7,
-                marginTop: 8,
-                marginBottom: 16,
-              }}
-            >
-              {incomplete
-                ? isAr
-                  ? 'يعرض هذا القسم التبادلات التي حدثت فعلياً في الجلسة دون درجات أو حكم على الأداء.'
-                  : 'This section records the exchanges that actually occurred, without scores or performance judgment.'
-                : isAr
-                  ? 'يراجع هذا القسم إجاباتك كما قُدّمت، ويوضح سبب التقييم، وما أضعف كل إجابة، وكيف يمكن صياغتها بصورة أقوى.'
-                  : 'This section reviews your submitted answers, explains the score, identifies what weakened each response, and shows how to strengthen it.'}
-            </div>
-
-            {showReplay && (
-              <div className="print-show" style={{ marginTop: 16 }}>
-                {r.replay.map((item, i) => (
-                  <div
-                    key={i}
-                    style={{
-                      marginBottom: 28,
-                      paddingBottom: 28,
-                      borderBottom:
-                        i < r.replay.length - 1 ? '1px solid #F5F1EB' : 'none',
-                    }}
-                  >
-                    <div
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 8,
-                        marginBottom: 12,
-                      }}
-                    >
-                      <div
-                        style={{
-                          width: 26,
-                          height: 26,
-                          borderRadius: '50%',
-                          background: incomplete ? '#5A463E' : '#CC785C',
-                          color: '#fff',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          fontSize: 11,
-                          fontWeight: 800,
-                          flexShrink: 0,
-                        }}
-                      >
-                        {i + 1}
-                      </div>
-
-                      {!incomplete && (
-                        <span
-                          style={{
-                            fontSize: 12,
-                            fontWeight: 900,
-                            color: scoreColor(item.score),
-                            marginLeft: isAr ? 0 : 'auto',
-                            marginRight: isAr ? 'auto' : 0,
-                          }}
-                        >
-                          <bdi dir="ltr">{item.score} / 100</bdi>
-                        </span>
-                      )}
-                    </div>
-
-                    <div style={{ marginBottom: 10 }}>
-                      <div
-                        style={{
-                          fontSize: 10,
-                          fontWeight: 700,
-                          color: 'rgba(26,26,26,0.4)',
-                          marginBottom: 4,
-                          ...labelType(isAr),
-                        }}
-                      >
-                        {incomplete
-                          ? isAr
-                            ? 'السؤال'
-                            : 'Question'
-                          : isAr
-                            ? 'السؤال محل التقييم'
-                            : 'Evaluated Question'}
-                      </div>
-
-                      <div
-                        style={{
-                          fontSize: 13,
-                          color: '#1A1A1A',
-                          lineHeight: 1.7,
-                          padding: '10px 14px',
-                          background: '#F5F1EB',
-                          borderRadius: 10,
-                          fontWeight: 600,
-                        }}
-                      >
-                        {item.question}
-                      </div>
-                    </div>
-
-                    <div style={{ marginBottom: 10 }}>
-                      <div
-                        style={{
-                          fontSize: 10,
-                          fontWeight: 700,
-                          color: 'rgba(26,26,26,0.4)',
-                          marginBottom: 4,
-                          ...labelType(isAr),
-                        }}
-                      >
-                        {isAr ? 'الإجابة كما وردت' : 'Your Submitted Answer'}
-                      </div>
-
-                      <div
-                        style={{
-                          fontSize: 12,
-                          color: '#1A1A1A',
-                          lineHeight: 1.7,
-                          padding: '10px 14px',
-                          background: 'rgba(204,120,92,0.06)',
-                          border: incomplete
-                            ? '0.5px solid rgba(26,26,26,0.12)'
-                            : `0.5px solid ${scoreColor(item.score)}33`,
-                          borderRadius: 10,
-                        }}
-                      >
-                        {item.answer}
-                      </div>
-                    </div>
-
-                    {item.analysis && (
-                      <div style={{ marginBottom: 10 }}>
-                        <div
-                          style={{
-                            fontSize: 10,
-                            fontWeight: 700,
-                            color: '#86591D',
-                            marginBottom: 4,
-                            ...labelType(isAr),
-                          }}
-                        >
-                          {incomplete
-                            ? isAr
-                              ? 'ملاحظة الجلسة'
-                              : 'Session Note'
-                            : isAr
-                              ? 'تحليل الأداء'
-                              : 'Performance Analysis'}
-                        </div>
-
-                        <div
-                          style={{
-                            fontSize: 12,
-                            color: incomplete ? 'rgba(26,26,26,0.70)' : '#86591D',
-                            lineHeight: 1.7,
-                            padding: '10px 14px',
-                            background: incomplete
-                              ? 'rgba(26,26,26,0.035)'
-                              : tint('#B07A2E', 0.07),
-                            border: incomplete
-                              ? '0.5px solid rgba(26,26,26,0.10)'
-                              : '0.5px solid rgba(176,122,46,0.25)',
-                            borderRadius: 10,
-                          }}
-                        >
-                          {item.analysis}
-                        </div>
-                      </div>
-                    )}
-
-                    {!incomplete && item.weakened && (
-                      <div style={{ marginBottom: 10 }}>
-                        <div
-                          style={{
-                            fontSize: 10,
-                            fontWeight: 700,
-                            color: '#A14234',
-                            marginBottom: 4,
-                            ...labelType(isAr),
-                          }}
-                        >
-                          {isAr ? 'مواطن الضعف في الطرح' : 'What Weakened the Answer'}
-                        </div>
-
-                        <div
-                          style={{
-                            fontSize: 12,
-                            color: '#7A2E24',
-                            lineHeight: 1.7,
-                            padding: '10px 14px',
-                            background: tint('#A14234', 0.055),
-                            border: '0.5px solid rgba(161,66,52,0.22)',
-                            borderRadius: 10,
-                          }}
-                        >
-                          {item.weakened}
-                        </div>
-                      </div>
-                    )}
-
-                    {!incomplete && item.stronger && (
-                      <div>
-                        <div
-                          style={{
-                            fontSize: 10,
-                            fontWeight: 700,
-                            color: '#3F6B5E',
-                            marginBottom: 4,
-                            ...labelType(isAr),
-                          }}
-                        >
-                          {isAr ? 'النموذج المرجعي للإجابة' : 'Suggested Stronger Response'}
-                        </div>
-
-                        <div
-                          style={{
-                            fontSize: 12,
-                            color: '#2E5248',
-                            lineHeight: 1.8,
-                            padding: '10px 14px',
-                            background: tint('#3F6B5E', 0.07),
-                            border: '0.5px solid rgba(63,107,94,0.30)',
-                            borderRadius: 10,
-                          }}
-                        >
-                          {item.stronger}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </Section>
-        )}
-
-        {/* 8. RECOMMENDATION */}
-        {r.recommendation && (
-          <Section
-            lang={lang}
-            style={{
-              background: 'rgba(204,120,92,0.06)',
-              border: '1px solid rgba(204,120,92,0.3)',
-            }}
-          >
-            <SectionTitle>
-              {incomplete
-                ? isAr
-                  ? 'الخطوة التالية'
-                  : 'Next Step'
-                : isAr
-                  ? 'التوصية الختامية'
-                  : 'Your Next Step'}
-            </SectionTitle>
-
-            <div style={{ fontSize: 13, color: '#1A1A1A', lineHeight: 1.9 }}>
-              {r.recommendation}
-            </div>
-          </Section>
-        )}
-
-               {/* 9. CTA / PRINT FOOTER */}
-        <div style={{ textAlign: 'center', marginTop: 8 }}>
-          <div className="no-print">
-            <button
-              onClick={() => window.print()}
-              style={{
-                background: '#1A1A1A',
-                color: '#FFFFFF',
-                border: 'none',
-                borderRadius: 14,
-                padding: '12px 36px',
-                fontSize: 13,
-                fontWeight: 700,
-                cursor: 'pointer',
-                fontFamily: 'inherit',
-                width: '100%',
-                marginBottom: 10,
-              }}
-            >
-              {isAr ? 'طباعة التقرير / حفظ PDF' : 'Print Report / Save PDF'}
-            </button>
-
-            <button
-              onClick={() => router.push('/onboarding')}
-              style={{
-                background: 'transparent',
-                color: '#CC785C',
-                border: '1px solid #CC785C',
-                borderRadius: 14,
-                padding: '12px 36px',
-                fontSize: 13,
-                fontWeight: 700,
-                cursor: 'pointer',
-                fontFamily: 'inherit',
-                width: '100%',
-                marginBottom: 12,
-              }}
-            >
-              {isAr ? 'مقابلة جديدة' : 'Start New Interview'}
-            </button>
-          </div>
-
-          <div
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              gap: 6,
-              color: 'rgba(26,26,26,0.38)',
-              marginTop: 18,
-              paddingTop: 14,
-              borderTop: '0.5px solid rgba(26,26,26,0.10)',
-            }}
-          >
-            <Barbaros size={11} />
-
-            <div
-              style={{
-                fontSize: 12,
-                lineHeight: 1.7,
-                maxWidth: 430,
-                margin: '0 auto',
-              }}
-            >
-              {footerText}
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-/* ---------- Orchestrator: reads reportJobId, polls status ---------- */
-
-type Phase = 'loading' | 'ready' | 'failed' | 'error'
-
-function ReportContent() {
-  const router = useRouter()
-  const searchParams = useSearchParams()
-  const reportJobId = searchParams.get('reportJobId')
-
-  const [phase, setPhase] = useState<Phase>('loading')
-  const [data, setData] = useState<Stored | null>(null)
-  const [lang, setLang] = useState<Lang>('en')
-  const [planTier, setPlanTier] = useState<PlanTier>('go')
-
+    try {
+      sessionTokenRef.current = sessionStorage.getItem(sessionTokenStorageKey)
+    } catch {
+      sessionTokenRef.current = null
+    }
+  }, [sessionTokenStorageKey])
+
+  // CLOSING FLOW FIX
+  // Cleanup audio and timers on unmount.
   useEffect(() => {
-    if (!reportJobId) return
-
-    let cancelled = false
-    let timer: ReturnType<typeof setInterval> | null = null
-
-    const stop = () => {
-      if (timer) {
-        clearInterval(timer)
-        timer = null
-      }
-    }
-
-    const readLang = (cfg: Record<string, unknown>) => {
-      if (cfg && typeof cfg.language === 'string') {
-        setLang(cfg.language === 'ar' ? 'ar' : 'en')
-      }
-      if (cfg && typeof cfg.plan === 'string') {
-        setPlanTier(resolvePlanTier(cfg.plan))
-      }
-    }
-
-    const poll = async () => {
-      try {
-        const res = await fetch(
-          `/api/report/status?reportJobId=${encodeURIComponent(reportJobId)}`,
-          { cache: 'no-store' }
-        )
-        const json = await res.json()
-        if (cancelled) return
-
-        const cfg = (json?.config ?? {}) as Record<string, unknown>
-        readLang(cfg)
-
-        if (!res.ok) {
-          stop()
-          setPhase('error')
-          return
-        }
-
-        if (json.status === 'completed' && json.report) {
-          const str = (k: string) =>
-            typeof cfg[k] === 'string' ? (cfg[k] as string) : ''
-
-          // Report date comes from an existing field on the status response.
-          // Prefer completedAt (when the report was finalized), fall back to createdAt.
-          const ts = (json?.timestamps ?? {}) as Record<string, unknown>
-          const reportDate =
-            typeof ts.completedAt === 'string'
-              ? ts.completedAt
-              : typeof ts.createdAt === 'string'
-                ? ts.createdAt
-                : ''
-
-          stop()
-          setData({
-            report: json.report as Report,
-            candidateName: str('candidateName'),
-            jobTitle: str('jobTitle'),
-            institution: str('institution'),
-            sector: str('sector'),
-            yearsExperience: str('yearsExperience'),
-            language: str('language') || 'en',
-            plan: str('plan'),
-            reportDate,
-            reportReference: reportJobId,
-          })
-          setPhase('ready')
-          return
-        }
-
-        if (json.status === 'failed') {
-          stop()
-          setPhase('failed')
-          return
-        }
-
-        // pending | processing -> keep polling
-        setPhase('loading')
-      } catch {
-        // transient network issue: keep polling, do not crash
-        if (!cancelled) setPhase('loading')
-      }
-    }
-
-    poll()
-    timer = setInterval(poll, 3000)
-
     return () => {
-      cancelled = true
-      stop()
-    }
-  }, [reportJobId])
+      if (closingTimerRef.current) clearTimeout(closingTimerRef.current)
+      if (silenceTimer.current) clearTimeout(silenceTimer.current)
 
-  if (!reportJobId) {
-    return (
-      <CenteredScreen>
-        <Barbaros size={20} />
-        <div style={{ marginTop: 16, fontSize: 15, fontWeight: 700, color: '#1A1A1A' }}>
-          {lang === 'ar' ? 'رابط التقرير غير مكتمل' : 'Incomplete report link'}
-        </div>
-        <div
-          style={{
-            marginTop: 8,
-            fontSize: 12.5,
-            color: 'rgba(26,26,26,0.5)',
-            maxWidth: 360,
-            lineHeight: 1.7,
-            marginBottom: 20,
-          }}
-        >
-          {lang === 'ar'
-            ? 'لا يحتوي هذا الرابط على مُعرّف تقرير صالح. ابدأ مقابلة للحصول على تقريرك.'
-            : 'This link does not include a valid report reference. Start an interview to generate your report.'}
-        </div>
-        <button
-          onClick={() => router.push('/onboarding')}
-          style={{
-            background: '#CC785C',
-            color: '#fff',
-            border: 'none',
-            borderRadius: 12,
-            padding: '12px 28px',
-            fontSize: 13,
-            fontWeight: 700,
-            cursor: 'pointer',
-          }}
-        >
-          {lang === 'ar' ? 'ابدأ مقابلة' : 'Start an Interview'}
-        </button>
-      </CenteredScreen>
+      if (audioRef.current) {
+        audioRef.current.pause()
+        audioRef.current.src = ''
+        audioRef.current = null
+      }
+    }
+  }, [])
+
+  // CLOSING FLOW FIX
+  // Local generic closing is used only for time-up or manual early ending.
+  // Engine-based end uses the backend closing message with covered assessment areas.
+  const genericClosingMessage = useCallback(() => {
+    return CONFIG.language === 'ar'
+      ? 'شكراً لك. بهذا تنتهي جلستنا. يجري الآن إعداد تقريرك الكامل وسيكون جاهزاً بعد قليل.'
+      : 'Thank you. That brings our session to a close. Your full report is being prepared now and will be ready shortly.'
+  }, [CONFIG.language])
+
+  const markFinalQuestionAsked = useCallback(() => {
+    if (finalQuestionAskedRef.current) return
+
+    finalQuestionAskedRef.current = true
+    awaitingFinalAnswerRef.current = true
+    setIsAwaitingFinalAnswer(true)
+  }, [])
+
+  // CLOSING FLOW FIX
+  // Moves from the closing screen to the existing report generation flow.
+  const finishClosing = useCallback(() => {
+    if (closingTimerRef.current) {
+      clearTimeout(closingTimerRef.current)
+      closingTimerRef.current = null
+    }
+
+    setIsClosing(false)
+    isClosingRef.current = false
+    setIsEnded(true)
+  }, [])
+
+  // CLOSING FLOW FIX
+  // Shows the farewell message, plays its audio if available, then moves to report generation.
+  const beginClosing = useCallback((message: string, audioBase64?: string | null) => {
+    if (isClosingRef.current || isEndedRef.current) return
+
+    pendingClosingRef.current = false
+    pendingClosingMessage.current = null
+    pendingClosingAudio.current = null
+    setPendingAudio(null)
+
+    setIsClosing(true)
+    isClosingRef.current = true
+
+    setIsPaused(false)
+    isPausedRef.current = false
+    setPauseReason(null)
+    pauseReasonRef.current = null
+    setPauseMessage(null)
+    setConductNoticeKind(null)
+
+    if (silenceTimer.current) clearTimeout(silenceTimer.current)
+
+    if (audioRef.current) {
+      audioRef.current.pause()
+      audioRef.current.src = ''
+      audioRef.current = null
+    }
+
+    setIsSpeaking(false)
+
+    if (message?.trim()) {
+      const closingMsg: Message = {
+        role: 'assistant',
+        content: message.trim(),
+        timestamp: Date.now(),
+        clientMessageId: createClientMessageId('assistant'),
+        assessmentEligible: true,
+        isQuestion: false,
+      }
+
+      setMessages(prev => {
+        const last = prev[prev.length - 1]
+        if (last?.role === 'assistant' && last.content === closingMsg.content) return prev
+        const next = [...prev, closingMsg]
+        messagesRef.current = next
+        return next
+      })
+    }
+
+    const done = () => finishClosing()
+
+    if (closingTimerRef.current) clearTimeout(closingTimerRef.current)
+
+    const fallbackMs = audioBase64 && !isMutedRef.current && audioReadyRef.current ? 15000 : 6000
+    closingTimerRef.current = setTimeout(done, fallbackMs)
+
+    if (audioBase64 && !isMutedRef.current && audioReadyRef.current) {
+      try {
+        const audio = new Audio(`data:audio/mpeg;base64,${audioBase64}`)
+        audioRef.current = audio
+
+        audio.onplay = () => setIsSpeaking(true)
+
+        audio.onended = () => {
+          setIsSpeaking(false)
+          if (audioRef.current === audio) audioRef.current = null
+
+          // Keep the closing message visible briefly after the farewell audio ends.
+          // This prevents the report screen from appearing too abruptly.
+          setTimeout(done, 2000)
+        }
+
+        audio.onerror = () => {
+          setIsSpeaking(false)
+          done()
+        }
+
+        audio.play().catch(() => {
+          setIsSpeaking(false)
+          done()
+        })
+      } catch {
+        setIsSpeaking(false)
+        done()
+      }
+    }
+  }, [finishClosing])
+
+  const closeAfterFinalAnswer = useCallback(() => {
+    awaitingFinalAnswerRef.current = false
+    setIsAwaitingFinalAnswer(false)
+    beginClosing(genericClosingMessage(), null)
+  }, [beginClosing, genericClosingMessage])
+
+  // CLOSING FLOW FIX
+  // Requests closing. If Barbaros is speaking, wait for audio to finish.
+  // If forced, start immediately to avoid reaching 0:00 without farewell.
+  const requestClosing = useCallback((message: string, audioBase64?: string | null, force = false) => {
+    if (isClosingRef.current || isEndedRef.current) return
+
+    pendingClosingRef.current = true
+    pendingClosingMessage.current = message
+    pendingClosingAudio.current = audioBase64 ?? null
+    setPendingAudio(null)
+
+    if (!force && isSpeakingRef.current) {
+      return
+    }
+
+    const finalMessage = pendingClosingMessage.current || message
+    const finalAudio = pendingClosingAudio.current
+
+    pendingClosingRef.current = false
+    pendingClosingMessage.current = null
+    pendingClosingAudio.current = null
+
+    beginClosing(finalMessage, finalAudio)
+  }, [beginClosing])
+
+  useEffect(() => {
+    if (!serverTimerStarted) return
+
+    const id = setInterval(() => {
+      setTimeLeft(prev => {
+        if (prev <= 1) {
+          clearInterval(id)
+          return 0
+        }
+        return prev - 1
+      })
+    }, 1000)
+
+    return () => clearInterval(id)
+  }, [serverTimerStarted])
+
+  // CLOSING FLOW FIX
+  // Do not cut off the candidate at 0:00.
+  // If the final assessment question has been asked, wait for the candidate's
+  // answer, then close. If no final answer is pending and the timer reaches zero,
+  // show the farewell and move to the report.
+  useEffect(() => {
+    if (isEndedRef.current || isClosingRef.current) return
+
+    if (
+      timeLeft <= CLOSING_FORCE_SECONDS &&
+      (!awaitingFinalAnswerRef.current || isPausedRef.current) &&
+      !isLoading &&
+      !isRecording &&
+      !isTranscribing
+    ) {
+      requestClosing(genericClosingMessage(), null, true)
+    }
+  }, [
+    timeLeft,
+    isLoading,
+    isRecording,
+    isTranscribing,
+    requestClosing,
+    genericClosingMessage,
+  ])
+
+  const formatTime = (s: number) => {
+    const m = Math.floor(s / 60)
+    const sec = s % 60
+    return `${m}:${sec.toString().padStart(2, '0')}`
+  }
+
+  useEffect(() => {
+    if (audioReady && pendingAudio && !pendingClosingRef.current && !isClosingRef.current) {
+      playAudioDirect(pendingAudio)
+      setPendingAudio(null)
+    }
+  }, [audioReady, pendingAudio])
+
+  const playAudioDirect = (audioBase64: string) => {
+    if (isMutedRef.current) return
+    if (isClosingRef.current || pendingClosingRef.current) return
+
+    try {
+      if (audioRef.current) {
+        audioRef.current.pause()
+        audioRef.current.src = ''
+        audioRef.current = null
+      }
+
+      const audio = new Audio(`data:audio/mpeg;base64,${audioBase64}`)
+      audioRef.current = audio
+
+      audio.onplay = () => { setIsSpeaking(true) }
+
+      audio.onended = () => {
+        setIsSpeaking(false)
+
+        if (audioRef.current === audio) audioRef.current = null
+
+        if (pendingClosingRef.current) {
+          const finalMessage = pendingClosingMessage.current || genericClosingMessage()
+          const finalAudio = pendingClosingAudio.current
+
+          pendingClosingRef.current = false
+          pendingClosingMessage.current = null
+          pendingClosingAudio.current = null
+
+          beginClosing(finalMessage, finalAudio)
+          return
+        }
+
+        if (!isClosingRef.current) resetSilenceTimer()
+      }
+
+      audio.onerror = () => {
+        setIsSpeaking(false)
+
+        if (pendingClosingRef.current) {
+          const finalMessage = pendingClosingMessage.current || genericClosingMessage()
+          const finalAudio = pendingClosingAudio.current
+
+          pendingClosingRef.current = false
+          pendingClosingMessage.current = null
+          pendingClosingAudio.current = null
+
+          beginClosing(finalMessage, finalAudio)
+        }
+      }
+
+      audio.play().catch(err => {
+        setIsSpeaking(false)
+        console.warn('Audio play failed:', err)
+
+        if (pendingClosingRef.current) {
+          const finalMessage = pendingClosingMessage.current || genericClosingMessage()
+          const finalAudio = pendingClosingAudio.current
+
+          pendingClosingRef.current = false
+          pendingClosingMessage.current = null
+          pendingClosingAudio.current = null
+
+          beginClosing(finalMessage, finalAudio)
+        }
+      })
+    } catch (err) {
+      setIsSpeaking(false)
+      console.warn('Audio error:', err)
+    }
+  }
+
+  const playAudio = useCallback((audioBase64: string) => {
+    if (isMutedRef.current) return
+    if (isClosingRef.current || pendingClosingRef.current) return
+
+    if (!audioReadyRef.current) {
+      setPendingAudio(audioBase64)
+      return
+    }
+
+    playAudioDirect(audioBase64)
+  }, [])
+
+  const stopAudio = () => {
+    if (audioRef.current) {
+      audioRef.current.pause()
+      audioRef.current.src = ''
+      audioRef.current = null
+    }
+    setPendingAudio(null)
+    setIsSpeaking(false)
+  }
+
+  const stopMediaCapture = useCallback(() => {
+    const recorder = mediaRecorderRef.current
+
+    if (recorder) {
+      recorder.ondataavailable = null
+      recorder.onstop = null
+
+      if (recorder.state !== 'inactive') {
+        try { recorder.stop() } catch {}
+      }
+
+      recorder.stream.getTracks().forEach(track => track.stop())
+    }
+
+    mediaRecorderRef.current = null
+    audioChunksRef.current = []
+    setIsRecording(false)
+    isRecordingRef.current = false
+    setIsTranscribing(false)
+    isTranscribingRef.current = false
+  }, [])
+
+  const handleFirstInteraction = useCallback(() => {
+    if (!audioReadyRef.current) {
+      audioReadyRef.current = true
+      setAudioReady(true)
+    }
+  }, [])
+
+  const toggleMute = () => {
+    const next = !isMuted
+    setIsMuted(next)
+    isMutedRef.current = next
+    if (next) stopAudio()
+  }
+
+  // SILENCE → UI pause only. The server-side interview clock continues.
+  const resetSilenceTimer = useCallback(() => {
+    if (silenceTimer.current) clearTimeout(silenceTimer.current)
+
+    silenceTimer.current = setTimeout(() => {
+      if (
+        !isLoadingRef.current &&
+        !isEndedRef.current &&
+        !isClosingRef.current &&
+        !isRecordingRef.current &&
+        !isTranscribingRef.current &&
+        !isSpeakingRef.current &&
+        pauseReasonRef.current !== 'conduct'
+      ) {
+        setIsPaused(true)
+        isPausedRef.current = true
+        setPauseReason('inactivity')
+        pauseReasonRef.current = 'inactivity'
+      }
+    }, 45000)
+  }, [])
+
+  const isConductPaused = () => pauseReasonRef.current === 'conduct'
+
+  const clearInactivityPause = () => {
+    if (pauseReasonRef.current !== 'inactivity') return
+
+    setIsPaused(false)
+    isPausedRef.current = false
+    setPauseReason(null)
+    pauseReasonRef.current = null
+  }
+
+  const startRecording = async () => {
+    if (
+      isLoading ||
+      isTranscribing ||
+      isEnded ||
+      isClosing ||
+      pauseReasonRef.current === 'conduct'
+    ) return
+
+    try {
+      handleFirstInteraction()
+      setMicError(null)
+      clearInactivityPause()
+
+      if (silenceTimer.current) clearTimeout(silenceTimer.current)
+
+      stopAudio()
+      setPauseMessage(null)
+      setConductNoticeKind(null)
+
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/mp4'
+      const mediaRecorder = new MediaRecorder(stream, { mimeType })
+
+      audioChunksRef.current = []
+
+      mediaRecorder.ondataavailable = e => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data)
+      }
+
+      mediaRecorder.start()
+      mediaRecorderRef.current = mediaRecorder
+      setIsRecording(true)
+      isRecordingRef.current = true
+    } catch (err: any) {
+      const msg = err.name === 'NotAllowedError' ? 'Microphone access denied' : 'Could not access microphone'
+      setMicError(msg)
+      setShowTextInput(true)
+    }
+  }
+
+  const stopRecording = async () => {
+    if (
+      !isRecordingRef.current ||
+      !mediaRecorderRef.current ||
+      pauseReasonRef.current === 'conduct'
+    ) return
+
+    setIsRecording(false)
+    isRecordingRef.current = false
+
+    const mediaRecorder = mediaRecorderRef.current
+    mediaRecorder.stream.getTracks().forEach(track => track.stop())
+
+    await new Promise<void>(resolve => {
+      mediaRecorder.onstop = () => resolve()
+      mediaRecorder.stop()
+    })
+
+    mediaRecorderRef.current = null
+    const blob = new Blob(audioChunksRef.current, { type: mediaRecorder.mimeType || 'audio/webm' })
+    audioChunksRef.current = []
+
+    if (blob.size < 1000) {
+      resetSilenceTimer()
+      return
+    }
+
+    setIsTranscribing(true)
+    isTranscribingRef.current = true
+
+    try {
+      const fd = new FormData()
+      fd.append('audio', blob, 'recording.webm')
+      fd.append('language', CONFIG.language)
+
+      const res = await fetch('/api/transcribe', { method: 'POST', body: fd })
+      const data = await res.json()
+      const text = typeof data.text === 'string' ? data.text.trim() : ''
+
+      if (text && !isConductPaused()) {
+        const userMsg: Message = {
+          role: 'user',
+          content: text,
+          timestamp: Date.now(),
+          clientMessageId: createClientMessageId('user'),
+          assessmentEligible: true,
+        }
+        const newMessages = [...messagesRef.current, userMsg]
+
+        messagesRef.current = newMessages
+        setMessages(newMessages)
+        setInput('')
+        setPauseMessage(null)
+        setConductNoticeKind(null)
+
+        if (awaitingFinalAnswerRef.current) {
+          closeAfterFinalAnswer()
+          return
+        }
+
+        await callAdam(newMessages)
+      } else {
+        resetSilenceTimer()
+      }
+    } catch (err) {
+      console.error('Transcription error:', err)
+      resetSilenceTimer()
+    } finally {
+      setIsTranscribing(false)
+      isTranscribingRef.current = false
+    }
+  }
+
+  const toggleRecording = () => {
+    if (
+      isLoading ||
+      isTranscribing ||
+      isEnded ||
+      isClosing ||
+      pauseReasonRef.current === 'conduct'
+    ) return
+
+    if (isRecordingRef.current) {
+      void stopRecording()
+    } else {
+      void startRecording()
+    }
+  }
+
+  // One network attempt. State mutation remains in the caller.
+  const attemptInterviewCall = async (
+    msgs: Message[],
+    controlAction?: ControlAction
+  ) => {
+    const res = await fetch('/api/interview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sessionId: CONFIG.sessionId,
+        config: CONFIG,
+        messages: msgs,
+        sessionToken: sessionTokenRef.current,
+        ...(controlAction ? { controlAction } : {}),
+      }),
+    })
+
+    let data: any = null
+    try {
+      data = await res.json()
+    } catch {
+      data = null
+    }
+
+    if (!res.ok || !data?.success) {
+      const error = new Error(
+        typeof data?.error === 'string' ? data.error : 'interview_call_failed'
+      ) as Error & { code?: string; status?: number }
+      error.code = typeof data?.code === 'string' ? data.code : undefined
+      error.status = res.status
+      throw error
+    }
+
+    if (typeof data.sessionToken === 'string' && data.sessionToken.length > 0) {
+      sessionTokenRef.current = data.sessionToken
+      try {
+        sessionStorage.setItem(sessionTokenStorageKey, data.sessionToken)
+      } catch {}
+    } else if (data.sessionToken === null) {
+      sessionTokenRef.current = null
+      try {
+        sessionStorage.removeItem(sessionTokenStorageKey)
+      } catch {}
+    }
+
+    return data
+  }
+
+  const applyInterviewResponse = (
+    data: any,
+    attemptedMessages: Message[],
+    controlAction?: ControlAction
+  ) => {
+    setServerTimerStarted(true)
+
+    if (typeof data.remainingSeconds === 'number' && Number.isFinite(data.remainingSeconds)) {
+      setTimeLeft(Math.max(0, Math.floor(data.remainingSeconds)))
+    }
+
+    let nextMessages = attemptedMessages
+
+    if (data.excludeLastUserMessageFromAssessment === true) {
+      const lastUserIndex = [...attemptedMessages]
+        .map((message, index) => ({ message, index }))
+        .reverse()
+        .find(item => item.message.role === 'user')?.index
+
+      if (lastUserIndex !== undefined) {
+        nextMessages = attemptedMessages.map((message, index) =>
+          index === lastUserIndex
+            ? { ...message, assessmentEligible: false }
+            : message
+        )
+      }
+    }
+
+    const content = typeof data.content === 'string' ? data.content.trim() : ''
+    if (content) {
+      const newMsg: Message = {
+        role: 'assistant',
+        content,
+        timestamp: Date.now(),
+        clientMessageId: createClientMessageId('assistant'),
+        score: data.excludeResponseFromAssessment === true ? undefined : data.score,
+        isQuestion: isQuestionLike(content),
+        assessmentEligible: data.excludeResponseFromAssessment !== true,
+      }
+      nextMessages = [...nextMessages, newMsg]
+    }
+
+    messagesRef.current = nextMessages
+    setMessages(nextMessages)
+
+    const responseCoveredAreas = normalizeCoveredAreas(data.coveredAreas)
+    if (data.isEndOfSession) {
+      coveredAreasRef.current = responseCoveredAreas
+    }
+
+    const responseKind = typeof data.responseKind === 'string' ? data.responseKind : 'interview'
+
+    if (data.sessionPaused === true) {
+      stopAudio()
+      stopMediaCapture()
+      if (silenceTimer.current) clearTimeout(silenceTimer.current)
+
+      setIsPaused(true)
+      isPausedRef.current = true
+      setPauseReason('conduct')
+      pauseReasonRef.current = 'conduct'
+      setPauseMessage(content || L.conductPausedSub)
+      setConductNoticeKind('pause')
+      setShowTextInput(false)
+      setShowEndModal(false)
+      setCallError(null)
+      return
+    }
+
+    if (controlAction === 'resume') {
+      setIsPaused(false)
+      isPausedRef.current = false
+      setPauseReason(null)
+      pauseReasonRef.current = null
+      setPauseMessage(null)
+      setConductNoticeKind(null)
+    } else if (responseKind === 'redirect' || responseKind === 'warning') {
+      setPauseMessage(content)
+      setConductNoticeKind(responseKind)
+    } else {
+      setPauseMessage(null)
+      setConductNoticeKind(null)
+    }
+
+    const assessmentResponse = data.excludeResponseFromAssessment !== true
+
+    if (
+      assessmentResponse &&
+      !data.isEndOfSession &&
+      !finalQuestionAskedRef.current &&
+      timeLeft <= FINAL_QUESTION_WINDOW_SECONDS &&
+      isQuestionLike(content)
+    ) {
+      markFinalQuestionAsked()
+    }
+
+    if (assessmentResponse && data.focus) setCurrentFocus(data.focus)
+    if (assessmentResponse && data.score) setQuestionCount(prev => prev + 1)
+
+    if (data.isEndOfSession) {
+      requestClosing(content, data.audioBase64, false)
+      return
+    }
+
+    if (
+      assessmentResponse &&
+      timeLeft <= CLOSING_REQUEST_SECONDS &&
+      isQuestionLike(content)
+    ) {
+      markFinalQuestionAsked()
+    }
+
+    if (data.audioBase64) playAudio(data.audioBase64)
+    resetSilenceTimer()
+  }
+
+  // One silent automatic retry. The route deduplicates the exact request.
+  const callAdam = async (
+    msgs: Message[],
+    controlAction?: ControlAction
+  ) => {
+    if (isSubmittingRef.current) return
+
+    isSubmittingRef.current = true
+    lastAttemptedCallRef.current = { messages: msgs, controlAction }
+
+    setCallError(null)
+    setIsLoading(true)
+    setServerTimerStarted(true)
+    handleFirstInteraction()
+
+    if (silenceTimer.current) clearTimeout(silenceTimer.current)
+
+    try {
+      let data
+      try {
+        data = await attemptInterviewCall(msgs, controlAction)
+      } catch (firstErr) {
+        console.warn('[interview] first attempt failed, retrying silently:', firstErr)
+        await new Promise(resolve => setTimeout(resolve, SILENT_RETRY_DELAY_MS))
+        data = await attemptInterviewCall(msgs, controlAction)
+      }
+
+      applyInterviewResponse(data, msgs, controlAction)
+    } catch (err) {
+      console.error('[interview] call failed after silent retry:', err)
+      const typedError = err as Error & { code?: string }
+
+      if (typedError.code === 'SESSION_NOT_FOUND') {
+        sessionTokenRef.current = null
+        try {
+          sessionStorage.removeItem(sessionTokenStorageKey)
+        } catch {}
+      }
+
+      setCallError(typedError.code === 'SESSION_NOT_FOUND' ? L.sessionMissing : L.connIssueBody)
+    } finally {
+      isSubmittingRef.current = false
+      setIsLoading(false)
+    }
+  }
+
+  const retryLastCall = useCallback(() => {
+    const call = lastAttemptedCallRef.current
+    if (!call) return
+    setCallError(null)
+    void callAdam(call.messages, call.controlAction)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const resumeInterview = async () => {
+    if (
+      pauseReasonRef.current !== 'conduct' ||
+      isLoading ||
+      isSubmittingRef.current ||
+      isEnded ||
+      isClosing
+    ) return
+
+    stopAudio()
+    stopMediaCapture()
+    if (silenceTimer.current) clearTimeout(silenceTimer.current)
+    await callAdam(messagesRef.current, 'resume')
+  }
+
+  const sendMessage = async () => {
+    if (
+      !input.trim() ||
+      isLoading ||
+      isEnded ||
+      isClosing ||
+      pauseReasonRef.current === 'conduct'
+    ) return
+
+    handleFirstInteraction()
+    clearInactivityPause()
+
+    if (silenceTimer.current) clearTimeout(silenceTimer.current)
+
+    stopAudio()
+    setPauseMessage(null)
+    setConductNoticeKind(null)
+
+    const userMsg: Message = {
+      role: 'user',
+      content: input.trim(),
+      timestamp: Date.now(),
+      clientMessageId: createClientMessageId('user'),
+      assessmentEligible: true,
+    }
+    const newMessages = [...messagesRef.current, userMsg]
+
+    messagesRef.current = newMessages
+    setMessages(newMessages)
+    setInput('')
+
+    if (awaitingFinalAnswerRef.current) {
+      closeAfterFinalAnswer()
+      return
+    }
+
+    await callAdam(newMessages)
+  }
+
+  const handleKey = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      sendMessage()
+    }
+  }
+
+  const genSteps = CONFIG.language === 'ar'
+    ? ['تحليل اتساق إجاباتك...', 'مراجعة العمق التخصصي...', 'رصد الأنماط السلوكية...', 'إعداد تقييم التوظيف...']
+    : ['Analyzing answer consistency...', 'Reviewing domain depth...', 'Detecting behavioral patterns...', 'Generating hiring evaluation...']
+
+const goToReport = async () => {
+  setGenError(null)
+  setIsGenerating(true)
+  setGenStep(0)
+
+  if (silenceTimer.current) clearTimeout(silenceTimer.current)
+
+  stopAudio()
+
+  const stepTimer = setInterval(() => {
+    setGenStep(prev => (prev + 1) % genSteps.length)
+  }, 2200)
+
+  const reportMessages = messagesRef.current
+    .filter(message => message.assessmentEligible !== false)
+    .map(({ assessmentEligible, clientMessageId, ...message }) => message)
+
+  try {
+    const res = await fetch('/api/report/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session_id: CONFIG.sessionId,
+        messages: reportMessages,
+        covered_areas: coveredAreasRef.current,
+        config: {
+          candidateName:   CONFIG.candidateName,
+          jobTitle:        CONFIG.jobTitle,
+          institution:     CONFIG.institution,
+          sector:          CONFIG.sector,
+          yearsExperience: CONFIG.yearsExperience,
+          language:        CONFIG.language,
+          plan:            CONFIG.plan,
+          coveredAreas:    coveredAreasRef.current,
+        },
+      }),
+    })
+
+    const data = await res.json()
+
+    if (!res.ok || !data.reportJobId) {
+      throw new Error(data.error || 'Report job creation failed')
+    }
+
+    clearInterval(stepTimer)
+
+    window.location.href = `/report?reportJobId=${encodeURIComponent(
+      data.reportJobId
+    )}`
+  } catch (err: any) {
+    clearInterval(stepTimer)
+    setIsGenerating(false)
+    setGenError(
+      CONFIG.language === 'ar'
+        ? 'تعذّر إنشاء التقرير. حاول مرة أخرى.'
+        : 'Could not generate the report. Please try again.'
     )
   }
+}
 
-  if (phase === 'ready' && data) {
-    return <ReportView data={data} />
+  // Time-up or engine-signalled end now routes through isClosing first.
+  // goToReport runs only after finishClosing sets isEnded.
+  useEffect(() => {
+    if (isEnded && !isGenerating && !genError) goToReport()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isEnded])
+
+  const started = messages.length > 0 || isLoading
+  const lastQuestion = [...messages]
+    .reverse()
+    .find(message =>
+      message.role === 'assistant' && message.assessmentEligible !== false
+    )?.content || ''
+
+  // Presence state
+  let stateLabel = L.ready
+  let stateSub   = L.readySub
+  let glow       = '#3A4252'
+  let stateKey   = 'ready'
+
+  if (isPaused) {
+    stateLabel = L.paused
+    stateSub = pauseReason === 'conduct' ? L.conductPausedSub : L.pausedSub
+    glow = '#6B7280'
+    stateKey = 'paused'
+  } else if (isAwaitingFinalAnswer) {
+    stateLabel = L.ready
+    stateSub = CONFIG.language === 'ar'
+      ? 'أجب عن السؤال الأخير، ثم سيتم تجهيز التقرير.'
+      : 'Answer the final question, then your report will be prepared.'
+    glow = '#3A4252'
+    stateKey = 'ready'
+  } else if (isClosing) {
+    stateLabel = L.closing
+    stateSub = L.closingSub
+    glow = '#CC785C'
+    stateKey = 'speaking'
+  } else if (isSpeaking) {
+    stateLabel = L.speaking
+    stateSub = L.speakingSub
+    glow = '#CC785C'
+    stateKey = 'speaking'
+  } else if (isLoading || isTranscribing) {
+    stateLabel = L.evaluating
+    stateSub = L.evaluatingSub
+    glow = '#F59E0B'
+    stateKey = 'evaluating'
+  } else if (isRecording) {
+    stateLabel = L.listening
+    stateSub = L.listeningSub
+    glow = '#8B96FF'
+    stateKey = 'listening'
   }
 
-  if (phase === 'failed' || phase === 'error') {
-    const isArF = lang === 'ar'
-    const ref = shortReference(reportJobId)
+  const animated = stateKey === 'speaking' || stateKey === 'evaluating' || stateKey === 'listening'
+  const sessionMissingError = callError === L.sessionMissing
 
+  if (!mounted) {
     return (
-      <div
-        dir={isArF ? 'rtl' : 'ltr'}
-        style={{
-          minHeight: '100vh',
-          background: '#F5F1EB',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          fontFamily: 'system-ui, sans-serif',
-          padding: 24,
-        }}
-      >
-        <div
-          style={{
-            width: '100%',
-            maxWidth: 440,
-            background: '#FFFFFF',
-            border: '1px solid #E5DDD0',
-            borderRadius: 22,
-            padding: '30px 26px',
-            boxShadow: '0 12px 34px rgba(26,26,26,0.07)',
-            textAlign: 'center',
-          }}
-        >
-          <Barbaros size={24} />
-
-          <div
-            style={{
-              marginTop: 16,
-              fontFamily: SERIF,
-              fontSize: 17,
-              fontWeight: 700,
-              color: '#1A1A1A',
-            }}
-          >
-            {isArF ? 'تعذّر تجهيز التقرير حالياً' : 'Your report could not be prepared right now'}
-          </div>
-
-          <div
-            style={{
-              marginTop: 10,
-              fontSize: 12.5,
-              color: 'rgba(26,26,26,0.55)',
-              lineHeight: 1.8,
-            }}
-          >
-            {isArF
-              ? 'بيانات مقابلتك محفوظة ولم تُفقد. يمكنك إعادة المحاولة لاحقاً بفتح هذا الرابط نفسه، أو بدء مقابلة جديدة.'
-              : 'Your interview data is saved and has not been lost. You can retry later by reopening this same link, or start a new interview.'}
-          </div>
-
-          {ref && (
-            <div
-              style={{
-                marginTop: 16,
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 8,
-                background: '#F5F1EB',
-                border: '0.5px solid #E5DDD0',
-                borderRadius: 10,
-                padding: '8px 14px',
-              }}
-            >
-              <span style={{ fontSize: 11, color: 'rgba(26,26,26,0.5)', fontWeight: 600 }}>
-                {isArF ? 'الرقم المرجعي' : 'Reference'}
-              </span>
-              <span
-                style={{
-                  fontSize: 12,
-                  fontWeight: 800,
-                  color: '#1A1A1A',
-                  letterSpacing: 1,
-                  fontFamily: 'ui-monospace, monospace',
-                  direction: 'ltr',
-                }}
-              >
-                {ref}
-              </span>
-            </div>
-          )}
-
-          <div style={{ marginTop: 22, display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <button
-              onClick={() => window.location.reload()}
-              style={{
-                background: '#1A1A1A',
-                color: '#FFFFFF',
-                border: 'none',
-                borderRadius: 12,
-                padding: '12px 28px',
-                fontSize: 13,
-                fontWeight: 700,
-                cursor: 'pointer',
-                fontFamily: 'inherit',
-              }}
-            >
-              {isArF ? 'تحديث حالة التقرير' : 'Refresh Report Status'}
-            </button>
-
-            <button
-              onClick={() => router.push('/onboarding')}
-              style={{
-                background: 'transparent',
-                color: '#CC785C',
-                border: '1px solid #CC785C',
-                borderRadius: 12,
-                padding: '12px 28px',
-                fontSize: 13,
-                fontWeight: 700,
-                cursor: 'pointer',
-                fontFamily: 'inherit',
-              }}
-            >
-              {isArF ? 'بدء مقابلة جديدة' : 'Start a New Interview'}
-            </button>
-          </div>
-
-          <div
-            style={{
-              marginTop: 18,
-              paddingTop: 14,
-              borderTop: '0.5px solid rgba(26,26,26,0.08)',
-              fontSize: 11,
-              color: 'rgba(26,26,26,0.38)',
-              lineHeight: 1.7,
-            }}
-          >
-            {isArF
-              ? 'احتفظ بالرقم المرجعي عند التواصل مع الدعم.'
-              : 'Keep the reference number when contacting support.'}
-          </div>
+      <div style={{ fontFamily: 'system-ui, sans-serif', background: '#0B0D11', color: '#F0EDE8', minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
+        <div style={{ fontWeight: 900, fontSize: 22 }}>
+          <span style={{ color: '#F0EDE8' }}>Barbar</span><span style={{ color: '#CC785C' }}>os</span>
         </div>
+        <div style={{ fontSize: 12, color: 'rgba(240,237,232,0.4)' }}>Preparing your interview…</div>
       </div>
     )
   }
 
-  // loading (pending | processing | initial)
-  return <GeneratingScreen lang={lang} tier={planTier} />
+  // CLOSING FLOW FIX
+  // This screen appears before report generation. It lets the candidate see and hear the farewell.
+  if (isClosing) {
+    const lastClosingMessage = [...messages]
+      .reverse()
+      .find(message =>
+        message.role === 'assistant' && message.assessmentEligible !== false
+      )?.content || genericClosingMessage()
+
+    return (
+      <div style={{ fontFamily: 'system-ui, sans-serif', background: '#0B0D11', color: '#F0EDE8', minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 24, textAlign: 'center' }}>
+        <div style={{ fontWeight: 900, fontSize: 20, marginBottom: 28 }}>
+          <span style={{ color: '#F0EDE8' }}>Barbar</span><span style={{ color: '#CC785C' }}>os</span>
+        </div>
+
+        <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 28 }}>
+          <div className="ring" style={{ borderColor: 'rgba(204,120,92,0.35)' }} />
+          <div className="ring ring2" style={{ borderColor: 'rgba(204,120,92,0.22)' }} />
+          <div className="orb breathe" style={{ boxShadow: '0 0 70px rgba(204,120,92,0.45), inset 0 0 44px rgba(204,120,92,0.14)', borderColor: 'rgba(204,120,92,0.55)' }}>
+            <div style={{ fontWeight: 900, fontSize: 28 }}>
+              <span style={{ color: '#F0EDE8' }}>B</span><span style={{ color: '#CC785C' }}>os</span>
+            </div>
+          </div>
+        </div>
+
+        <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 0.6, textTransform: 'uppercase', color: '#CC785C', marginBottom: 8 }}>
+          {L.closing}
+        </div>
+
+        <div style={{ fontSize: 11, color: 'rgba(240,237,232,0.4)', marginBottom: 22 }}>
+          {L.closingSub}
+        </div>
+
+        <div style={{ maxWidth: 520, fontSize: 17, lineHeight: 1.7, fontWeight: 500, color: '#F0EDE8' }}>
+          {lastClosingMessage}
+        </div>
+
+        <style>{`
+          .orb {
+            width: 150px; height: 150px; border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            background: radial-gradient(circle at 50% 40%, rgba(255,255,255,0.05), rgba(15,17,23,0.9));
+            border: 1px solid; transition: box-shadow .4s, border-color .4s;
+          }
+          .breathe { animation: breathe 2.6s ease-in-out infinite; }
+          .ring {
+            position: absolute; width: 150px; height: 150px; border-radius: 50%;
+            border: 1px solid; animation: ringPulse 2.2s ease-out infinite;
+          }
+          .ring2 { animation-delay: 1.1s; }
+          @keyframes breathe { 0%,100% { transform: scale(1) } 50% { transform: scale(1.04) } }
+          @keyframes ringPulse {
+            0%   { transform: scale(1);   opacity: .7 }
+            100% { transform: scale(1.7); opacity: 0 }
+          }
+        `}</style>
+      </div>
+    )
+  }
+
+  // Ended → Generating report
+  if (isEnded) {
+    return (
+      <div style={{ fontFamily: 'system-ui, sans-serif', background: '#0B0D11', color: '#F0EDE8', minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 24, textAlign: 'center' }}>
+        <div style={{ fontWeight: 900, fontSize: 20, marginBottom: 28 }}>
+          <span style={{ color: '#F0EDE8' }}>Barbar</span><span style={{ color: '#CC785C' }}>os</span>
+        </div>
+
+        {genError ? (
+          <>
+            <div style={{ fontSize: 13, color: '#F87171', marginBottom: 18, maxWidth: 360 }}>{genError}</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, width: 260 }}>
+              <button type="button" onClick={goToReport}
+                style={{ padding: '12px 24px', background: '#CC785C', border: 'none', borderRadius: 10, color: '#fff', fontSize: 14, fontWeight: 800, cursor: 'pointer', fontFamily: 'inherit' }}>
+                {L.retry}
+              </button>
+
+              <button type="button" onClick={() => { window.location.href = '/onboarding' }}
+                style={{ padding: '11px 24px', background: 'transparent', border: '0.5px solid rgba(255,255,255,0.15)', borderRadius: 10, color: 'rgba(240,237,232,0.6)', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
+                {L.newInterview}
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 12 }}>{L.complete}</div>
+
+            <div style={{ display: 'flex', justifyContent: 'center', gap: 6, margin: '8px 0 16px' }}>
+              {[0,1,2].map(i => (
+                <div key={i} className="bdot" style={{ animationDelay: `${i * 0.2}s` }} />
+              ))}
+            </div>
+
+            <div style={{ fontSize: 14, color: '#F0EDE8', fontWeight: 600, minHeight: 20, transition: 'opacity .3s' }}>{genSteps[genStep]}</div>
+            <div style={{ fontSize: 11, color: 'rgba(240,237,232,0.4)', marginTop: 6 }}>{L.generating}</div>
+          </>
+        )}
+
+        <style>{`
+          .bdot { width: 9px; height: 9px; background: #CC785C; border-radius: 50%; animation: pulse 1.2s infinite; }
+          @keyframes pulse { 0%,100% { opacity: .3; transform: scale(.8) } 50% { opacity: 1; transform: scale(1.2) } }
+        `}</style>
+      </div>
+    )
+  }
+
+  // Main Executive Interview Room
+  return (
+    <div
+      onClick={handleFirstInteraction}
+      style={{ fontFamily: 'system-ui, sans-serif', background: '#0B0D11', color: '#F0EDE8', minHeight: '100vh', display: 'flex', flexDirection: 'column', position: 'relative', overflow: 'hidden' }}
+    >
+      {/* Top bar */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 18px', borderBottom: '0.5px solid rgba(255,255,255,0.07)', background: 'rgba(15,17,23,0.6)' }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{CONFIG.jobTitle}</div>
+          <div style={{ fontSize: 10, color: 'rgba(240,237,232,0.4)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{CONFIG.institution}</div>
+        </div>
+
+        <div style={{ textAlign: 'center', flexShrink: 0, padding: '0 12px' }}>
+          <div style={{ fontWeight: 900, fontSize: 15, letterSpacing: 0.3 }}>
+            <span style={{ color: '#F0EDE8' }}>BARBAR</span><span style={{ color: '#CC785C' }}>OS</span>
+          </div>
+          <div style={{ fontSize: 9, color: 'rgba(240,237,232,0.45)', letterSpacing: 0.5, textTransform: 'uppercase', marginTop: 1 }}>{L.sessionActive}</div>
+        </div>
+
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+          <span style={{ fontWeight: 900, fontSize: 16, color: timeLeft < 60 ? '#F87171' : '#F0EDE8' }}>{formatTime(timeLeft)}</span>
+          <button type="button" onClick={toggleMute}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 9, color: 'rgba(240,237,232,0.5)', display: 'flex', alignItems: 'center', gap: 4, padding: 0, fontFamily: 'inherit' }}>
+            {isMuted ? '🔇' : '🔊'} {isMuted ? L.audioMuted : L.audioOn}
+          </button>
+        </div>
+      </div>
+
+      {started && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '8px 18px 0' }}>
+          <button type="button" onClick={() => setShowTranscript(true)}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(240,237,232,0.4)', fontSize: 11, fontFamily: 'inherit', textDecoration: 'underline', textUnderlineOffset: 3 }}>
+            {L.transcript}
+          </button>
+        </div>
+      )}
+
+      {/* Center: Barbaros presence */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 26, padding: '20px 24px' }}>
+        {!started ? (
+          <>
+            <div className="orb" style={{ boxShadow: `0 0 60px ${glow}55, inset 0 0 40px ${glow}22`, borderColor: `${glow}66` }}>
+              <div style={{ fontWeight: 900, fontSize: 26 }}>
+                <span style={{ color: '#F0EDE8' }}>B</span><span style={{ color: '#CC785C' }}>os</span>
+              </div>
+            </div>
+
+            <div style={{ textAlign: 'center' }}>
+              <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 6 }}>{L.readyTitle}</div>
+              <div style={{ fontSize: 12, color: 'rgba(240,237,232,0.5)' }}>{CONFIG.candidateName} · {CONFIG.jobTitle}</div>
+            </div>
+
+            <button type="button" onClick={() => callAdam([])}
+              style={{ padding: '13px 36px', background: '#CC785C', border: 'none', borderRadius: 12, color: '#fff', fontSize: 14, fontWeight: 800, cursor: 'pointer', fontFamily: 'inherit', boxShadow: '0 6px 24px rgba(204,120,92,0.35)' }}>
+              {L.begin}
+            </button>
+          </>
+        ) : (
+          <>
+            <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              {animated && <div className="ring" style={{ borderColor: `${glow}55` }} />}
+              {animated && <div className="ring ring2" style={{ borderColor: `${glow}33` }} />}
+              <div className={animated ? 'orb breathe' : 'orb'} style={{ boxShadow: `0 0 70px ${glow}66, inset 0 0 44px ${glow}22`, borderColor: `${glow}77` }}>
+                <div style={{ fontWeight: 900, fontSize: 28 }}>
+                  <span style={{ color: '#F0EDE8' }}>B</span><span style={{ color: '#CC785C' }}>os</span>
+                </div>
+              </div>
+            </div>
+
+            <div style={{ textAlign: 'center' }}>
+              <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 0.6, textTransform: 'uppercase', color: glow === '#3A4252' ? 'rgba(240,237,232,0.65)' : glow, transition: 'color .3s' }}>{stateLabel}</div>
+              <div style={{ fontSize: 11, color: 'rgba(240,237,232,0.4)', marginTop: 4 }}>{stateSub}</div>
+            </div>
+
+            {lastQuestion && (
+              <div style={{ textAlign: 'center', maxWidth: 470, maxHeight: 170, overflowY: 'auto', fontSize: 17, lineHeight: 1.6, fontWeight: 500, color: '#F0EDE8', padding: '0 8px' }}>
+                {lastQuestion}
+              </div>
+            )}
+
+            {pauseMessage && conductNoticeKind && (
+              <div style={{ maxWidth: 460, width: '100%', textAlign: 'center', padding: '14px 16px', background: conductNoticeKind === 'pause' ? 'rgba(107,114,128,0.12)' : 'rgba(245,158,11,0.08)', border: conductNoticeKind === 'pause' ? '0.5px solid rgba(156,163,175,0.3)' : '0.5px solid rgba(245,158,11,0.3)', borderRadius: 14 }}>
+                <div style={{ fontSize: 12.5, color: 'rgba(240,237,232,0.82)', lineHeight: 1.7 }}>
+                  {pauseMessage}
+                </div>
+                {conductNoticeKind === 'pause' && !sessionMissingError && (
+                  <button type="button" onClick={() => void resumeInterview()} disabled={isLoading}
+                    style={{ marginTop: 12, padding: '10px 24px', background: isLoading ? '#1a1a22' : '#CC785C', border: 'none', borderRadius: 10, color: '#fff', fontSize: 13, fontWeight: 800, cursor: isLoading ? 'not-allowed' : 'pointer', fontFamily: 'inherit' }}>
+                    {L.resume}
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* INTERVIEW CALL RESILIENCE — retry panel (not a Barbaros message) */}
+            {callError && (
+              <div style={{ maxWidth: 420, width: '100%', textAlign: 'center', padding: '14px 16px', background: 'rgba(239,68,68,0.06)', border: '0.5px solid rgba(239,68,68,0.28)', borderRadius: 14 }}>
+                <div style={{ fontSize: 12, fontWeight: 800, color: '#F87171', marginBottom: 6 }}>
+                  {L.connIssueTitle}
+                </div>
+                <div style={{ fontSize: 11.5, color: 'rgba(240,237,232,0.6)', lineHeight: 1.6, marginBottom: 12 }}>
+                  {callError}
+                </div>
+                <button type="button" onClick={sessionMissingError ? () => { window.location.href = '/onboarding' } : retryLastCall} disabled={isLoading}
+                  style={{ padding: '9px 26px', background: isLoading ? '#1a1a22' : '#CC785C', border: 'none', borderRadius: 10, color: '#fff', fontSize: 13, fontWeight: 800, cursor: isLoading ? 'not-allowed' : 'pointer', fontFamily: 'inherit' }}>
+                  {sessionMissingError ? L.newInterview : L.retry}
+                </button>
+              </div>
+            )}
+
+            {currentFocus && (
+              <div style={{ textAlign: 'center', padding: '8px 16px', border: '0.5px solid rgba(255,255,255,0.08)', borderRadius: 12, background: 'rgba(255,255,255,0.02)' }}>
+                <div style={{ fontSize: 9, letterSpacing: 0.8, textTransform: 'uppercase', color: 'rgba(240,237,232,0.4)', marginBottom: 4 }}>{L.focusLabel}</div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: '#8B96FF' }}>{currentFocus}</div>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* Bottom controls */}
+      {started && (
+        <div style={{ padding: '14px 18px 22px', borderTop: '0.5px solid rgba(255,255,255,0.05)' }}>
+          {micError && pauseReason !== 'conduct' && (
+            <div style={{ textAlign: 'center', marginBottom: 12 }}>
+              <button type="button" onClick={() => setShowTextInput(true)}
+                style={{ background: 'rgba(239,68,68,0.08)', border: '0.5px solid rgba(239,68,68,0.25)', borderRadius: 8, color: '#F87171', fontSize: 11.5, padding: '7px 14px', cursor: 'pointer', fontFamily: 'inherit' }}>
+                ⌨ {L.micFail}
+              </button>
+            </div>
+          )}
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', alignItems: 'center' }}>
+            <div />
+
+            <button type="button" onClick={toggleRecording} disabled={isLoading || isTranscribing || isClosing || pauseReason === 'conduct'}
+              style={{ justifySelf: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, background: 'none', border: 'none', cursor: (isLoading || isTranscribing || isClosing || pauseReason === 'conduct') ? 'not-allowed' : 'pointer', fontFamily: 'inherit' }}>
+              <div style={{
+                width: 76, height: 76, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 30,
+                background: isRecording ? '#DC2626' : '#CC785C',
+                boxShadow: isRecording ? '0 0 28px rgba(220,38,38,0.65)' : '0 6px 22px rgba(204,120,92,0.4)',
+                transition: 'all .15s',
+                opacity: (isLoading || isTranscribing || isClosing || pauseReason === 'conduct') ? 0.4 : 1,
+              }}>
+                {isTranscribing ? '⏳' : isRecording ? '⏹' : '🎤'}
+              </div>
+              <span style={{ fontSize: 10, color: 'rgba(240,237,232,0.55)' }}>
+                {isRecording ? (CONFIG.language === 'ar' ? 'إيقاف وإرسال' : 'Tap to send') : (CONFIG.language === 'ar' ? 'تحدّث' : 'Speak')}
+              </span>
+            </button>
+
+            <div style={{ justifySelf: 'end' }}>
+              <button type="button" onClick={() => setShowEndModal(true)} disabled={pauseReason === 'conduct'}
+                style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, background: 'none', border: 'none', cursor: pauseReason === 'conduct' ? 'not-allowed' : 'pointer', color: 'rgba(248,113,113,0.7)', opacity: pauseReason === 'conduct' ? 0.35 : 1, fontFamily: 'inherit' }}>
+                <div style={{ width: 46, height: 46, borderRadius: '50%', border: '0.5px solid rgba(248,113,113,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>⛔</div>
+                <span style={{ fontSize: 10 }}>{L.end}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Transcript panel */}
+      {showTranscript && (
+        <div style={{ position: 'absolute', inset: 0, background: 'rgba(11,13,17,0.96)', display: 'flex', flexDirection: 'column', zIndex: 20 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 18px', borderBottom: '0.5px solid rgba(255,255,255,0.07)' }}>
+            <span style={{ fontSize: 13, fontWeight: 700 }}>{L.transcriptTitle}</span>
+            <button type="button" onClick={() => setShowTranscript(false)}
+              style={{ background: 'none', border: '0.5px solid rgba(255,255,255,0.2)', borderRadius: 8, color: '#F0EDE8', fontSize: 12, padding: '6px 14px', cursor: 'pointer', fontFamily: 'inherit' }}>
+              ✕ {L.close}
+            </button>
+          </div>
+
+          <div ref={chatRef} style={{ flex: 1, overflowY: 'auto', padding: '16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {messages.filter(message => message.assessmentEligible !== false).map((msg, i) => {
+              const label = msg.score?.score !== undefined ? scoreLabel(msg.score.score) : null
+
+              return (
+                <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: msg.role === 'assistant' ? 'flex-start' : 'flex-end', maxWidth: '88%', alignSelf: msg.role === 'assistant' ? 'flex-start' : 'flex-end' }}>
+                  <div style={{ background: msg.role === 'assistant' ? '#1a1f2e' : '#1E3A8A', borderRadius: 10, padding: '10px 13px', fontSize: 13, lineHeight: 1.7 }}>
+                    <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: 0.5, marginBottom: 4, textTransform: 'uppercase', color: msg.role === 'assistant' ? '#8B96FF' : 'rgba(255,255,255,0.5)' }}>
+                      {msg.role === 'assistant'
+                        ? <><span style={{ color: '#F0EDE8' }}>Barbar</span><span style={{ color: '#CC785C' }}>os</span></>
+                        : CONFIG.candidateName}
+                    </div>
+                    {msg.content}
+                    {label && (
+                      <div style={{ marginTop: 6, padding: '2px 8px', background: 'rgba(255,255,255,0.04)', borderRadius: 5, fontSize: 10, color: label.color, display: 'inline-block' }}>● {label.text}</div>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Text input panel */}
+      {showTextInput && pauseReason !== 'conduct' && (
+        <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, background: '#0F1117', borderTop: '0.5px solid rgba(255,255,255,0.1)', padding: '14px 16px', zIndex: 25, boxShadow: '0 -10px 30px rgba(0,0,0,0.4)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+            <span style={{ fontSize: 11, color: 'rgba(240,237,232,0.5)' }}>{L.typeHere}</span>
+            <button type="button" onClick={() => setShowTextInput(false)}
+              style={{ background: 'none', border: 'none', color: 'rgba(240,237,232,0.5)', fontSize: 14, cursor: 'pointer' }}>✕</button>
+          </div>
+
+          <div style={{ display: 'flex', gap: 8 }}>
+            <textarea ref={inputRef} value={input} onChange={e => setInput(e.target.value)} onKeyDown={handleKey}
+              placeholder={L.typeHere} disabled={isLoading || isClosing} rows={1}
+              style={{ flex: 1, background: '#16181F', border: '0.5px solid rgba(255,255,255,0.08)', color: '#F0EDE8', fontFamily: 'inherit', fontSize: 13, padding: '10px 12px', borderRadius: 8, outline: 'none', resize: 'none' }} />
+
+            <button type="button" onClick={sendMessage} disabled={isLoading || isClosing || !input.trim()}
+              style={{ width: 46, background: (isLoading || isClosing || !input.trim()) ? '#1a1a22' : '#2563EB', border: 'none', borderRadius: 8, cursor: (isLoading || isClosing || !input.trim()) ? 'not-allowed' : 'pointer', color: '#fff', fontSize: 18, flexShrink: 0 }}>→</button>
+          </div>
+        </div>
+      )}
+
+      {/* End Interview modal */}
+      {showEndModal && (
+        <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 30, padding: 24 }}>
+          <div style={{ background: '#12151C', border: '0.5px solid rgba(255,255,255,0.1)', borderRadius: 16, padding: '26px 22px', maxWidth: 360, width: '100%', textAlign: 'center' }}>
+            <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 12 }}>{L.endTitle}</div>
+            <div style={{ fontSize: 13, color: 'rgba(240,237,232,0.6)', lineHeight: 1.6, marginBottom: 22 }}>{L.endBody}</div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <button type="button" onClick={() => {
+                setShowEndModal(false)
+                requestClosing(genericClosingMessage(), null, true)
+              }}
+                style={{ padding: '12px 20px', background: '#CC785C', border: 'none', borderRadius: 10, color: '#fff', fontSize: 14, fontWeight: 800, cursor: 'pointer', fontFamily: 'inherit' }}>
+                {L.endGenerate}
+              </button>
+
+              <button type="button" onClick={() => setShowEndModal(false)}
+                style={{ padding: '11px 20px', background: 'transparent', border: '0.5px solid rgba(255,255,255,0.15)', borderRadius: 10, color: 'rgba(240,237,232,0.7)', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
+                {L.continueBtn}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <style>{`
+        .orb {
+          width: 150px; height: 150px; border-radius: 50%;
+          display: flex; align-items: center; justify-content: center;
+          background: radial-gradient(circle at 50% 40%, rgba(255,255,255,0.05), rgba(15,17,23,0.9));
+          border: 1px solid; transition: box-shadow .4s, border-color .4s;
+        }
+        .breathe { animation: breathe 2.6s ease-in-out infinite; }
+        .ring {
+          position: absolute; width: 150px; height: 150px; border-radius: 50%;
+          border: 1px solid; animation: ringPulse 2.2s ease-out infinite;
+        }
+        .ring2 { animation-delay: 1.1s; }
+        @keyframes breathe { 0%,100% { transform: scale(1) } 50% { transform: scale(1.04) } }
+        @keyframes ringPulse {
+          0%   { transform: scale(1);   opacity: .7 }
+          100% { transform: scale(1.7); opacity: 0 }
+        }
+      `}</style>
+    </div>
+  )
 }
 
-/* ---------- Page export: Suspense wrapper required for useSearchParams ---------- */
-
-export default function ReportPage() {
-  return (
-    <Suspense
-      fallback={
-        <CenteredScreen>
-          <Barbaros size={20} />
-        </CenteredScreen>
-      }
-    >
-      <ReportContent />
-    </Suspense>
-  )
+export default function InterviewPage() {
+  return <InterviewRoom />
 }

@@ -85,7 +85,7 @@ const AR_READINESS_LEVELS: Record<string, string> = {
 
   // Legacy labels remain readable for previously generated reports.
   'Strong Hire': 'جاهز بقوة',
-  'Maybe Hire': 'قابل للتوصية بحذر',
+  'Maybe Hire': 'جاهزية متوسطة',
   'Risky Candidate': 'مخاطرة عالية',
   'Not Recommended': 'غير جاهز حالياً',
 }

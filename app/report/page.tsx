@@ -834,7 +834,7 @@ function ReportCover({
                 borderTop: '0.5px solid rgba(26,26,26,0.08)',
               }}
             >
-              "{assessment}"
+              {“${assessment}”}
             </div>
           )}
         </div>

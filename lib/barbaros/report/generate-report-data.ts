@@ -84,66 +84,76 @@ const DEEPER_ASSESSMENT_LABELS: Record<'en' | 'ar', string[]> = {
   ],
 }
 
-const TIER_EXTENDED_COVERAGE: Record<PlanTier, Record<'en' | 'ar', string[]>> = {
-  go: { en: [], ar: [] },
-  pro: {
-    en: [
-      'Behavioral Consistency',
-      'Competency Mapping',
-      'Pressure Response',
-      'Leadership Judgment',
-      'Improvement Priorities',
-    ],
-    ar: [
-      'الاتساق السلوكي',
-      'خريطة الكفاءات',
-      'الاستجابة للضغط',
-      'الحُكم القيادي',
-      'أولويات التحسين',
-    ],
-  },
-  expert: {
-    en: [
-      'Behavioral Analysis',
-      'Competency Mapping',
-      'Scenario-Based Pressure',
-      'Leadership Judgment',
-      'Strategic Thinking',
-      'Executive Judgment',
-      'Panel Role Simulation',
-      'Long-Form Behavioral Analysis',
-      'Decision-Grade Recommendations',
-    ],
-    ar: [
-      'التحليل السلوكي',
-      'خريطة الكفاءات',
-      'الضغط القائم على السيناريوهات',
-      'الحُكم القيادي',
-      'التفكير الاستراتيجي',
-      'الحُكم التنفيذي',
-      'محاكاة أدوار لجنة المقابلة',
-      'التحليل السلوكي المُطوَّل',
-      'توصيات بمستوى قرار التوظيف',
-    ],
-  },
-}
-
 const AR_READINESS_LEVELS: Record<string, string> = {
+  'Strong Readiness': 'جاهزية قوية',
+  'Moderate Readiness': 'جاهزية متوسطة',
+  'Developing Readiness': 'جاهزية قيد التطوير',
+  'Limited Readiness': 'جاهزية محدودة',
+  'Interview Incomplete': 'المقابلة غير مكتملة',
+
+  // Legacy values remain readable for previously generated reports.
   'Strong Hire': 'جاهز بقوة',
   'Maybe Hire': 'قابل للتوصية بحذر',
   'Risky Candidate': 'مخاطرة عالية',
   'Not Recommended': 'غير جاهز حالياً',
-  'Interview Incomplete': 'المقابلة غير مكتملة',
 }
 
-const AR_COMPETENCY_NAMES: Record<string, string> = {
-  Communication: 'التواصل',
-  Confidence: 'الثقة',
-  'Domain Expertise': 'الخبرة في المجال',
-  Structure: 'تنظيم الإجابة',
-  'Problem Solving': 'حل المشكلات',
-  Clarity: 'الوضوح',
+const REPORT_COMPETENCY_ORDER = [
+  'Communication',
+  'Confidence',
+  'Domain Expertise',
+  'Structure',
+  'Problem Solving',
+  'Clarity',
+] as const
+
+type ReportCompetencyName = (typeof REPORT_COMPETENCY_ORDER)[number]
+type ReadinessLevel =
+  | 'Limited Readiness'
+  | 'Developing Readiness'
+  | 'Moderate Readiness'
+  | 'Strong Readiness'
+
+// V1 product rule for internal consistency only.
+// These equal weights are not calibrated against real hiring outcomes.
+const REPORT_COMPETENCY_WEIGHTS_V1: Record<ReportCompetencyName, number> = {
+  Communication: 1,
+  Confidence: 1,
+  'Domain Expertise': 1,
+  Structure: 1,
+  'Problem Solving': 1,
+  Clarity: 1,
 }
+
+// Keys are pre-normalized with normalizeReplyText.
+const REPORT_COMPETENCY_ALIASES: Record<string, ReportCompetencyName> = {
+  communication: 'Communication',
+  التواصل: 'Communication',
+  'التواصل المهني': 'Communication',
+
+  confidence: 'Confidence',
+  الثقه: 'Confidence',
+  'الحضور والاتزان': 'Confidence',
+
+  'domain expertise': 'Domain Expertise',
+  'الخبره في المجال': 'Domain Expertise',
+  'التمكن المهني في المجال': 'Domain Expertise',
+
+  structure: 'Structure',
+  'تنظيم الاجابه': 'Structure',
+  'بنيه الطرح': 'Structure',
+
+  'problem solving': 'Problem Solving',
+  'حل المشكلات': 'Problem Solving',
+
+  clarity: 'Clarity',
+  الوضوح: 'Clarity',
+  'وضوح الاجابه': 'Clarity',
+}
+
+const THIN_EVIDENCE_MAX_ANSWERS = 4
+const REPLAY_FUZZY_MIN_CHARS = 120
+const REPLAY_DUPLICATE_SIMILARITY = 0.94
 
 function reportLang(language: string): 'en' | 'ar' {
   return language === 'ar' ? 'ar' : 'en'
@@ -188,107 +198,55 @@ function buildAssessmentCoverage(
   const tier = resolvePlanTier(plan)
   const essentialLabels = coveredAreas.map(axis => ESSENTIAL_AXIS_LABELS[axis][lang])
   const title =
-    lang === 'ar' ? 'نطاق التقييم في هذه الباقة' : 'Assessment scope for this package'
+    lang === 'ar' ? 'نطاق التقييم في هذه الجلسة' : 'Assessment coverage for this session'
 
   if (!evidenceSufficient) {
-    const summary =
-      lang === 'ar'
-        ? 'لم تُعتمد أي محاور كمقاسة في هذه الجلسة لعدم اكتمال المقابلة.'
-        : 'No dimensions are presented as measured in this session because the interview is incomplete.'
-
-    if (tier === 'pro') {
-      return {
-        title,
-        summary,
-        coveredAreaKeys: [],
-        coveredAreas: [],
-        recommendedForDeeperAssessment: [],
-        upgradeNote:
-          lang === 'ar'
-            ? 'صُمِّمت باقة Pro لقياس الاتساق السلوكي، وخريطة الكفاءات، والاستجابة للضغط، والحُكم القيادي، وأولويات التحسين. لم توفّر هذه الجلسة ثلاث إجابات فعلية على الأقل، لذلك لم يُعتمد أي محور كمقاس. هذا قيد على الجلسة، لا على باقتك ولا على أدائك. أكمل مقابلة كاملة للحصول على النطاق المهني الكامل.'
-            : 'The Pro plan is built to measure behavioral consistency, competency mapping, pressure response, leadership judgment, and improvement priorities. This session did not provide at least three substantive answers, so no dimension is presented as measured. This is a limitation of the session, not of your plan or ability. Complete a full interview to receive the full professional scope.',
-      }
-    }
-
-    if (tier === 'expert') {
-      return {
-        title,
-        summary,
-        coveredAreaKeys: [],
-        coveredAreas: [],
-        recommendedForDeeperAssessment: [],
-        upgradeNote:
-          lang === 'ar'
-            ? 'صُمِّمت باقة Expert لتقديم التقييم التنفيذي الأشمل، بما يشمل محاكاة أدوار اللجنة، والضغط، والتفكير الاستراتيجي، والحُكم التنفيذي، وتوصيات بمستوى قرار التوظيف. لم توفّر هذه الجلسة ثلاث إجابات فعلية على الأقل، لذلك لم يُعتمد أي محور كمقاس. هذا قيد على الجلسة، لا على باقتك ولا على أدائك. أكمل مقابلة كاملة للحصول على النطاق التنفيذي الكامل.'
-            : 'The Expert plan is built to deliver the most comprehensive executive assessment, including panel simulation, pressure response, strategic thinking, executive judgment, and decision-grade recommendations. This session did not provide at least three substantive answers, so no dimension is presented as measured. This is a limitation of the session, not of your plan or ability. Complete a full interview to receive the full executive scope.',
-      }
-    }
-
     return {
       title,
       summary:
         lang === 'ar'
-          ? 'لم تُعتمد أي محاور كمقاسة في هذه الجلسة لعدم اكتمال المقابلة، وتبقى المحاور المتقدمة المتاحة في الباقات الأعلى ظاهرة أدناه.'
-          : 'No dimensions are presented as measured because the interview is incomplete; advanced areas available in higher-tier plans remain listed below.',
+          ? 'لم تُعتمد محاور كمقاسة لأن الجلسة لم تتضمن ثلاث إجابات جوهرية على الأقل.'
+          : 'No dimensions are presented as measured because the session did not include at least three substantive answers.',
       coveredAreaKeys: [],
       coveredAreas: [],
-      recommendedForDeeperAssessment: DEEPER_ASSESSMENT_LABELS[lang],
+      recommendedForDeeperAssessment:
+        tier === 'go' ? DEEPER_ASSESSMENT_LABELS[lang] : [],
       upgradeNote:
         lang === 'ar'
-          ? 'لم توفّر هذه الجلسة ثلاث إجابات فعلية على الأقل لقراءة جاهزيتك الأساسية، لذلك لم يُعتمد أي محور كمقاس. هذا قيد على الجلسة، لا على أدائك. أكمل مقابلة كاملة للحصول على تقييم جاهزيتك الأساسية.'
-          : 'This session did not provide at least three substantive answers for a baseline readiness reading, so no dimension is presented as measured. This is a limitation of the session, not of your ability. Complete a full interview to receive your baseline readiness assessment.',
+          ? 'هذه حالة جلسة غير مكتملة وليست حكماً على قدراتك. أكمل مقابلة كاملة للحصول على قراءة موثوقة ضمن باقتك.'
+          : 'This is an incomplete-session status, not a judgment of your ability. Complete a full interview to receive a reliable reading within your plan.',
     }
   }
 
-  if (tier === 'pro') {
-    return {
-      title,
-      summary:
-        lang === 'ar'
-          ? 'يعرض هذا القسم النطاق المهني الكامل للتقييم المُنجز في هذه الباقة.'
-          : 'This section outlines the full professional scope of evaluation completed in this plan.',
-      coveredAreaKeys: coveredAreas,
-      coveredAreas: [...essentialLabels, ...TIER_EXTENDED_COVERAGE.pro[lang]],
-      recommendedForDeeperAssessment: [],
-      upgradeNote:
-        lang === 'ar'
-          ? 'ضمن هذه الباقة، تم دمج المحاور المهنية الموسّعة أعلاه — الاتساق السلوكي، وخريطة الكفاءات، والاستجابة للضغط، والحُكم القيادي، وأولويات التحسين — مباشرةً في درجاتك وتوصياتك، وبالعمق المهني الذي صُمِّمت له باقة Pro. أمّا باقة Expert فتأخذ التقييم نفسه إلى المستوى التنفيذي، مضيفةً محاكاة أدوار لجنة المقابلة، والحُكم الاستراتيجي والتنفيذي، وتوصيات بمستوى قرار التوظيف.'
-          : 'In this plan, the extended professional dimensions above — behavioral consistency, competency mapping, pressure response, leadership judgment, and improvement priorities — were integrated directly into your scoring and recommendations, at the professional depth Pro is designed for. The Expert plan carries the same evaluation further into executive territory, adding panel role simulation, strategic and executive judgment, and decision-grade recommendations.',
-    }
-  }
+  const hasVerifiedCoverage = essentialLabels.length > 0
+  const summary = hasVerifiedCoverage
+    ? lang === 'ar'
+      ? `يعرض هذا القسم فقط المحاور التي تدعم بيانات التغطية الفعلية أنها قِيست في هذه الجلسة: ${joinAr(essentialLabels)}.`
+      : `This section lists only the dimensions supported as measured by the session coverage data: ${joinEn(essentialLabels)}.`
+    : lang === 'ar'
+      ? 'استند التقرير إلى إجاباتك الفعلية في هذه الجلسة. لا نعرض محوراً محدداً على أنه قِيس بصورة مستقلة دون بيانات تغطية موثقة.'
+      : 'The report is based on your actual answers in this session. No specific dimension is presented as independently measured without verified coverage data.'
 
-  if (tier === 'expert') {
-    return {
-      title,
-      summary:
-        lang === 'ar'
-          ? 'يؤكد هذا القسم النطاق الشامل للتقييم التنفيذي المُنجز في هذه الباقة.'
-          : 'This section confirms the comprehensive, executive-level scope of evaluation completed in this plan.',
-      coveredAreaKeys: coveredAreas,
-      coveredAreas: [...essentialLabels, ...TIER_EXTENDED_COVERAGE.expert[lang]],
-      recommendedForDeeperAssessment: [],
-      upgradeNote:
-        lang === 'ar'
-          ? 'هذا أشمل تقييم نقدّمه. كل المحاور أعلاه — من ملاءمة الدور الأساسية إلى محاكاة أدوار لجنة المقابلة والتفكير الاستراتيجي والحُكم التنفيذي — قِيست ضمن تقييم واحد بمستوى قرار التوظيف. لا توجد درجة تقييم أعلى من هذا التقرير.'
-          : 'This is the most comprehensive assessment we produce. Every dimension above — from core role fit through panel role simulation, strategic thinking, and executive judgment — was measured within a single decision-grade evaluation. There is no higher assessment tier beyond this report.',
-    }
-  }
-
-  const coveredLabels = essentialLabels
   const upgradeNote =
-    lang === 'ar'
-      ? `ضمن هذه الباقة، تم تقييم المحاور الأساسية التالية فقط: ${joinAr(coveredLabels)}. أمّا المحاور المتقدمة الظاهرة أدناه فلم يتم قياسها ضمن هذه الجلسة، وهي متاحة بتفصيل أعمق في الباقات الأعلى. مهنياً، هذا لا يعني أن تقريرك ناقص؛ بل يعني أن هذه الباقة تقيس جاهزيتك الأساسية للمقابلة، بينما تكشف الباقات الأعلى صورة أوسع عن أدائك، وحكمك القيادي، وتفكيرك الاستراتيجي، وقدرتك على الثبات تحت ضغط أقرب للمقابلات الحقيقية.`
-      : `In this package, only the following core areas were assessed: ${joinEn(coveredLabels)}. The advanced areas listed below were not measured in this session; they are available in greater depth in higher-tier plans. Professionally, this does not mean your report is incomplete; it means this package measures your baseline interview readiness, while higher-tier plans reveal a fuller picture of your performance, leadership judgment, strategic thinking, and ability to perform under realistic interview pressure.`
+    tier === 'go'
+      ? lang === 'ar'
+        ? 'تقيس باقة Go الجاهزية الأساسية. المحاور المتقدمة المدرجة أدناه متاحة بعمق أكبر في الباقات الأعلى، ولم تُحتسب كمحاور مقاسة في هذه الجلسة.'
+        : 'The Go plan measures baseline readiness. The advanced areas listed below are available in greater depth in higher plans and were not counted as measured dimensions in this session.'
+      : tier === 'pro'
+        ? lang === 'ar'
+          ? 'تتيح باقة Pro تحليلاً أعمق للاتساق السلوكي والكفاءات والاستجابة للضغط وأولويات التحسين. يعرض هذا القسم فقط المحاور التي تثبت بيانات الجلسة أنها قِيست فعلياً.'
+          : 'The Pro plan supports deeper analysis of behavioral consistency, competencies, pressure response, and improvement priorities. This section lists only dimensions verified as measured by the session data.'
+        : lang === 'ar'
+          ? 'تتيح باقة Expert التحليل التنفيذي ومحاكاة أدوار اللجنة والضغط والتفكير الاستراتيجي. يعرض هذا القسم فقط المحاور التي تثبت بيانات الجلسة أنها قِيست فعلياً.'
+          : 'The Expert plan supports executive analysis, panel-role simulation, pressure testing, and strategic thinking. This section lists only dimensions verified as measured by the session data.'
 
   return {
     title,
-    summary:
-      lang === 'ar'
-        ? 'يعرض هذا القسم نطاق التقييم المُنجز في هذه الباقة، والمحاور المتاحة بتفصيل أعمق في الباقات الأعلى.'
-        : 'This section outlines the scope of evaluation completed in this package and the areas available in greater depth in higher-tier plans.',
+    summary,
     coveredAreaKeys: coveredAreas,
-    coveredAreas: coveredLabels,
-    recommendedForDeeperAssessment: DEEPER_ASSESSMENT_LABELS[lang],
+    coveredAreas: essentialLabels,
+    recommendedForDeeperAssessment:
+      tier === 'go' ? DEEPER_ASSESSMENT_LABELS[lang] : [],
     upgradeNote,
   }
 }
@@ -316,6 +274,172 @@ function normalizeReplyText(content: string): string {
     .replace(/\s+/g, ' ')
     .trim()
 }
+
+
+function canonicalCompetencyName(value: unknown): ReportCompetencyName | null {
+  if (typeof value !== 'string') return null
+  return REPORT_COMPETENCY_ALIASES[normalizeReplyText(value)] ?? null
+}
+
+function canonicalizeCompetencies(
+  value: unknown
+): Array<Record<string, unknown>> | null {
+  if (!Array.isArray(value) || value.length !== REPORT_COMPETENCY_ORDER.length) {
+    return null
+  }
+
+  const items: Array<Record<string, unknown>> = []
+
+  for (const item of value) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return null
+
+    const competency = item as Record<string, unknown>
+    if (!isScoreNumber(competency.score) || !isNonEmptyString(competency.why)) {
+      return null
+    }
+
+    items.push(competency)
+  }
+
+  const resolvedNames = items.map(item => canonicalCompetencyName(item.name))
+  const allResolved = resolvedNames.every(
+    (name): name is ReportCompetencyName => name !== null
+  )
+
+  if (allResolved && new Set(resolvedNames).size === REPORT_COMPETENCY_ORDER.length) {
+    const byName = new Map<ReportCompetencyName, Record<string, unknown>>()
+    items.forEach((item, index) => {
+      byName.set(resolvedNames[index], { ...item, name: resolvedNames[index] })
+    })
+    return REPORT_COMPETENCY_ORDER.map(name => byName.get(name)!)
+  }
+
+  const hasConflictingKnownName = resolvedNames.some(
+    (name, index) => name !== null && name !== REPORT_COMPETENCY_ORDER[index]
+  )
+
+  if (hasConflictingKnownName) return null
+
+  console.warn('[report] competency names recovered by prompt-defined order')
+
+  return items.map((item, index) => ({
+    ...item,
+    name: REPORT_COMPETENCY_ORDER[index],
+  }))
+}
+
+function computeFinalScore(
+  competencies: Array<Record<string, unknown>>
+): number {
+  let weightedTotal = 0
+  let totalWeight = 0
+
+  for (const competency of competencies) {
+    const name = canonicalCompetencyName(competency.name)
+    if (!name || !isScoreNumber(competency.score)) {
+      throw new ReportGenerationError(
+        'Cannot compute final score from invalid competency data',
+        502
+      )
+    }
+
+    const weight = REPORT_COMPETENCY_WEIGHTS_V1[name]
+    weightedTotal += competency.score * weight
+    totalWeight += weight
+  }
+
+  if (totalWeight <= 0) {
+    throw new ReportGenerationError('Invalid report competency weights', 500)
+  }
+
+  return Math.round(weightedTotal / totalWeight)
+}
+
+function deriveReadinessLevel(
+  finalScore: number,
+  capAtModerate: boolean
+): ReadinessLevel {
+  const rawLevel: ReadinessLevel =
+    finalScore >= 80
+      ? 'Strong Readiness'
+      : finalScore >= 65
+        ? 'Moderate Readiness'
+        : finalScore >= 45
+          ? 'Developing Readiness'
+          : 'Limited Readiness'
+
+  return capAtModerate && rawLevel === 'Strong Readiness'
+    ? 'Moderate Readiness'
+    : rawLevel
+}
+
+function diceSimilarity(a: string, b: string): number {
+  if (a === b) return 1
+  if (a.length < 2 || b.length < 2) return 0
+
+  const bigrams = new Map<string, number>()
+  for (let i = 0; i < a.length - 1; i++) {
+    const pair = a.slice(i, i + 2)
+    bigrams.set(pair, (bigrams.get(pair) ?? 0) + 1)
+  }
+
+  let overlap = 0
+  for (let i = 0; i < b.length - 1; i++) {
+    const pair = b.slice(i, i + 2)
+    const count = bigrams.get(pair) ?? 0
+    if (count <= 0) continue
+    overlap++
+    bigrams.set(pair, count - 1)
+  }
+
+  return (2 * overlap) / (a.length + b.length - 2)
+}
+
+function isRepeatedReplayAnswer(
+  normalizedAnswer: string,
+  previousAnswers: string[]
+): boolean {
+  if (!normalizedAnswer) return false
+
+  return previousAnswers.some(previous => {
+    if (normalizedAnswer === previous) return true
+    if (
+      normalizedAnswer.length < REPLAY_FUZZY_MIN_CHARS ||
+      previous.length < REPLAY_FUZZY_MIN_CHARS
+    ) {
+      return false
+    }
+
+    return diceSimilarity(normalizedAnswer, previous) >= REPLAY_DUPLICATE_SIMILARITY
+  })
+}
+
+function markReplayPathCounts(value: unknown): Array<Record<string, unknown>> {
+  if (!Array.isArray(value)) return []
+
+  const countedAnswers: string[] = []
+
+  return value.map(item => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      return { countsTowardPath: false }
+    }
+
+    const replayItem = item as Record<string, unknown>
+    const normalizedAnswer =
+      typeof replayItem.answer === 'string'
+        ? normalizeReplyText(replayItem.answer)
+        : ''
+    const duplicate = isRepeatedReplayAnswer(normalizedAnswer, countedAnswers)
+
+    if (!duplicate && normalizedAnswer) countedAnswers.push(normalizedAnswer)
+
+    return {
+      ...replayItem,
+      countsTowardPath: !duplicate,
+    }
+  })
+}
+
 
 const GENERIC_REPLY_WORDS = new Set(
   [
@@ -476,7 +600,6 @@ function buildIncompleteReport(
   return {
     finalScore: 0,
     readinessLevel: isArabic ? 'المقابلة غير مكتملة' : 'Interview Incomplete',
-    hireProbability: 0,
     verdict: isArabic
       ? 'لم يصدر حكم مهني على أدائك لأن الجلسة لم تتضمن أدلة كافية. هذه الحالة تعني أن المقابلة غير مكتملة، ولا تعني ضعفاً في الكفاءة.'
       : 'No professional verdict was issued because the session did not contain enough evidence. This status means the interview is incomplete; it does not indicate weak ability.',
@@ -514,18 +637,6 @@ function localizeReportLabels(
       AR_READINESS_LEVELS[localized.readinessLevel] ?? localized.readinessLevel
   }
 
-  if (Array.isArray(localized.competencies)) {
-    localized.competencies = localized.competencies.map(item => {
-      if (!item || typeof item !== 'object' || Array.isArray(item)) return item
-      const competency = item as Record<string, unknown>
-      if (typeof competency.name !== 'string') return competency
-      return {
-        ...competency,
-        name: AR_COMPETENCY_NAMES[competency.name] ?? competency.name,
-      }
-    })
-  }
-
   return localized
 }
 
@@ -543,29 +654,28 @@ function buildReportPrompt(
     : 'Write ALL human-readable text fields in clear, professional English. Keep JSON keys in English exactly as specified.'
 
   const coverageRule = isArabic
-    ? `Assessment Coverage تم تحديده مسبقاً من محرك المقابلة. لا تضف محاور، لا تحذف محاور، لا تغيّر الأسماء، ولا تعيد تفسيرها. استخدم هذا الكائن كما هو:\n${JSON.stringify(assessmentCoverage, null, 2)}`
-    : `Assessment Coverage has already been resolved by the interview engine. Do not add, remove, rename, or reinterpret covered areas. Use this exact object:\n${JSON.stringify(assessmentCoverage, null, 2)}`
+    ? `تم تحديد نطاق التقييم مسبقاً من بيانات الجلسة. لا تدّعِ قياس أي محور غير موجود في هذا الكائن:\n${JSON.stringify(assessmentCoverage, null, 2)}`
+    : `Assessment coverage has already been resolved from the session data. Do not claim that any dimension was measured unless it appears in this object:\n${JSON.stringify(assessmentCoverage, null, 2)}`
 
   const coverageIntegrityRule =
     planTier === 'go'
-      ? `The upgradeNote is intentional. Keep it professional, clear, and not pushy.
-Make it clear that the advanced areas listed in recommendedForDeeperAssessment were NOT measured in this package.`
-      : `The upgradeNote is intentional. Keep it professional and confident.
-Never describe any dimension listed in coveredAreas as unmeasured, missing, partial, or reserved for a higher plan.
-recommendedForDeeperAssessment is intentionally empty for this plan; do not populate it.`
+      ? 'The advanced areas in recommendedForDeeperAssessment are available in higher plans. Do not describe them as measured in this session.'
+      : 'Do not expand measured coverage from package capabilities. Package capabilities are not proof that a dimension was measured in this session.'
 
   const audienceRule = isArabic
-    ? 'هذا التقرير يُعرض مباشرة للمرشح، وليس لصاحب العمل. اكتب بصيغة تخاطب المرشح مباشرة، وكن صارماً وواضحاً دون لغة آلية أو مجاملات عامة.'
-    : 'This report is shown directly to the candidate, not to the employer. Address the candidate directly and stay rigorous, specific, and professional.'
-
-  const readinessLevelOptions = isArabic
-    ? 'جاهز بقوة | قابل للتوصية بحذر | مخاطرة عالية | غير جاهز حالياً'
-    : 'Strong Hire | Maybe Hire | Risky Candidate | Not Recommended'
+    ? `هذا التقرير يُعرض مباشرة لك، وليس لصاحب العمل.
+- خاطبك بصيغة مباشرة مثل: أظهرت، قدّمت، تحتاج إلى، لم تتمكن خلال هذه الجلسة.
+- لا تستخدم: المرشح، ${config.candidateName || 'اسم الشخص'} يعتمد، لا يُنصح بتوظيفه، أو أي قرار توظيف.
+- كن حازماً وصادقاً، لكن لا تستخدم لغة جارحة أو مهينة.`
+    : `This report is shown directly to you, not to an employer.
+- Address you directly using second-person language.
+- Never refer to "the candidate", use the candidate's name in third person, or issue an employment decision.
+- Be firm and honest without using humiliating or hurtful language.`
 
   const competencyOutput = isArabic
     ? `[
     { "name": "التواصل", "score": <0-100>, "why": "<سبب مبني على دليل من المقابلة>" },
-    { "name": "الثقة", "score": <0-100>, "why": "<سبب مبني على دليل من المقابلة>" },
+    { "name": "الثقة", "score": <0-100>, "why": "<سبب مبني على سلوك ملحوظ في المقابلة>" },
     { "name": "الخبرة في المجال", "score": <0-100>, "why": "<سبب مبني على دليل من المقابلة>" },
     { "name": "تنظيم الإجابة", "score": <0-100>, "why": "<سبب مبني على دليل من المقابلة>" },
     { "name": "حل المشكلات", "score": <0-100>, "why": "<سبب مبني على دليل من المقابلة>" },
@@ -573,14 +683,14 @@ recommendedForDeeperAssessment is intentionally empty for this plan; do not popu
   ]`
     : `[
     { "name": "Communication", "score": <0-100>, "why": "<evidence-based reason>" },
-    { "name": "Confidence", "score": <0-100>, "why": "<evidence-based reason>" },
+    { "name": "Confidence", "score": <0-100>, "why": "<reason based only on observable interview behavior>" },
     { "name": "Domain Expertise", "score": <0-100>, "why": "<evidence-based reason>" },
     { "name": "Structure", "score": <0-100>, "why": "<evidence-based reason>" },
     { "name": "Problem Solving", "score": <0-100>, "why": "<evidence-based reason>" },
     { "name": "Clarity", "score": <0-100>, "why": "<evidence-based reason>" }
   ]`
 
-  return `You are Barbaros, an elite AI hiring evaluator who has just completed a real job interview. Write a private, serious, candidate-facing performance report.
+  return `You are Barbaros, an elite AI interview evaluator who has completed a job-interview simulation. Write a serious, candidate-facing performance report.
 
 CANDIDATE CONTEXT:
 - Name: ${config.candidateName}
@@ -590,42 +700,62 @@ CANDIDATE CONTEXT:
 - Experience: ${config.yearsExperience}
 - Package: ${config.plan}
 
-CORE RULES:
-- Every observation must be anchored to the candidate's actual answers.
-- Reference real moments, questions, answer fragments, contradictions, ownership, avoidance, or role evidence from this interview.
-- Never invent experience, achievements, qualifications, quotes, questions, or behavior.
+CORE EVIDENCE RULES:
+- Every observation must be anchored to the candidate's actual answers in this session.
+- Reference real questions, answer fragments, contradictions, ownership, avoidance, or role evidence.
+- Never invent experience, achievements, qualifications, quotes, questions, motives, or behavior.
 - Reject generic HR filler. If a sentence could apply to another candidate, rewrite it.
 - Evaluate a real human under interview pressure, not an ideal AI answer.
 - Concise, honest evidence can score strongly; do not require perfect STAR structure.
 - Penalize only real deficiencies in evidence, consistency, ownership, role readiness, or domain understanding.
+- Describe observable behavior and evidence. Never attribute intent or character.
+- Forbidden meanings include: deliberately evaded, tried to exaggerate, lacks transparency, claims expertise, dishonest, or not recommended for hiring.
+- Use evidence language instead, such as: the answer did not provide enough evidence, an inconsistency appeared, or the required technical depth was not demonstrated in this session.
 
 AUDIENCE & VOICE:
 ${audienceRule}
 
+FIRM BUT CONSTRUCTIVE:
+- Do not hide weaknesses or soften scores with false praise.
+- State the weakness, the supporting evidence, its likely interview impact, and the practical training priority.
+- Frame every judgment as limited to this simulated session, not as a fixed judgment of ability.
+- The recommendation must invite the candidate to train again and compare measurable improvement in a future session.
+- Do not promise a specific score increase, hiring outcome, or acceptance result.
+
+OVERALL JUDGMENT RESTRICTION:
+- Do not produce or mention finalScore, hireProbability, readinessLevel, overall readiness, hiring probability, or an employment recommendation.
+- Do not write phrases equivalent to "strongly ready", "low chance of hiring", or "not recommended for employment" in verdict, barbarosAssessment, or recommendation.
+- Application code will compute and display the overall score and session-readiness category.
+
+CONFIDENCE SCORING:
+- Score Confidence only from observable behavior in this session, such as answer stability, clarity under pressure, unexplained retreat, or ability to maintain a supported position.
+- Do not infer confidence from accent, culture, personality type, quietness, speaking style, or fluency alone.
+
 ASSESSMENT COVERAGE:
 ${coverageRule}
-The assessmentCoverage object must appear in the final JSON with exactly the same values.
 ${coverageIntegrityRule}
 
 SCORING:
-- Scores are 0-100 and must feel earned.
+- Competency and replay scores are 0-100 and must feel earned.
 - 90+ is extremely rare; 75-89 strong; 55-74 acceptable; 35-54 weak; below 35 poor.
 - Every competency why must reference actual interview evidence.
 
 REPLAY:
 - Select only the 3-5 most important questions; more than 5 is invalid.
 - Use a short representative excerpt for long answers.
+- The same answer or incident may support more than one analytical observation, but do not present it as two independent pieces of evidence.
+- If one incident serves two purposes, keep the distinction in analysis rather than duplicating the evidence.
 - analysis: 1-2 sentences.
 - weakened: 1-2 sentences, or empty if the answer was strong.
 - stronger: realistic improved answer, 3-5 sentences maximum, or empty if already strong.
 - Never label answers correct or wrong.
 
 LENGTH:
-- verdict: 2-3 sentences.
-- barbarosAssessment: 2-3 sentences.
+- verdict: 2-3 sentences describing the current session performance without an overall readiness label.
+- barbarosAssessment: 2-3 evidence-based sentences in Barbaros's voice without an overall readiness label.
 - hiddenWeakness: 2-3 sentences.
 - behavioralPatterns: 2-4 sentences.
-- recommendation: 2-3 sentences.
+- recommendation: 2-3 direct next-step sentences based only on this session.
 - Do not add keys or repeat the same observation across fields.
 
 LANGUAGE:
@@ -634,15 +764,11 @@ ${languageRule}
 OUTPUT:
 Return ONLY one valid JSON object, with no markdown or text before or after:
 {
-  "finalScore": <number 0-100>,
-  "readinessLevel": "<one of: ${readinessLevelOptions}>",
-  "hireProbability": <number 0-100>,
-  "verdict": "<2-3 candidate-facing sentences>",
+  "verdict": "<2-3 candidate-facing sentences about this session>",
   "barbarosAssessment": "<2-3 first-person sentences in Barbaros's voice>",
-  "assessmentCoverage": ${JSON.stringify(assessmentCoverage, null, 2)},
   "competencies": ${competencyOutput},
-  "hiddenWeakness": "<single most important recurring weakness>",
-  "behavioralPatterns": "<2-4 sentences on recurring patterns>",
+  "hiddenWeakness": "<single most important recurring performance weakness>",
+  "behavioralPatterns": "<2-4 sentences on recurring observable patterns>",
   "replay": [
     {
       "question": "<actual interviewer question>",
@@ -653,7 +779,7 @@ Return ONLY one valid JSON object, with no markdown or text before or after:
       "stronger": "<realistic stronger response or empty string>"
     }
   ],
-  "recommendation": "<2-3 direct next-step sentences>"
+  "recommendation": "<2-3 direct training and return-session sentences>"
 }`
 }
 
@@ -748,8 +874,13 @@ function isNonEmptyString(value: unknown): boolean {
   return typeof value === 'string' && value.trim().length > 0
 }
 
-function isScoreNumber(value: unknown): boolean {
-  return typeof value === 'number' && Number.isFinite(value)
+function isScoreNumber(value: unknown): value is number {
+  return (
+    typeof value === 'number' &&
+    Number.isFinite(value) &&
+    value >= 0 &&
+    value <= 100
+  )
 }
 
 const MAX_FIELD_CHARS: Record<string, number> = {
@@ -770,21 +901,24 @@ const MAX_REPLAY_ITEM_CHARS: Record<string, number> = {
 
 function validateReportData(
   report: Record<string, unknown>,
-  evidenceSufficient: boolean
+  evidenceSufficient: boolean,
+  requireDerivedFields = true
 ): string[] {
   const problems: string[] = []
 
-  if (!isScoreNumber(report.finalScore)) problems.push('finalScore')
-  if (!isNonEmptyString(report.readinessLevel)) problems.push('readinessLevel')
-  if (!isScoreNumber(report.hireProbability)) problems.push('hireProbability')
+  if (requireDerivedFields) {
+    if (!isScoreNumber(report.finalScore)) problems.push('finalScore')
+    if (!isNonEmptyString(report.readinessLevel)) problems.push('readinessLevel')
+  }
+
   if (!isNonEmptyString(report.verdict)) problems.push('verdict')
   if (!isNonEmptyString(report.barbarosAssessment)) problems.push('barbarosAssessment')
   if (!isNonEmptyString(report.hiddenWeakness)) problems.push('hiddenWeakness')
   if (!isNonEmptyString(report.behavioralPatterns)) problems.push('behavioralPatterns')
   if (!isNonEmptyString(report.recommendation)) problems.push('recommendation')
 
-  if (!Array.isArray(report.competencies) || report.competencies.length === 0) {
-    problems.push('competencies')
+  if (!canonicalizeCompetencies(report.competencies)) {
+    problems.push('competencies (six unique valid competencies required)')
   }
 
   if (!Array.isArray(report.replay)) {
@@ -818,6 +952,12 @@ function validateReportData(
       if (!isNonEmptyString(replayItem.analysis)) problems.push(`replay[${index}].analysis`)
       if (typeof replayItem.weakened !== 'string') problems.push(`replay[${index}].weakened`)
       if (typeof replayItem.stronger !== 'string') problems.push(`replay[${index}].stronger`)
+      if (
+        replayItem.countsTowardPath !== undefined &&
+        typeof replayItem.countsTowardPath !== 'boolean'
+      ) {
+        problems.push(`replay[${index}].countsTowardPath`)
+      }
 
       for (const [field, max] of Object.entries(MAX_REPLAY_ITEM_CHARS)) {
         const value = replayItem[field]
@@ -906,11 +1046,7 @@ export async function generateReportData(
   )
 
   const normalizedCoveredAreas = normalizeCoveredAreas(rawCoveredAreas)
-  const coveredAreas = !evidenceSufficient
-    ? []
-    : normalizedCoveredAreas.length > 0
-      ? normalizedCoveredAreas
-      : [...ESSENTIAL_AXIS_ORDER]
+  const coveredAreas = evidenceSufficient ? normalizedCoveredAreas : []
 
   const assessmentCoverage = buildAssessmentCoverage(
     coveredAreas,
@@ -972,20 +1108,50 @@ export async function generateReportData(
     throw new ReportGenerationError('Could not parse report output', 502)
   }
 
-  const missingFields = validateReportData(report, true)
-  if (missingFields.length > 0) {
+  const modelProblems = validateReportData(report, true, false)
+  if (modelProblems.length > 0) {
     console.error(
-      `[report] validation failed, missing/invalid fields: ${missingFields.join(', ')}`
+      `[report] model validation failed: ${modelProblems.join(', ')}`
     )
     throw new ReportGenerationError(
-      `Report validation failed: ${missingFields.join(', ')}`,
+      `Report validation failed: ${modelProblems.join(', ')}`,
       502
     )
   }
 
-  const localizedReport = localizeReportLabels(report, config.language)
-  return {
-    ...localizedReport,
-    assessmentCoverage,
+  const competencies = canonicalizeCompetencies(report.competencies)
+  if (!competencies) {
+    throw new ReportGenerationError(
+      'Report validation failed: invalid competency matrix',
+      502
+    )
   }
+
+  const finalScore = computeFinalScore(competencies)
+  const evidenceThin =
+    substantiveAnswerCount >= MIN_SUBSTANTIVE_ANSWERS &&
+    substantiveAnswerCount <= THIN_EVIDENCE_MAX_ANSWERS
+  const readinessLevel = deriveReadinessLevel(finalScore, evidenceThin)
+
+  const enrichedReport: Record<string, unknown> = {
+    ...report,
+    finalScore,
+    readinessLevel,
+    competencies,
+    replay: markReplayPathCounts(report.replay),
+    assessmentCoverage,
+    interviewIncomplete: false,
+  }
+
+  delete enrichedReport.hireProbability
+
+  const finalProblems = validateReportData(enrichedReport, true, true)
+  if (finalProblems.length > 0) {
+    throw new ReportGenerationError(
+      `Derived report validation failed: ${finalProblems.join(', ')}`,
+      502
+    )
+  }
+
+  return localizeReportLabels(enrichedReport, config.language)
 }

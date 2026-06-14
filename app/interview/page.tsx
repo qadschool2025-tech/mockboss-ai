@@ -13,8 +13,18 @@ interface VoiceAnalysis {
 interface Message {
   role: 'user' | 'assistant'
   content: string
+  timestamp: number
   score?: any
   voiceAnalysis?: VoiceAnalysis
+  isQuestion?: boolean
+  assessmentEligible?: boolean
+  clientMessageId?: string
+}
+
+type ControlAction = 'resume'
+
+function createClientMessageId(prefix: 'user' | 'assistant'): string {
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
 }
 
 type EssentialAxis =
@@ -132,6 +142,9 @@ function t(lang: string) {
     speakingSub:     ar ? 'يطرح السؤال التالي...'       : 'Asking the next question...',
     paused:          ar ? 'المقابلة متوقّفة مؤقتاً'      : 'Interview Paused',
     pausedSub:       ar ? 'توقّفت بسبب عدم النشاط. اضغط الميكروفون للمتابعة.' : 'Interview paused due to inactivity. Press the microphone to continue.',
+    conductPausedSub: ar ? 'يمكنك استئناف المقابلة عندما تكون مستعداً للمتابعة بأسلوب مهني.' : 'Resume when you are ready to continue professionally.',
+    resume:          ar ? 'استئناف المقابلة'             : 'Resume Interview',
+    sessionMissing:  ar ? 'تعذّر استئناف هذه الجلسة لأنها لم تعد متاحة. ابدأ مقابلة جديدة.' : 'This session is no longer available. Start a new interview.',
     focusLabel:      ar ? 'محور التقييم الحالي'          : 'Current Assessment Focus',
     begin:           ar ? 'ابدأ المقابلة'              : 'Begin Interview',
     readyTitle:      ar ? 'الجلسة جاهزة'                : 'Interview Session Ready',
@@ -173,11 +186,11 @@ function InterviewRoom() {
   const [messages, setMessages]             = useState<Message[]>([])
   const [input, setInput]                   = useState('')
   const [isLoading, setIsLoading]           = useState(false)
-  const [sessionStartTime]                  = useState(Date.now())
   const [timeLeft, setTimeLeft]             = useState(() => {
     const limits: Record<string, number> = { go: 15*60, pro: 30*60, expert: 45*60 }
     return limits[CONFIG.plan] ?? 15*60
   })
+  const [serverTimerStarted, setServerTimerStarted] = useState(false)
   const [questionCount, setQuestionCount]   = useState(1)
   const [isEnded, setIsEnded]               = useState(false)
 
@@ -202,6 +215,9 @@ function InterviewRoom() {
 
   // Executive Room additions
   const [isPaused, setIsPaused]             = useState(false)
+  const [pauseReason, setPauseReason]       = useState<'inactivity' | 'conduct' | null>(null)
+  const [pauseMessage, setPauseMessage]     = useState<string | null>(null)
+  const [conductNoticeKind, setConductNoticeKind] = useState<'redirect' | 'warning' | 'pause' | null>(null)
   const [isSpeaking, setIsSpeaking]         = useState(false)
   const [showTranscript, setShowTranscript] = useState(false)
   const [showTextInput, setShowTextInput]   = useState(false)
@@ -219,6 +235,7 @@ function InterviewRoom() {
   const isRecordingRef    = useRef(false)
   const isTranscribingRef = useRef(false)
   const isPausedRef       = useRef(false)
+  const pauseReasonRef     = useRef<'inactivity' | 'conduct' | null>(null)
   const isSpeakingRef     = useRef(false)
   const audioRef          = useRef<HTMLAudioElement | null>(null)
   const isMutedRef        = useRef(false)
@@ -244,10 +261,20 @@ function InterviewRoom() {
   // report so the farewell and report use the same covered criteria.
   const coveredAreasRef = useRef<EssentialAxis[]>([])
 
+  // ENCRYPTED SESSION CONTINUITY
+  // The server remains authoritative. The browser only carries the opaque token
+  // between requests so a Vercel instance change cannot erase pause/resume state.
+  const sessionTokenRef = useRef<string | null>(null)
+  const sessionTokenStorageKey = `barbaros_interview_session:${CONFIG.sessionId}`
+
   // INTERVIEW CALL RESILIENCE
   // Holds the exact messages of the last /api/interview attempt so Retry can
   // re-send them without asking the candidate to re-type or re-record.
-  const lastAttemptedMessagesRef = useRef<Message[] | null>(null)
+  const lastAttemptedCallRef = useRef<{
+    messages: Message[]
+    controlAction?: ControlAction
+  } | null>(null)
+  const isSubmittingRef = useRef(false)
 
   useEffect(() => { messagesRef.current       = messages       }, [messages])
   useEffect(() => { isLoadingRef.current      = isLoading      }, [isLoading])
@@ -256,9 +283,18 @@ function InterviewRoom() {
   useEffect(() => { isRecordingRef.current    = isRecording    }, [isRecording])
   useEffect(() => { isTranscribingRef.current = isTranscribing }, [isTranscribing])
   useEffect(() => { isPausedRef.current       = isPaused       }, [isPaused])
+  useEffect(() => { pauseReasonRef.current     = pauseReason     }, [pauseReason])
   useEffect(() => { isSpeakingRef.current     = isSpeaking     }, [isSpeaking])
 
   useEffect(() => { setMounted(true) }, [])
+
+  useEffect(() => {
+    try {
+      sessionTokenRef.current = sessionStorage.getItem(sessionTokenStorageKey)
+    } catch {
+      sessionTokenRef.current = null
+    }
+  }, [sessionTokenStorageKey])
 
   // CLOSING FLOW FIX
   // Cleanup audio and timers on unmount.
@@ -320,6 +356,10 @@ function InterviewRoom() {
 
     setIsPaused(false)
     isPausedRef.current = false
+    setPauseReason(null)
+    pauseReasonRef.current = null
+    setPauseMessage(null)
+    setConductNoticeKind(null)
 
     if (silenceTimer.current) clearTimeout(silenceTimer.current)
 
@@ -332,12 +372,21 @@ function InterviewRoom() {
     setIsSpeaking(false)
 
     if (message?.trim()) {
-      const closingMsg: Message = { role: 'assistant', content: message.trim() }
+      const closingMsg: Message = {
+        role: 'assistant',
+        content: message.trim(),
+        timestamp: Date.now(),
+        clientMessageId: createClientMessageId('assistant'),
+        assessmentEligible: true,
+        isQuestion: false,
+      }
 
       setMessages(prev => {
         const last = prev[prev.length - 1]
         if (last?.role === 'assistant' && last.content === closingMsg.content) return prev
-        return [...prev, closingMsg]
+        const next = [...prev, closingMsg]
+        messagesRef.current = next
+        return next
       })
     }
 
@@ -412,6 +461,8 @@ function InterviewRoom() {
   }, [beginClosing])
 
   useEffect(() => {
+    if (!serverTimerStarted) return
+
     const id = setInterval(() => {
       setTimeLeft(prev => {
         if (prev <= 1) {
@@ -423,7 +474,7 @@ function InterviewRoom() {
     }, 1000)
 
     return () => clearInterval(id)
-  }, [])
+  }, [serverTimerStarted])
 
   // CLOSING FLOW FIX
   // Do not cut off the candidate at 0:00.
@@ -435,7 +486,7 @@ function InterviewRoom() {
 
     if (
       timeLeft <= CLOSING_FORCE_SECONDS &&
-      !awaitingFinalAnswerRef.current &&
+      (!awaitingFinalAnswerRef.current || isPausedRef.current) &&
       !isLoading &&
       !isRecording &&
       !isTranscribing
@@ -551,10 +602,34 @@ function InterviewRoom() {
   const stopAudio = () => {
     if (audioRef.current) {
       audioRef.current.pause()
+      audioRef.current.src = ''
       audioRef.current = null
     }
+    setPendingAudio(null)
     setIsSpeaking(false)
   }
+
+  const stopMediaCapture = useCallback(() => {
+    const recorder = mediaRecorderRef.current
+
+    if (recorder) {
+      recorder.ondataavailable = null
+      recorder.onstop = null
+
+      if (recorder.state !== 'inactive') {
+        try { recorder.stop() } catch {}
+      }
+
+      recorder.stream.getTracks().forEach(track => track.stop())
+    }
+
+    mediaRecorderRef.current = null
+    audioChunksRef.current = []
+    setIsRecording(false)
+    isRecordingRef.current = false
+    setIsTranscribing(false)
+    isTranscribingRef.current = false
+  }, [])
 
   const handleFirstInteraction = useCallback(() => {
     if (!audioReadyRef.current) {
@@ -570,7 +645,7 @@ function InterviewRoom() {
     if (next) stopAudio()
   }
 
-  // SILENCE → PAUSE. No backend call. Saves credits during inactivity.
+  // SILENCE → UI pause only. The server-side interview clock continues.
   const resetSilenceTimer = useCallback(() => {
     if (silenceTimer.current) clearTimeout(silenceTimer.current)
 
@@ -581,26 +656,47 @@ function InterviewRoom() {
         !isClosingRef.current &&
         !isRecordingRef.current &&
         !isTranscribingRef.current &&
-        !isSpeakingRef.current
+        !isSpeakingRef.current &&
+        pauseReasonRef.current !== 'conduct'
       ) {
         setIsPaused(true)
         isPausedRef.current = true
+        setPauseReason('inactivity')
+        pauseReasonRef.current = 'inactivity'
       }
     }, 45000)
   }, [])
 
+  const isConductPaused = () => pauseReasonRef.current === 'conduct'
+
+  const clearInactivityPause = () => {
+    if (pauseReasonRef.current !== 'inactivity') return
+
+    setIsPaused(false)
+    isPausedRef.current = false
+    setPauseReason(null)
+    pauseReasonRef.current = null
+  }
+
   const startRecording = async () => {
-    if (isLoading || isTranscribing || isEnded || isClosing) return
+    if (
+      isLoading ||
+      isTranscribing ||
+      isEnded ||
+      isClosing ||
+      pauseReasonRef.current === 'conduct'
+    ) return
 
     try {
       handleFirstInteraction()
       setMicError(null)
-      setIsPaused(false)
-      isPausedRef.current = false
+      clearInactivityPause()
 
       if (silenceTimer.current) clearTimeout(silenceTimer.current)
 
       stopAudio()
+      setPauseMessage(null)
+      setConductNoticeKind(null)
 
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       const mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/mp4'
@@ -615,6 +711,7 @@ function InterviewRoom() {
       mediaRecorder.start()
       mediaRecorderRef.current = mediaRecorder
       setIsRecording(true)
+      isRecordingRef.current = true
     } catch (err: any) {
       const msg = err.name === 'NotAllowedError' ? 'Microphone access denied' : 'Could not access microphone'
       setMicError(msg)
@@ -623,19 +720,26 @@ function InterviewRoom() {
   }
 
   const stopRecording = async () => {
-    if (!isRecordingRef.current || !mediaRecorderRef.current) return
+    if (
+      !isRecordingRef.current ||
+      !mediaRecorderRef.current ||
+      pauseReasonRef.current === 'conduct'
+    ) return
 
     setIsRecording(false)
+    isRecordingRef.current = false
 
     const mediaRecorder = mediaRecorderRef.current
-    mediaRecorder.stream.getTracks().forEach(t => t.stop())
+    mediaRecorder.stream.getTracks().forEach(track => track.stop())
 
     await new Promise<void>(resolve => {
       mediaRecorder.onstop = () => resolve()
       mediaRecorder.stop()
     })
 
-    const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
+    mediaRecorderRef.current = null
+    const blob = new Blob(audioChunksRef.current, { type: mediaRecorder.mimeType || 'audio/webm' })
+    audioChunksRef.current = []
 
     if (blob.size < 1000) {
       resetSilenceTimer()
@@ -643,6 +747,7 @@ function InterviewRoom() {
     }
 
     setIsTranscribing(true)
+    isTranscribingRef.current = true
 
     try {
       const fd = new FormData()
@@ -651,14 +756,23 @@ function InterviewRoom() {
 
       const res = await fetch('/api/transcribe', { method: 'POST', body: fd })
       const data = await res.json()
-      const text = data.text?.trim()
+      const text = typeof data.text === 'string' ? data.text.trim() : ''
 
-      if (text) {
-        const userMsg: Message = { role: 'user', content: text }
+      if (text && !isConductPaused()) {
+        const userMsg: Message = {
+          role: 'user',
+          content: text,
+          timestamp: Date.now(),
+          clientMessageId: createClientMessageId('user'),
+          assessmentEligible: true,
+        }
         const newMessages = [...messagesRef.current, userMsg]
 
+        messagesRef.current = newMessages
         setMessages(newMessages)
         setInput('')
+        setPauseMessage(null)
+        setConductNoticeKind(null)
 
         if (awaitingFinalAnswerRef.current) {
           closeAfterFinalAnswer()
@@ -674,23 +788,31 @@ function InterviewRoom() {
       resetSilenceTimer()
     } finally {
       setIsTranscribing(false)
+      isTranscribingRef.current = false
     }
   }
 
   const toggleRecording = () => {
-    if (isLoading || isTranscribing || isEnded || isClosing) return
+    if (
+      isLoading ||
+      isTranscribing ||
+      isEnded ||
+      isClosing ||
+      pauseReasonRef.current === 'conduct'
+    ) return
 
     if (isRecordingRef.current) {
-      stopRecording()
+      void stopRecording()
     } else {
-      startRecording()
+      void startRecording()
     }
   }
 
-  // INTERVIEW CALL RESILIENCE
-  // Single network attempt against /api/interview. Returns parsed data on
-  // success, or throws. No state mutation here — the caller owns the flow.
-  const attemptInterviewCall = async (msgs: Message[]) => {
+  // One network attempt. State mutation remains in the caller.
+  const attemptInterviewCall = async (
+    msgs: Message[],
+    controlAction?: ControlAction
+  ) => {
     const res = await fetch('/api/interview', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -698,84 +820,171 @@ function InterviewRoom() {
         sessionId: CONFIG.sessionId,
         config: CONFIG,
         messages: msgs,
-        sessionStartTime
-      })
+        sessionToken: sessionTokenRef.current,
+        ...(controlAction ? { controlAction } : {}),
+      }),
     })
 
-    const data = await res.json()
+    let data: any = null
+    try {
+      data = await res.json()
+    } catch {
+      data = null
+    }
 
-    if (!data.success) {
-      throw new Error(typeof data.error === 'string' ? data.error : 'interview_call_failed')
+    if (!res.ok || !data?.success) {
+      const error = new Error(
+        typeof data?.error === 'string' ? data.error : 'interview_call_failed'
+      ) as Error & { code?: string; status?: number }
+      error.code = typeof data?.code === 'string' ? data.code : undefined
+      error.status = res.status
+      throw error
+    }
+
+    if (typeof data.sessionToken === 'string' && data.sessionToken.length > 0) {
+      sessionTokenRef.current = data.sessionToken
+      try {
+        sessionStorage.setItem(sessionTokenStorageKey, data.sessionToken)
+      } catch {}
+    } else if (data.sessionToken === null) {
+      sessionTokenRef.current = null
+      try {
+        sessionStorage.removeItem(sessionTokenStorageKey)
+      } catch {}
     }
 
     return data
   }
 
-  // INTERVIEW CALL RESILIENCE
-  // Applies a successful backend response to the room. Pure success path.
-  const applyInterviewResponse = (data: any) => {
+  const applyInterviewResponse = (
+    data: any,
+    attemptedMessages: Message[],
+    controlAction?: ControlAction
+  ) => {
+    setServerTimerStarted(true)
+
+    if (typeof data.remainingSeconds === 'number' && Number.isFinite(data.remainingSeconds)) {
+      setTimeLeft(Math.max(0, Math.floor(data.remainingSeconds)))
+    }
+
+    let nextMessages = attemptedMessages
+
+    if (data.excludeLastUserMessageFromAssessment === true) {
+      const lastUserIndex = [...attemptedMessages]
+        .map((message, index) => ({ message, index }))
+        .reverse()
+        .find(item => item.message.role === 'user')?.index
+
+      if (lastUserIndex !== undefined) {
+        nextMessages = attemptedMessages.map((message, index) =>
+          index === lastUserIndex
+            ? { ...message, assessmentEligible: false }
+            : message
+        )
+      }
+    }
+
+    const content = typeof data.content === 'string' ? data.content.trim() : ''
+    if (content) {
+      const newMsg: Message = {
+        role: 'assistant',
+        content,
+        timestamp: Date.now(),
+        clientMessageId: createClientMessageId('assistant'),
+        score: data.excludeResponseFromAssessment === true ? undefined : data.score,
+        isQuestion: isQuestionLike(content),
+        assessmentEligible: data.excludeResponseFromAssessment !== true,
+      }
+      nextMessages = [...nextMessages, newMsg]
+    }
+
+    messagesRef.current = nextMessages
+    setMessages(nextMessages)
+
     const responseCoveredAreas = normalizeCoveredAreas(data.coveredAreas)
     if (data.isEndOfSession) {
       coveredAreasRef.current = responseCoveredAreas
     }
 
-    const newMsg: Message = {
-      role: 'assistant',
-      content: data.content,
-      score: data.score
+    const responseKind = typeof data.responseKind === 'string' ? data.responseKind : 'interview'
+
+    if (data.sessionPaused === true) {
+      stopAudio()
+      stopMediaCapture()
+      if (silenceTimer.current) clearTimeout(silenceTimer.current)
+
+      setIsPaused(true)
+      isPausedRef.current = true
+      setPauseReason('conduct')
+      pauseReasonRef.current = 'conduct'
+      setPauseMessage(content || L.conductPausedSub)
+      setConductNoticeKind('pause')
+      setShowTextInput(false)
+      setShowEndModal(false)
+      setCallError(null)
+      return
     }
 
-    setMessages(prev => [...prev, newMsg])
+    if (controlAction === 'resume') {
+      setIsPaused(false)
+      isPausedRef.current = false
+      setPauseReason(null)
+      pauseReasonRef.current = null
+      setPauseMessage(null)
+      setConductNoticeKind(null)
+    } else if (responseKind === 'redirect' || responseKind === 'warning') {
+      setPauseMessage(content)
+      setConductNoticeKind(responseKind)
+    } else {
+      setPauseMessage(null)
+      setConductNoticeKind(null)
+    }
+
+    const assessmentResponse = data.excludeResponseFromAssessment !== true
 
     if (
+      assessmentResponse &&
       !data.isEndOfSession &&
       !finalQuestionAskedRef.current &&
       timeLeft <= FINAL_QUESTION_WINDOW_SECONDS &&
-      isQuestionLike(data.content)
+      isQuestionLike(content)
     ) {
       markFinalQuestionAsked()
     }
 
-    // Assessment focus: shown ONLY when the backend actually provides it.
-    if (data.focus) setCurrentFocus(data.focus)
+    if (assessmentResponse && data.focus) setCurrentFocus(data.focus)
+    if (assessmentResponse && data.score) setQuestionCount(prev => prev + 1)
 
-    if (data.score) setQuestionCount(prev => prev + 1)
-
-    // CLOSING FLOW FIX
-    // End-of-session response enters the farewell screen first.
     if (data.isEndOfSession) {
-      requestClosing(data.content, data.audioBase64, false)
+      requestClosing(content, data.audioBase64, false)
       return
     }
 
-    // FINAL ANSWER FLOW
-    // In the final window, keep the last question visible and wait for the
-    // candidate's answer. Do not jump to the report before the answer.
     if (
+      assessmentResponse &&
       timeLeft <= CLOSING_REQUEST_SECONDS &&
-      isQuestionLike(data.content) &&
-      !data.isEndOfSession
+      isQuestionLike(content)
     ) {
       markFinalQuestionAsked()
     }
 
     if (data.audioBase64) playAudio(data.audioBase64)
-
     resetSilenceTimer()
   }
 
-  // INTERVIEW CALL RESILIENCE
-  // One silent automatic retry before any error reaches the candidate.
-  // On total failure: no message is injected, the last user answer stays
-  // visible, the report is NOT triggered, and a small retry panel appears.
-  const callAdam = async (msgs: Message[]) => {
-    lastAttemptedMessagesRef.current = msgs
+  // One silent automatic retry. The route deduplicates the exact request.
+  const callAdam = async (
+    msgs: Message[],
+    controlAction?: ControlAction
+  ) => {
+    if (isSubmittingRef.current) return
+
+    isSubmittingRef.current = true
+    lastAttemptedCallRef.current = { messages: msgs, controlAction }
 
     setCallError(null)
     setIsLoading(true)
-    setIsPaused(false)
-    isPausedRef.current = false
-
+    setServerTimerStarted(true)
     handleFirstInteraction()
 
     if (silenceTimer.current) clearTimeout(silenceTimer.current)
@@ -783,50 +992,83 @@ function InterviewRoom() {
     try {
       let data
       try {
-        // First attempt.
-        data = await attemptInterviewCall(msgs)
+        data = await attemptInterviewCall(msgs, controlAction)
       } catch (firstErr) {
-        // Silent automatic retry — the candidate never sees this failure.
         console.warn('[interview] first attempt failed, retrying silently:', firstErr)
         await new Promise(resolve => setTimeout(resolve, SILENT_RETRY_DELAY_MS))
-        data = await attemptInterviewCall(msgs)
+        data = await attemptInterviewCall(msgs, controlAction)
       }
 
-      applyInterviewResponse(data)
+      applyInterviewResponse(data, msgs, controlAction)
     } catch (err) {
-      // Both attempts failed. Surface a professional, non-Barbaros panel.
-      // Nothing is added to messages; the last user answer remains intact.
       console.error('[interview] call failed after silent retry:', err)
-      setCallError(L.connIssueBody)
+      const typedError = err as Error & { code?: string }
+
+      if (typedError.code === 'SESSION_NOT_FOUND') {
+        sessionTokenRef.current = null
+        try {
+          sessionStorage.removeItem(sessionTokenStorageKey)
+        } catch {}
+      }
+
+      setCallError(typedError.code === 'SESSION_NOT_FOUND' ? L.sessionMissing : L.connIssueBody)
     } finally {
+      isSubmittingRef.current = false
       setIsLoading(false)
     }
   }
 
-  // INTERVIEW CALL RESILIENCE
-  // Retry re-sends the exact last attempted messages — no re-typing, no re-recording.
   const retryLastCall = useCallback(() => {
-    const msgs = lastAttemptedMessagesRef.current
-    if (!msgs) return
+    const call = lastAttemptedCallRef.current
+    if (!call) return
     setCallError(null)
-    callAdam(msgs)
+    void callAdam(call.messages, call.controlAction)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  const resumeInterview = async () => {
+    if (
+      pauseReasonRef.current !== 'conduct' ||
+      isLoading ||
+      isSubmittingRef.current ||
+      isEnded ||
+      isClosing
+    ) return
+
+    stopAudio()
+    stopMediaCapture()
+    if (silenceTimer.current) clearTimeout(silenceTimer.current)
+    await callAdam(messagesRef.current, 'resume')
+  }
+
   const sendMessage = async () => {
-    if (!input.trim() || isLoading || isEnded || isClosing) return
+    if (
+      !input.trim() ||
+      isLoading ||
+      isEnded ||
+      isClosing ||
+      pauseReasonRef.current === 'conduct'
+    ) return
 
     handleFirstInteraction()
-    setIsPaused(false)
-    isPausedRef.current = false
+    clearInactivityPause()
 
     if (silenceTimer.current) clearTimeout(silenceTimer.current)
 
     stopAudio()
+    setPauseMessage(null)
+    setConductNoticeKind(null)
 
-    const userMsg: Message = { role: 'user', content: input.trim() }
+    const userMsg: Message = {
+      role: 'user',
+      content: input.trim(),
+      timestamp: Date.now(),
+      clientMessageId: createClientMessageId('user'),
+      assessmentEligible: true,
+    }
     const newMessages = [...messagesRef.current, userMsg]
 
+    messagesRef.current = newMessages
     setMessages(newMessages)
     setInput('')
 
@@ -862,13 +1104,17 @@ const goToReport = async () => {
     setGenStep(prev => (prev + 1) % genSteps.length)
   }, 2200)
 
+  const reportMessages = messagesRef.current
+    .filter(message => message.assessmentEligible !== false)
+    .map(({ assessmentEligible, clientMessageId, ...message }) => message)
+
   try {
     const res = await fetch('/api/report/create', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         session_id: CONFIG.sessionId,
-        messages: messagesRef.current,
+        messages: reportMessages,
         covered_areas: coveredAreasRef.current,
         config: {
           candidateName:   CONFIG.candidateName,
@@ -913,7 +1159,11 @@ const goToReport = async () => {
   }, [isEnded])
 
   const started = messages.length > 0 || isLoading
-  const lastQuestion = [...messages].reverse().find(m => m.role === 'assistant')?.content || ''
+  const lastQuestion = [...messages]
+    .reverse()
+    .find(message =>
+      message.role === 'assistant' && message.assessmentEligible !== false
+    )?.content || ''
 
   // Presence state
   let stateLabel = L.ready
@@ -923,7 +1173,7 @@ const goToReport = async () => {
 
   if (isPaused) {
     stateLabel = L.paused
-    stateSub = L.pausedSub
+    stateSub = pauseReason === 'conduct' ? L.conductPausedSub : L.pausedSub
     glow = '#6B7280'
     stateKey = 'paused'
   } else if (isAwaitingFinalAnswer) {
@@ -956,6 +1206,7 @@ const goToReport = async () => {
   }
 
   const animated = stateKey === 'speaking' || stateKey === 'evaluating' || stateKey === 'listening'
+  const sessionMissingError = callError === L.sessionMissing
 
   if (!mounted) {
     return (
@@ -971,7 +1222,11 @@ const goToReport = async () => {
   // CLOSING FLOW FIX
   // This screen appears before report generation. It lets the candidate see and hear the farewell.
   if (isClosing) {
-    const lastClosingMessage = [...messages].reverse().find(m => m.role === 'assistant')?.content || genericClosingMessage()
+    const lastClosingMessage = [...messages]
+      .reverse()
+      .find(message =>
+        message.role === 'assistant' && message.assessmentEligible !== false
+      )?.content || genericClosingMessage()
 
     return (
       <div style={{ fontFamily: 'system-ui, sans-serif', background: '#0B0D11', color: '#F0EDE8', minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 24, textAlign: 'center' }}>
@@ -1151,6 +1406,20 @@ const goToReport = async () => {
               </div>
             )}
 
+            {pauseMessage && conductNoticeKind && (
+              <div style={{ maxWidth: 460, width: '100%', textAlign: 'center', padding: '14px 16px', background: conductNoticeKind === 'pause' ? 'rgba(107,114,128,0.12)' : 'rgba(245,158,11,0.08)', border: conductNoticeKind === 'pause' ? '0.5px solid rgba(156,163,175,0.3)' : '0.5px solid rgba(245,158,11,0.3)', borderRadius: 14 }}>
+                <div style={{ fontSize: 12.5, color: 'rgba(240,237,232,0.82)', lineHeight: 1.7 }}>
+                  {pauseMessage}
+                </div>
+                {conductNoticeKind === 'pause' && !sessionMissingError && (
+                  <button type="button" onClick={() => void resumeInterview()} disabled={isLoading}
+                    style={{ marginTop: 12, padding: '10px 24px', background: isLoading ? '#1a1a22' : '#CC785C', border: 'none', borderRadius: 10, color: '#fff', fontSize: 13, fontWeight: 800, cursor: isLoading ? 'not-allowed' : 'pointer', fontFamily: 'inherit' }}>
+                    {L.resume}
+                  </button>
+                )}
+              </div>
+            )}
+
             {/* INTERVIEW CALL RESILIENCE — retry panel (not a Barbaros message) */}
             {callError && (
               <div style={{ maxWidth: 420, width: '100%', textAlign: 'center', padding: '14px 16px', background: 'rgba(239,68,68,0.06)', border: '0.5px solid rgba(239,68,68,0.28)', borderRadius: 14 }}>
@@ -1160,9 +1429,9 @@ const goToReport = async () => {
                 <div style={{ fontSize: 11.5, color: 'rgba(240,237,232,0.6)', lineHeight: 1.6, marginBottom: 12 }}>
                   {callError}
                 </div>
-                <button type="button" onClick={retryLastCall} disabled={isLoading}
+                <button type="button" onClick={sessionMissingError ? () => { window.location.href = '/onboarding' } : retryLastCall} disabled={isLoading}
                   style={{ padding: '9px 26px', background: isLoading ? '#1a1a22' : '#CC785C', border: 'none', borderRadius: 10, color: '#fff', fontSize: 13, fontWeight: 800, cursor: isLoading ? 'not-allowed' : 'pointer', fontFamily: 'inherit' }}>
-                  {L.retry}
+                  {sessionMissingError ? L.newInterview : L.retry}
                 </button>
               </div>
             )}
@@ -1180,7 +1449,7 @@ const goToReport = async () => {
       {/* Bottom controls */}
       {started && (
         <div style={{ padding: '14px 18px 22px', borderTop: '0.5px solid rgba(255,255,255,0.05)' }}>
-          {micError && (
+          {micError && pauseReason !== 'conduct' && (
             <div style={{ textAlign: 'center', marginBottom: 12 }}>
               <button type="button" onClick={() => setShowTextInput(true)}
                 style={{ background: 'rgba(239,68,68,0.08)', border: '0.5px solid rgba(239,68,68,0.25)', borderRadius: 8, color: '#F87171', fontSize: 11.5, padding: '7px 14px', cursor: 'pointer', fontFamily: 'inherit' }}>
@@ -1192,14 +1461,14 @@ const goToReport = async () => {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', alignItems: 'center' }}>
             <div />
 
-            <button type="button" onClick={toggleRecording} disabled={isLoading || isTranscribing || isClosing}
-              style={{ justifySelf: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, background: 'none', border: 'none', cursor: (isLoading || isTranscribing || isClosing) ? 'not-allowed' : 'pointer', fontFamily: 'inherit' }}>
+            <button type="button" onClick={toggleRecording} disabled={isLoading || isTranscribing || isClosing || pauseReason === 'conduct'}
+              style={{ justifySelf: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, background: 'none', border: 'none', cursor: (isLoading || isTranscribing || isClosing || pauseReason === 'conduct') ? 'not-allowed' : 'pointer', fontFamily: 'inherit' }}>
               <div style={{
                 width: 76, height: 76, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 30,
                 background: isRecording ? '#DC2626' : '#CC785C',
                 boxShadow: isRecording ? '0 0 28px rgba(220,38,38,0.65)' : '0 6px 22px rgba(204,120,92,0.4)',
                 transition: 'all .15s',
-                opacity: (isLoading || isTranscribing || isClosing) ? 0.4 : 1,
+                opacity: (isLoading || isTranscribing || isClosing || pauseReason === 'conduct') ? 0.4 : 1,
               }}>
                 {isTranscribing ? '⏳' : isRecording ? '⏹' : '🎤'}
               </div>
@@ -1209,8 +1478,8 @@ const goToReport = async () => {
             </button>
 
             <div style={{ justifySelf: 'end' }}>
-              <button type="button" onClick={() => setShowEndModal(true)}
-                style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(248,113,113,0.7)', fontFamily: 'inherit' }}>
+              <button type="button" onClick={() => setShowEndModal(true)} disabled={pauseReason === 'conduct'}
+                style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, background: 'none', border: 'none', cursor: pauseReason === 'conduct' ? 'not-allowed' : 'pointer', color: 'rgba(248,113,113,0.7)', opacity: pauseReason === 'conduct' ? 0.35 : 1, fontFamily: 'inherit' }}>
                 <div style={{ width: 46, height: 46, borderRadius: '50%', border: '0.5px solid rgba(248,113,113,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>⛔</div>
                 <span style={{ fontSize: 10 }}>{L.end}</span>
               </button>
@@ -1231,7 +1500,7 @@ const goToReport = async () => {
           </div>
 
           <div ref={chatRef} style={{ flex: 1, overflowY: 'auto', padding: '16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {messages.map((msg, i) => {
+            {messages.filter(message => message.assessmentEligible !== false).map((msg, i) => {
               const label = msg.score?.score !== undefined ? scoreLabel(msg.score.score) : null
 
               return (
@@ -1255,7 +1524,7 @@ const goToReport = async () => {
       )}
 
       {/* Text input panel */}
-      {showTextInput && (
+      {showTextInput && pauseReason !== 'conduct' && (
         <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, background: '#0F1117', borderTop: '0.5px solid rgba(255,255,255,0.1)', padding: '14px 16px', zIndex: 25, boxShadow: '0 -10px 30px rgba(0,0,0,0.4)' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
             <span style={{ fontSize: 11, color: 'rgba(240,237,232,0.5)' }}>{L.typeHere}</span>

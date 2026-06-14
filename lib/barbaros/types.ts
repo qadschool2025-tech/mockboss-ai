@@ -214,6 +214,35 @@ export interface Message {
   timestamp: number
   score?: NormalizedScore
   isQuestion?: boolean
+  assessmentEligible?: boolean
+  clientMessageId?: string
+}
+
+/**
+ * Internal conduct classification emitted by the existing interview LLM call.
+ * Unknown, missing, or uncertain values always fail safe to `professional`.
+ */
+export type ConductSignal =
+  | 'professional'
+  | 'off_topic_or_playful'
+  | 'explicit_abuse'
+  | 'uncertain'
+
+export type ConductAction = 'none' | 'redirect' | 'warning' | 'pause'
+
+export type SessionPauseReason = 'conduct' | 'inactivity' | null
+
+/**
+ * Optional and additive so sessions created before conduct controls remain valid.
+ */
+export interface ConductState {
+  redirected: boolean
+  warned: boolean
+  violationsAfterWarning: number
+  pendingQuestion?: string | null
+  lastViolationFingerprint?: string
+  lastViolationAction?: Exclude<ConductAction, 'none'>
+  lastViolationSignal?: 'off_topic_or_playful' | 'explicit_abuse'
 }
 
 // ============================================================================
@@ -377,6 +406,11 @@ export interface InterviewState {
   // Lifecycle
   interviewProgress: number      // 0-100, derived from time + phase completion
   isComplete: boolean
+
+  // Session conduct controls. Optional for backward compatibility.
+  sessionPaused?: boolean
+  pauseReason?: SessionPauseReason
+  conductState?: ConductState
 }
 
 // ============================================================================

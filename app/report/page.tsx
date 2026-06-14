@@ -17,6 +17,7 @@ interface ReplayItem {
   analysis: string
   weakened: string
   stronger: string
+  countsTowardPath?: boolean
 }
 
 interface AssessmentCoverage {
@@ -31,7 +32,7 @@ interface AssessmentCoverage {
 interface Report {
   finalScore: number
   readinessLevel: string
-  hireProbability: number
+  hireProbability?: number
   verdict: string
   barbarosAssessment: string
   assessmentCoverage?: AssessmentCoverage
@@ -76,11 +77,18 @@ const scoreColor = (s: number) =>
 /* ---------- Arabic label guards ---------- */
 
 const AR_READINESS_LEVELS: Record<string, string> = {
-  'Strong Hire':       'جاهز بقوة',
-  'Maybe Hire':        'قابل للتوصية بحذر',
-  'Risky Candidate':   'مخاطرة عالية',
-  'Not Recommended':   'غير جاهز حالياً',
+  'Strong Readiness': 'جاهزية قوية',
+  'Moderate Readiness': 'جاهزية متوسطة',
+  'Developing Readiness': 'جاهزية قيد التطوير',
+  'Limited Readiness': 'جاهزية محدودة',
   'Interview Incomplete': 'المقابلة غير مكتملة',
+
+  // Legacy labels remain readable for previously generated reports.
+  'Strong Hire': 'جاهز بقوة',
+  'Maybe Hire': 'جاهزية متوسطة',
+  'قابل للتوصية بحذر': 'جاهزية متوسطة',
+  'Risky Candidate': 'مخاطرة عالية',
+  'Not Recommended': 'غير جاهز حالياً',
 }
 
 const AR_COMPETENCY_NAMES: Record<string, string> = {
@@ -140,16 +148,26 @@ function labelType(isAr: boolean): React.CSSProperties {
 function verdictStyle(level: string) {
   const l = level.toLowerCase()
 
-  if (l.includes('strong') || level.includes('جاهز بقوة')) {
+  if (
+    l.includes('strong readiness') ||
+    l.includes('strong hire') ||
+    level.includes('جاهزية قوية') ||
+    level.includes('جاهز بقوة')
+  ) {
     return { color: '#2E5248', bg: '#E9EFEB', border: '#C6D8CE' }
   }
 
-  if (l.includes('maybe') || level.includes('قابل')) {
-    return { color: '#8A4A2E', bg: '#F6EAE1', border: '#E7CBBA' }
+  if (l.includes('moderate readiness') || level.includes('جاهزية متوسطة')) {
+    return { color: '#5A463E', bg: '#F1E8DF', border: '#D9C7B8' }
   }
 
-  if (l.includes('risky') || level.includes('مخاطرة')) {
-    return { color: '#86591D', bg: '#F4ECDB', border: '#E3D0A9' }
+  if (
+    l.includes('developing readiness') ||
+    l.includes('maybe hire') ||
+    level.includes('قيد التطوير') ||
+    level.includes('قابل')
+  ) {
+    return { color: '#8A4A2E', bg: '#F6EAE1', border: '#E7CBBA' }
   }
 
   return { color: '#7A2E24', bg: '#F3E3DE', border: '#DFC1B8' }
@@ -296,39 +314,85 @@ function hasCoverage(coverage?: AssessmentCoverage): coverage is AssessmentCover
 /* Frontend-only: derived from replay[].score order. No timestamps exist. */
 
 function PerformancePath({ replay, isAr }: { replay: ReplayItem[]; isAr: boolean }) {
-  const scores = replay
-    .map(item => item.score)
-    .filter(v => typeof v === 'number' && !Number.isNaN(v))
+  const pathItems = replay
+    .map((item, originalIndex) => ({ ...item, originalIndex }))
+    .filter(item => item.countsTowardPath !== false)
+    .filter(item => typeof item.score === 'number' && !Number.isNaN(item.score))
 
-  if (scores.length < 2) return null
+  if (pathItems.length < 2) return null
 
+  const scores = pathItems.map(item => item.score)
   const n = scores.length
   const max = Math.max(...scores)
   const min = Math.min(...scores)
   const avg = Math.round(scores.reduce((a, b) => a + b, 0) / n)
   const peakIdx = scores.indexOf(max)
   const lowIdx = scores.indexOf(min)
+  const range = max - min
 
-  // Trend: compare average of second half vs first half.
-  const half = Math.floor(n / 2)
-  const firstAvg = scores.slice(0, half).reduce((a, b) => a + b, 0) / half
-  const secondAvg = scores.slice(n - half).reduce((a, b) => a + b, 0) / half
-  const delta = secondAvg - firstAvg
-  const trend: 'up' | 'down' | 'flat' = delta >= 5 ? 'up' : delta <= -5 ? 'down' : 'flat'
+  const deltas = scores.slice(1).map((score, index) => score - scores[index])
+  const meaningfulDirections = deltas
+    .map(delta => (Math.abs(delta) < 5 ? 0 : Math.sign(delta)))
+    .filter(direction => direction !== 0)
+
+  let directionChanges = 0
+  for (let i = 1; i < meaningfulDirections.length; i++) {
+    if (meaningfulDirections[i] !== meaningfulDirections[i - 1]) {
+      directionChanges++
+    }
+  }
+
+  const biggestDrop = Math.min(0, ...deltas)
+  const biggestRise = Math.max(0, ...deltas)
+  const xMean = (n - 1) / 2
+  const yMean = scores.reduce((sum, score) => sum + score, 0) / n
+  const slopeDenominator = scores.reduce(
+    (sum, _score, index) => sum + (index - xMean) ** 2,
+    0
+  )
+  const slope =
+    slopeDenominator === 0
+      ? 0
+      : scores.reduce(
+          (sum, score, index) =>
+            sum + (index - xMean) * (score - yMean),
+          0
+        ) / slopeDenominator
+
+  const volatile =
+    range >= 25 &&
+    (directionChanges >= 1 || biggestDrop <= -20 || biggestRise >= 20)
+  const lastDelta = deltas[deltas.length - 1] ?? 0
+  const trend: 'volatile' | 'up' | 'down' | 'stable' = volatile
+    ? 'volatile'
+    : slope >= 3
+      ? 'up'
+      : slope <= -3
+        ? 'down'
+        : 'stable'
 
   const trendLabel = isAr
-    ? trend === 'up'
-      ? 'الاتجاه العام: أداء يتحسن مع تقدم المقابلة'
-      : trend === 'down'
-        ? 'الاتجاه العام: أداء يتراجع مع تقدم المقابلة'
-        : 'الاتجاه العام: أداء مستقر عبر المقابلة'
-    : trend === 'up'
-      ? 'Overall trend: performance improved as the interview progressed'
-      : trend === 'down'
-        ? 'Overall trend: performance declined as the interview progressed'
-        : 'Overall trend: performance remained stable across the interview'
+    ? trend === 'volatile'
+      ? lastDelta <= -15
+        ? 'الاتجاه العام: أداء متذبذب، تحسن في بعض مراحل المقابلة ثم انخفض بوضوح في الإجابة الأخيرة'
+        : 'الاتجاه العام: أداء متذبذب بين إجابات المقابلة'
+      : trend === 'up'
+        ? 'الاتجاه العام: تحسن الأداء مع تقدم المقابلة'
+        : trend === 'down'
+          ? 'الاتجاه العام: تراجع الأداء مع تقدم المقابلة'
+          : 'الاتجاه العام: أداء متقارب عبر المقابلة دون تغير حاد'
+    : trend === 'volatile'
+      ? lastDelta <= -15
+        ? 'Overall trend: performance fluctuated, improved in parts of the interview, then dropped clearly in the final answer'
+        : 'Overall trend: performance fluctuated across the interview answers'
+      : trend === 'up'
+        ? 'Overall trend: performance improved as the interview progressed'
+        : trend === 'down'
+          ? 'Overall trend: performance declined as the interview progressed'
+          : 'Overall trend: performance remained broadly consistent without sharp changes'
 
-  const trendColor = trend === 'up' ? '#3F6B5E' : trend === 'down' ? '#A14234' : '#86591D'
+  const trendColor =
+    trend === 'up' ? '#3F6B5E' : trend === 'down' ? '#A14234' : '#86591D'
 
   // SVG geometry
   const W = 640
@@ -344,6 +408,11 @@ function PerformancePath({ replay, isAr }: { replay: ReplayItem[]; isAr: boolean
 
   const points = scores.map((v, i) => `${x(i)},${y(v)}`).join(' ')
   const areaPoints = `${x(0)},${padTop + innerH} ${points} ${x(n - 1)},${padTop + innerH}`
+
+  const questionLabel = (pathIndex: number) => {
+    const originalNumber = pathItems[pathIndex].originalIndex + 1
+    return isAr ? `س${originalNumber}` : `Q${originalNumber}`
+  }
 
   const statBox = (label: string, value: string, color: string) => (
     <div
@@ -418,7 +487,7 @@ function PerformancePath({ replay, isAr }: { replay: ReplayItem[]; isAr: boolean
                 fontSize="9.5"
                 fill="rgba(26,26,26,0.45)"
               >
-                {isAr ? `س${i + 1}` : `Q${i + 1}`}
+                {questionLabel(i)}
               </text>
               {(isPeak || isLow) && (
                 <text
@@ -448,12 +517,12 @@ function PerformancePath({ replay, isAr }: { replay: ReplayItem[]; isAr: boolean
       >
         {statBox(
           isAr ? 'أعلى نقطة أداء' : 'Peak performance',
-          `${max} · ${isAr ? `س${peakIdx + 1}` : `Q${peakIdx + 1}`}`,
+          `${max} · ${questionLabel(peakIdx)}`,
           '#3F6B5E'
         )}
         {statBox(
           isAr ? 'أدنى نقطة أداء' : 'Lowest point',
-          `${min} · ${isAr ? `س${lowIdx + 1}` : `Q${lowIdx + 1}`}`,
+          `${min} · ${questionLabel(lowIdx)}`,
           '#A14234'
         )}
         {statBox(isAr ? 'متوسط الأداء' : 'Average', `${avg}`, '#CC785C')}
@@ -510,6 +579,23 @@ function safeText(value: string | undefined, fallback: string) {
   return v || fallback
 }
 
+function formatYearsExperience(value: string, isAr: boolean): string {
+  const clean = typeof value === 'string' ? value.trim() : ''
+  if (!clean) return ''
+
+  const normalized = clean.toLowerCase().replace(/\s+/g, ' ')
+  const match = normalized.match(
+    /^(?:years?\s*)?\+?\s*(\d+)\s*\+?(?:\s*years?)?$/
+  )
+
+  if (match && clean.includes('+')) {
+    const years = Number(match[1])
+    return isAr ? `أكثر من ${years} سنوات` : `More than ${years} years`
+  }
+
+  return clean
+}
+
 function displayPlanName(plan: string) {
   const key = (plan || '').toLowerCase()
   if (key.includes('expert')) return 'Expert Interview'
@@ -543,7 +629,7 @@ const MetaItem = ({
   isAr,
 }: {
   label: string
-  value: string
+  value: React.ReactNode
   isAr: boolean
 }) => (
   <div
@@ -586,7 +672,7 @@ function ReportCover({
   readinessLabel: string
   reportDate: string
   reference: string
-  summaryLine: string
+  summaryLine: React.ReactNode
   assessment: string
 }) {
   const incomplete = data.report.interviewIncomplete === true
@@ -703,7 +789,7 @@ function ReportCover({
                 letterSpacing: -0.4,
               }}
             >
-              {safeText(data.candidateName, isAr ? 'المرشح' : 'Candidate')}
+              {safeText(data.candidateName, isAr ? 'الاسم غير متاح' : 'Name not available')}
             </h1>
           </div>
 
@@ -722,8 +808,8 @@ function ReportCover({
                   ? 'حالة التقرير'
                   : 'Report Status'
                 : isAr
-                  ? 'الحكم المهني'
-                  : 'Professional Verdict'}
+                  ? 'مؤشر جاهزية الجلسة'
+                  : 'Session Readiness'}
             </div>
             <div style={{ fontFamily: SERIF, fontSize: 18, fontWeight: 800, lineHeight: 1.35 }}>
               {readinessLabel}
@@ -753,7 +839,10 @@ function ReportCover({
           <MetaItem
             isAr={isAr}
             label={isAr ? 'سنوات الخبرة' : 'Years of Experience'}
-            value={safeText(data.yearsExperience, isAr ? 'غير محدد' : 'Not provided')}
+            value={safeText(
+              formatYearsExperience(data.yearsExperience, isAr),
+              isAr ? 'غير محدد' : 'Not provided'
+            )}
           />
           <MetaItem
             isAr={isAr}
@@ -781,7 +870,9 @@ function ReportCover({
                 ? isAr
                   ? 'المقابلة غير مكتملة'
                   : 'Interview Incomplete'
-                : `${data.report.finalScore} / 100`
+                : (
+                  <bdi dir="ltr">{data.report.finalScore} / 100</bdi>
+                )
             }
           />
         </div>
@@ -834,7 +925,7 @@ function ReportCover({
                 borderTop: '0.5px solid rgba(26,26,26,0.08)',
               }}
             >
-              {“${assessment}”}
+ “{assessment}”
             </div>
           )}
         </div>
@@ -852,7 +943,7 @@ function ReportCover({
             accent,
           }: {
             label: string
-            value: string
+            value: React.ReactNode
             sub?: string
             accent: string
           }) => (
@@ -923,13 +1014,17 @@ function ReportCover({
                         ? 'حالة التقرير'
                         : 'Report Status'
                       : isAr
-                        ? 'الحكم المهني النهائي'
-                        : 'Final Professional Verdict'
+                        ? 'الجاهزية في هذه الجلسة'
+                        : 'Session Readiness'
                   }
                   value={
                     incomplete
                       ? readinessLabel
-                      : `${readinessLabel} · ${r.finalScore}/100`
+                      : (
+                          <>
+                            {readinessLabel} · <bdi dir="ltr">{r.finalScore} / 100</bdi>
+                          </>
+                        )
                   }
                 />
 
@@ -937,14 +1032,20 @@ function ReportCover({
                   <GlanceCard
                     accent="#3F6B5E"
                     label={isAr ? 'أقوى ميزة في أدائك' : 'Your Strongest Asset'}
-                    value={`${isAr ? AR_COMPETENCY_NAMES[top.name] ?? top.name : top.name} · ${top.score}/100`}
+                    value={
+                      <>
+                        {isAr ? AR_COMPETENCY_NAMES[top.name] ?? top.name : top.name}
+                        {' · '}
+                        <bdi dir="ltr">{top.score} / 100</bdi>
+                      </>
+                    }
                   />
                 )}
 
                 {!incomplete && risk && (
                   <GlanceCard
                     accent="#A14234"
-                    label={isAr ? 'أكبر نقطة خطر' : 'Primary Risk'}
+                    label={isAr ? 'أولوية التحسين الأساسية' : 'Primary Improvement Priority'}
                     value={risk}
                   />
                 )}
@@ -1231,14 +1332,22 @@ function ReportView({ data }: { data: Stored }) {
   const v = verdictStyle(readinessLabel)
   const coverage = r.assessmentCoverage
   const incomplete = r.interviewIncomplete === true
+  const performancePathItemCount = Array.isArray(r.replay)
+    ? r.replay.filter(
+        item =>
+          item.countsTowardPath !== false &&
+          typeof item.score === 'number' &&
+          !Number.isNaN(item.score)
+      ).length
+    : 0
 
   const footerText = incomplete
     ? isAr
       ? 'يسجل هذا التقرير جلسة مقابلة غير مكتملة، ولم يصدر عنها حكم على الأداء أو الكفاءة.'
       : 'This report records an incomplete interview session and does not issue a judgment on performance or ability.'
     : isAr
-      ? 'تم إعداد هذا التقرير وفق منهجية تقييم منظمة قائمة على الكفاءات، ومتوافقة مع ممارسات التوظيف الحديثة المستخدمة في الجهات الحكومية، والمؤسسات العالمية، والشركات الرائدة في القطاع الخاص.'
-      : 'Generated through a structured, competency-based evaluation methodology aligned with modern hiring practices used across government entities, global organizations, and leading private-sector companies.'
+      ? 'تم إعداد هذا التقرير وفق مبادئ التقييم المنظم القائم على الكفاءات.'
+      : 'This report was prepared using structured, competency-based assessment principles.'
 
   return (
     <div
@@ -1366,14 +1475,19 @@ function ReportView({ data }: { data: Stored }) {
               ? isAr
                 ? 'المقابلة غير مكتملة — لم تتضمن هذه الجلسة أدلة كافية لإصدار تقييم كامل.'
                 : 'Interview incomplete — this session did not include enough evidence to issue a full assessment.'
-              : (isAr
-                  ? `حصل المرشّح على ${r.finalScore} من 100 ضمن مستوى «${readinessLabel}»`
-                  : `Overall score of ${r.finalScore} out of 100 — readiness level: “${readinessLabel}”`) +
-                (typeof r.hireProbability === 'number'
-                  ? isAr
-                    ? `، باحتمالية توظيف ${r.hireProbability}%.`
-                    : `, with a ${r.hireProbability}% probability of hire.`
-                  : '.')
+              : isAr
+                ? (
+                    <>
+                      حصلت في هذه الجلسة على <bdi dir="ltr">{r.finalScore} / 100</bdi>{' '}
+                      ضمن مستوى «{readinessLabel}».
+                    </>
+                  )
+                : (
+                    <>
+                      Your score in this session is <bdi dir="ltr">{r.finalScore} / 100</bdi>{' '}
+                      with a “{readinessLabel}” level.
+                    </>
+                  )
           }
           assessment={r.barbarosAssessment || ''}
         />
@@ -1408,40 +1522,6 @@ function ReportView({ data }: { data: Stored }) {
         {!incomplete && (
         <Section lang={lang} style={{ textAlign: 'center' }}>
           <ScoreRing score={r.finalScore} />
-
-          {typeof r.hireProbability === 'number' && (
-            <div
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 8,
-                background: 'rgba(204,120,92,0.08)',
-                border: '0.5px solid rgba(204,120,92,0.25)',
-                borderRadius: 20,
-                padding: '6px 16px',
-              }}
-            >
-              <span
-                style={{
-                  fontSize: 11,
-                  color: 'rgba(26,26,26,0.5)',
-                  fontWeight: 600,
-                }}
-              >
-                {isAr ? 'مؤشر احتمالية التوظيف' : 'Hire Probability'}
-              </span>
-
-              <span
-                style={{
-                  fontSize: 16,
-                  fontWeight: 900,
-                  color: '#CC785C',
-                }}
-              >
-                {r.hireProbability}%
-              </span>
-            </div>
-          )}
         </Section>
         )}
 
@@ -1484,8 +1564,8 @@ function ReportView({ data }: { data: Stored }) {
                   ? 'نطاق التقييم في هذه الجلسة'
                   : 'Assessment Coverage for This Session'
                 : isAr
-                  ? 'نطاق التقييم في هذه الباقة'
-                  : 'Assessment Coverage for This Package'}
+                  ? 'نطاق التقييم في هذه الجلسة'
+                  : 'Assessment Coverage for This Session'}
             </SectionTitle>
 
             {coverage.summary && (
@@ -1514,8 +1594,8 @@ function ReportView({ data }: { data: Stored }) {
                     }}
                   >
                     {isAr
-                      ? 'الأبعاد المقاسة فعلياً في هذه الباقة'
-                      : 'Measured in this package'}
+                      ? 'الأبعاد المقاسة فعلياً في هذه الجلسة'
+                      : 'Measured in this session'}
                   </div>
 
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
@@ -1555,8 +1635,8 @@ function ReportView({ data }: { data: Stored }) {
                     }}
                   >
                     {isAr
-                      ? 'أبعاد لم تُقَس في هذه الباقة — متاحة بتفصيل أعمق في الباقات الأعلى'
-                      : 'Not measured here · available in greater depth in higher-tier plans'}
+                      ? 'محاور متقدمة متاحة بعمق أكبر في الباقات الأعلى'
+                      : 'Advanced areas available in greater depth in higher-tier plans'}
                   </div>
 
                   <div
@@ -1654,7 +1734,7 @@ function ReportView({ data }: { data: Stored }) {
                       color: scoreColor(c.score),
                     }}
                   >
-                    {c.score}/100
+                    <bdi dir="ltr">{c.score} / 100</bdi>
                   </span>
                 </div>
 
@@ -1697,13 +1777,26 @@ function ReportView({ data }: { data: Stored }) {
         )}
 
         {/* 4.5 PERFORMANCE PATH — derived from replay scores (question order, not time) */}
-        {!incomplete && Array.isArray(r.replay) && r.replay.length >= 2 && (
+        {!incomplete && performancePathItemCount >= 2 && (
           <Section lang={lang}>
             <SectionTitle>
               {isAr ? 'مسار الأداء عبر أسئلة المقابلة' : 'Performance Path Across Interview Questions'}
             </SectionTitle>
 
             <PerformancePath replay={r.replay} isAr={isAr} />
+
+            <div
+              style={{
+                marginTop: 12,
+                fontSize: 11.5,
+                lineHeight: 1.7,
+                color: 'rgba(26,26,26,0.55)',
+              }}
+            >
+              {isAr
+                ? 'النتيجة الإجمالية محسوبة من درجات الكفاءات الست. أما متوسط مسار الأداء فيعكس درجات الإجابات المختارة عبر تسلسل المقابلة، لذلك قد يختلف الرقمان.'
+                : 'The overall score is calculated from the six competency scores. The performance-path average reflects selected answer scores across the interview sequence, so the two figures may differ.'}
+            </div>
           </Section>
         )}
 
@@ -1718,7 +1811,7 @@ function ReportView({ data }: { data: Stored }) {
             }}
           >
             <SectionTitle color="#A14234">
-              {isAr ? 'المخاطرة الجوهرية في الأداء' : 'Hidden Weakness'}
+              {isAr ? 'أولوية التحسين الأساسية' : 'Primary Improvement Priority'}
             </SectionTitle>
 
             <div style={{ fontSize: 13, color: '#7A2E24', lineHeight: 1.8 }}>
@@ -1850,6 +1943,24 @@ function ReportView({ data }: { data: Stored }) {
                         {i + 1}
                       </div>
 
+                      {!incomplete && item.countsTowardPath === false && (
+                        <span
+                          style={{
+                            fontSize: 10.5,
+                            fontWeight: 700,
+                            color: 'rgba(26,26,26,0.5)',
+                            background: 'rgba(26,26,26,0.045)',
+                            border: '0.5px solid rgba(26,26,26,0.10)',
+                            borderRadius: 999,
+                            padding: '4px 8px',
+                          }}
+                        >
+                          {isAr
+                            ? 'قراءة إضافية للدليل نفسه'
+                            : 'Additional reading of the same evidence'}
+                        </span>
+                      )}
+
                       {!incomplete && (
                         <span
                           style={{
@@ -1860,7 +1971,7 @@ function ReportView({ data }: { data: Stored }) {
                             marginRight: isAr ? 'auto' : 0,
                           }}
                         >
-                          {item.score}/100
+                          <bdi dir="ltr">{item.score} / 100</bdi>
                         </span>
                       )}
                     </div>

@@ -2,7 +2,12 @@
 // Barbaros V4, Main Orchestrator.
 // Consumed by: app/api/interview/route.ts, single import point.
 
-import type { InterviewConfig, Message, CandidateProfile } from './types'
+import type {
+  InterviewConfig,
+  Message,
+  CandidateProfile,
+  SessionPauseReason,
+} from './types'
 import type { SessionState } from './state/session-state'
 import type { WeaknessTrackerState } from './longitudinal/weakness-tracker'
 import type { GrowthTrackerState } from './longitudinal/growth-tracker'
@@ -53,6 +58,16 @@ import type { PanelTurnState } from './panel/panel-rotation'
 
 import { buildPrompt } from './prompt/prompt-builder'
 import { buildClosingMessage } from './prompt/personality'
+import {
+  buildConductResponse,
+  buildResumeResponse,
+  decideConduct,
+  getCurrentAssessmentQuestion,
+  normalizeConductState,
+  parseConductSignal,
+  stripConductTag,
+} from './policy/conduct-policy'
+import type { ConductDecision } from './policy/conduct-policy'
 import { callClaude } from './llm/claude-client'
 import { synthesizeSpeech } from './llm/tts'
 
@@ -67,6 +82,7 @@ export interface EngineInput {
   previousSnapshot: SessionSnapshot | null
   sessionStartTime: number
   now:              number
+  controlAction?:   'resume'
 }
 
 export interface EngineOutput {
@@ -84,6 +100,12 @@ export interface EngineOutput {
   coveredAreas:     EssentialAxis[]
   activeRoleId?:    PanelRoleId | null
   activeRoleTitle?: string | null
+  sessionPaused:    boolean
+  pauseReason:      SessionPauseReason
+  responseKind:     'opening' | 'interview' | 'redirect' | 'warning' | 'pause' | 'resume' | 'closing'
+  excludeLastUserMessageFromAssessment: boolean
+  excludeResponseFromAssessment: boolean
+  remainingSeconds: number
 }
 
 // Time Limits
@@ -130,22 +152,49 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
     previousSnapshot,
     sessionStartTime,
     now,
+    controlAction,
   } = input
 
   const elapsedSeconds = (now - sessionStartTime) / 1000
   const totalSeconds   = TIME_LIMITS[config.plan] ?? TIME_LIMITS.free
   const elapsedMinutes = elapsedSeconds / 60
   const totalMinutes   = totalSeconds / 60
+  const remainingSeconds = Math.max(0, Math.ceil(totalSeconds - elapsedSeconds))
+  const assessmentMessages = messages.filter(
+    message => message.assessmentEligible !== false
+  )
+  const stateWithConfig: SessionState = { ...state, config }
 
   // 1. Session end check
 
-  if (elapsedSeconds >= totalSeconds || isSessionComplete({ ...state, config })) {
-    return buildEndOfSessionOutput(input, elapsedMinutes, totalMinutes, now)
+  if (elapsedSeconds >= totalSeconds || isSessionComplete(stateWithConfig)) {
+    return buildEndOfSessionOutput(
+      { ...input, messages: assessmentMessages },
+      elapsedMinutes,
+      totalMinutes,
+      now
+    )
+  }
+
+  // 1a. Control actions never enter the transcript, scoring, or evidence flow.
+
+  if (controlAction === 'resume') {
+    return buildResumeOutput(
+      input,
+      remainingSeconds,
+      now
+    )
+  }
+
+  // A paused session accepts only a control action. Any accidental user payload
+  // is ignored and explicitly excluded from assessment.
+  if (state.sessionPaused === true) {
+    return buildPausedOutput(input, remainingSeconds)
   }
 
   // 1b. First-turn short-circuit
 
-  const isFirstMessage = messages.length === 0
+  const isFirstMessage = assessmentMessages.length === 0
 
   if (isFirstMessage) {
     const built = buildPrompt(
@@ -187,6 +236,12 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
       coveredAreas:     [],
       activeRoleId:     null,
       activeRoleTitle:  null,
+      sessionPaused:    false,
+      pauseReason:      null,
+      responseKind:     'opening',
+      excludeLastUserMessageFromAssessment: false,
+      excludeResponseFromAssessment: false,
+      remainingSeconds,
     }
   }
 
@@ -225,7 +280,7 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
 
   const behaviorContext = {
     runtime: {
-      messages,
+      messages: assessmentMessages,
       currentPhase: stateWithPhase.phase,
       elapsedMinutes,
       now,
@@ -260,7 +315,7 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
     pendingTasks:     [],
   }
 
-  if (messages.length > 0) {
+  if (assessmentMessages.length > 0) {
     behaviorResult = await orchestrateBehavior(behaviorContext, orchestratorState)
   }
 
@@ -271,7 +326,7 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
 
   // 4. State patches
 
-  const lastUserMsg = [...messages].reverse().find(m => m.role === 'user')
+  const lastUserMsg = [...assessmentMessages].reverse().find(m => m.role === 'user')
   const updatedTopics = lastUserMsg
     ? recordTopicsFromText(stateWithPhase, lastUserMsg.content, now)
     : stateWithPhase
@@ -293,7 +348,7 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
 
   const contradictionPatch = detectContradictions(
     {
-      messages,
+      messages: assessmentMessages,
       currentPhase: stateWithPhase.phase,
       now,
     },
@@ -314,7 +369,7 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
   try {
     const semanticPatch = await detectContradictionsSemantic(
       {
-        messages,
+        messages: assessmentMessages,
         currentPhase: stateWithPhase.phase,
         now,
       },
@@ -339,6 +394,10 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
       ...stateWithPhase.metrics,
       contradictionCount: updatedContradictions.length,
     },
+    messages: assessmentMessages,
+    sessionPaused: false,
+    pauseReason: null,
+    conductState: normalizeConductState(stateWithPhase.conductState),
   }
 
   // 5. Score + candidate profile
@@ -361,7 +420,7 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
         behaviorResult,
         stateAfterCompetency.competencyCoverage,
         updatedContradictions,
-        messages,
+        assessmentMessages,
         elapsedMinutes,
         now
       )
@@ -382,7 +441,7 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
       }
 
       console.log('[barbaros:profile]', JSON.stringify({
-        turn:             messages.filter(m => m.role === 'user').length,
+        turn:             assessmentMessages.filter(m => m.role === 'user').length,
         confirmedSignals: confirmedSignals.length,
         insightCount,
         depth:            statePatch.candidateProfile?.depth,
@@ -396,7 +455,7 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
     }
   } else if (lastUserMsg) {
     console.log('[barbaros:profile] skipped, no confirmed signals this turn', JSON.stringify({
-      turn:             messages.filter(m => m.role === 'user').length,
+      turn:             assessmentMessages.filter(m => m.role === 'user').length,
       confirmedSignals: confirmedSignals.length,
       insightCount,
     }))
@@ -456,7 +515,7 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
       turnState: priorPanelTurnState,
       state: mergedStateForPanel,
       config,
-      messages,
+      messages: assessmentMessages,
       elapsedMinutes,
       totalMinutes,
     })
@@ -498,10 +557,47 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
 
   // 7. LLM call
 
-  const content = await callClaude({
+  const rawContent = await callClaude({
     systemPrompt: built.systemPrompt,
-    messages,
+    messages: assessmentMessages,
   })
+
+  const conductSignal = parseConductSignal(rawContent)
+
+  if (
+    lastUserMsg &&
+    (conductSignal === 'off_topic_or_playful' || conductSignal === 'explicit_abuse')
+  ) {
+    const question = getCurrentAssessmentQuestion(assessmentMessages)
+    const conductDecision = decideConduct(
+      conductSignal,
+      stateWithPhase.conductState,
+      question,
+      lastUserMsg.content,
+      lastUserMsg.clientMessageId
+    )
+
+    return buildConductDecisionOutput({
+      input,
+      decision: conductDecision,
+      question,
+      remainingSeconds,
+      promptCharCount: built.charCount,
+      truncated: built.truncated,
+    })
+  }
+
+  const content = stripConductTag(rawContent)
+
+  // A professional answer resolves the saved question. Escalation history stays
+  // intact, but any future pause must resume from the then-current question.
+  statePatch.conductState = {
+    ...normalizeConductState(stateWithPhase.conductState),
+    pendingQuestion: null,
+    lastViolationFingerprint: undefined,
+    lastViolationAction: undefined,
+    lastViolationSignal: undefined,
+  }
 
   // 8. TTS
 
@@ -549,6 +645,180 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
     coveredAreas:    [],
     activeRoleId:    activePanelMember?.id ?? null,
     activeRoleTitle: activePanelMember?.displayTitle ?? null,
+    sessionPaused:   false,
+    pauseReason:     null,
+    responseKind:    'interview',
+    excludeLastUserMessageFromAssessment: false,
+    excludeResponseFromAssessment: false,
+    remainingSeconds,
+  }
+}
+
+interface ConductOutputInput {
+  input: EngineInput
+  decision: ConductDecision
+  question: string | null
+  remainingSeconds: number
+  promptCharCount: number
+  truncated: boolean
+}
+
+async function buildConductDecisionOutput(
+  args: ConductOutputInput
+): Promise<EngineOutput> {
+  const {
+    input,
+    decision,
+    question,
+    remainingSeconds,
+    promptCharCount,
+    truncated,
+  } = args
+
+  const content = buildConductResponse(
+    decision.action,
+    decision.signal,
+    input.config.language,
+    question
+  )
+
+  const paused = decision.action === 'pause'
+  let audioBase64: string | null = null
+
+  if (!paused && content) {
+    try {
+      audioBase64 = await synthesizeSpeech(content)
+    } catch {
+      audioBase64 = null
+    }
+  }
+
+  return {
+    content,
+    audioBase64,
+    score: null,
+    statePatch: {
+      sessionPaused: paused,
+      pauseReason: paused ? 'conduct' : null,
+      conductState: decision.state,
+    },
+    weaknessPatch: input.weaknessState,
+    growthPatch: input.growthState,
+    isEndOfSession: false,
+    phaseChanged: false,
+    snapshot: null,
+    promptCharCount,
+    truncated,
+    coveredAreas: [],
+    activeRoleId: null,
+    activeRoleTitle: null,
+    sessionPaused: paused,
+    pauseReason: paused ? 'conduct' : null,
+    responseKind: decision.action === 'none' ? 'interview' : decision.action,
+    excludeLastUserMessageFromAssessment: true,
+    excludeResponseFromAssessment: true,
+    remainingSeconds,
+  }
+}
+
+async function buildResumeOutput(
+  input: EngineInput,
+  remainingSeconds: number,
+  now: number
+): Promise<EngineOutput> {
+  const conductState = normalizeConductState(input.state.conductState)
+  const wasPaused = input.state.sessionPaused === true
+  const content = wasPaused
+    ? buildResumeResponse(input.config.language, conductState.pendingQuestion ?? null)
+    : ''
+
+  let audioBase64: string | null = null
+
+  if (content) {
+    try {
+      audioBase64 = await synthesizeSpeech(content)
+    } catch {
+      audioBase64 = null
+    }
+  }
+
+  return {
+    content,
+    audioBase64,
+    score: null,
+    statePatch: {
+      sessionPaused: false,
+      pauseReason: null,
+      conductState: {
+        ...conductState,
+        pendingQuestion: null,
+      },
+      metrics: {
+        ...input.state.metrics,
+        lastActivityAt: now,
+      },
+    },
+    weaknessPatch: input.weaknessState,
+    growthPatch: input.growthState,
+    isEndOfSession: false,
+    phaseChanged: false,
+    snapshot: null,
+    promptCharCount: 0,
+    truncated: false,
+    coveredAreas: [],
+    activeRoleId: null,
+    activeRoleTitle: null,
+    sessionPaused: false,
+    pauseReason: null,
+    responseKind: 'resume',
+    excludeLastUserMessageFromAssessment: false,
+    excludeResponseFromAssessment: true,
+    remainingSeconds,
+  }
+}
+
+function buildPausedOutput(
+  input: EngineInput,
+  remainingSeconds: number
+): EngineOutput {
+  const conductState = normalizeConductState(input.state.conductState)
+  const signal = conductState.lastViolationSignal ?? 'off_topic_or_playful'
+  const content = buildConductResponse(
+    'pause',
+    signal,
+    input.config.language,
+    conductState.pendingQuestion ?? null
+  )
+  const lastUserMessage = [...input.messages]
+    .reverse()
+    .find(message => message.role === 'user')
+
+  return {
+    content,
+    audioBase64: null,
+    score: null,
+    statePatch: {
+      sessionPaused: true,
+      pauseReason: 'conduct',
+      conductState,
+    },
+    weaknessPatch: input.weaknessState,
+    growthPatch: input.growthState,
+    isEndOfSession: false,
+    phaseChanged: false,
+    snapshot: null,
+    promptCharCount: 0,
+    truncated: false,
+    coveredAreas: [],
+    activeRoleId: null,
+    activeRoleTitle: null,
+    sessionPaused: true,
+    pauseReason: 'conduct',
+    responseKind: 'pause',
+    excludeLastUserMessageFromAssessment:
+      Boolean(lastUserMessage && lastUserMessage.assessmentEligible !== false),
+    excludeResponseFromAssessment: true,
+    remainingSeconds,
   }
 }
 
@@ -630,6 +900,8 @@ async function buildEndOfSessionOutput(
     statePatch: {
       phase:              'closing',
       competencyCoverage: coverageState.competencyCoverage,
+      sessionPaused:      false,
+      pauseReason:        null,
     } as Partial<SessionState>,
     weaknessPatch,
     growthPatch,
@@ -641,6 +913,12 @@ async function buildEndOfSessionOutput(
     coveredAreas,
     activeRoleId:    null,
     activeRoleTitle: null,
+    sessionPaused:   false,
+    pauseReason:     null,
+    responseKind:    'closing',
+    excludeLastUserMessageFromAssessment: false,
+    excludeResponseFromAssessment: false,
+    remainingSeconds: 0,
   }
 }
 
@@ -717,19 +995,17 @@ function quickAnswerSignals(
   text: string
 ): { vagueness: 'low' | 'medium' | 'high'; hasExamples: boolean } {
   const t = text.trim()
-  const words = t.split(/\s+/).filter(Boolean).length
 
   const hasExamples =
     /\b(for example|for instance|e\.g\.|such as|specifically|one time|once|when i|at my|last year|this year|in \d{4})\b/i.test(t) ||
     /\d/.test(t)
 
-  let vagueness: 'low' | 'medium' | 'high' = 'low'
+  const hasVagueLanguage =
+    /\b(generally|usually|somehow|things|stuff|maybe|perhaps|it depends)\b/i.test(t) ||
+    /(بشكل عام|عادة|نوعاً ما|نوعا ما|أشياء|ربما|قد يكون|يعتمد)/.test(t)
 
-  if (!hasExamples && words < 25) {
-    vagueness = 'high'
-  } else if (!hasExamples && words < 60) {
-    vagueness = 'medium'
-  }
+  const vagueness: 'low' | 'medium' =
+    !hasExamples && hasVagueLanguage ? 'medium' : 'low'
 
   return { vagueness, hasExamples }
 }

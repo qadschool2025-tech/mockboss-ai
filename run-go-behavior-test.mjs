@@ -4,7 +4,7 @@ const BASE_URL = 'https://mockboss-ai.vercel.app'
 const sessionId = `go-behavior-${Date.now()}`
 
 const config = {
-  candidateName: 'سارة خليل',
+  candidateName: 'سارة',
   jobTitle: 'مشرفة خدمة عملاء',
   institution: 'شركة الإمارات للتجزئة',
   sector: 'retail',
@@ -14,8 +14,8 @@ const config = {
   plan: 'go',
   isCareerSwitch: false,
   cvText: `
-سارة خليل
-خبرة أربع سنوات في خدمة العملاء.
+رحمة احمد
+خبرة ثلاث سنوات في خدمة العملاء.
 عملت من 2021 إلى 2024 منسقة خدمة عملاء في شركة الندى.
 بدأت العمل مشرفة خدمة عملاء في يناير 2025.
 أدرت فريقاً من ستة موظفين.

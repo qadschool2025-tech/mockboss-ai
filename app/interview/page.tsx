@@ -231,6 +231,9 @@ function InterviewRoom() {
   const messagesRef       = useRef<Message[]>([])
   const isLoadingRef      = useRef(false)
   const isEndedRef        = useRef(false)
+  // True only when the engine itself returns data.isEndOfSession === true.
+  // Used to mark coverage completeness for the report; never inferred otherwise.
+  const engineEndedRef    = useRef(false)
   const isClosingRef      = useRef(false)
   const isRecordingRef    = useRef(false)
   const isTranscribingRef = useRef(false)
@@ -904,6 +907,7 @@ function InterviewRoom() {
     const responseCoveredAreas = normalizeCoveredAreas(data.coveredAreas)
     if (data.isEndOfSession) {
       coveredAreasRef.current = responseCoveredAreas
+      engineEndedRef.current = true
     }
 
     const responseKind = typeof data.responseKind === 'string' ? data.responseKind : 'interview'
@@ -1125,6 +1129,7 @@ const goToReport = async () => {
           language:        CONFIG.language,
           plan:            CONFIG.plan,
           coveredAreas:    coveredAreasRef.current,
+          coverageIncomplete: !engineEndedRef.current,
         },
       }),
     })

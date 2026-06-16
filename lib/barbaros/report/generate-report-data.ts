@@ -27,6 +27,10 @@ export interface ReportConfig {
   yearsExperience: string
   language: string
   plan: string
+  /** True when the interview engine did not signal a formal end-of-session. */
+  coverageIncomplete?: boolean
+  /** Legacy alias of coverageIncomplete, read-only for backward compatibility. */
+  interviewIncomplete?: boolean
 }
 
 export interface GenerateReportInput {
@@ -88,7 +92,7 @@ const AR_READINESS_LEVELS: Record<string, string> = {
   'Strong Readiness': 'جاهزية قوية',
   'Moderate Readiness': 'جاهزية متوسطة',
   'Developing Readiness': 'جاهزية قيد التطوير',
-  'Limited Readiness': 'جاهزية محدودة',
+  'Limited Readiness': 'غير جاهز حالياً',
   'Interview Incomplete': 'المقابلة غير مكتملة',
 
   // Legacy values remain readable for previously generated reports.
@@ -192,7 +196,8 @@ function buildAssessmentCoverage(
   coveredAreas: EssentialAxis[],
   language: string,
   plan: string,
-  evidenceSufficient: boolean
+  evidenceSufficient: boolean,
+  coverageIncomplete: boolean = false
 ): AssessmentCoverage {
   const lang = reportLang(language)
   const tier = resolvePlanTier(plan)
@@ -240,9 +245,15 @@ function buildAssessmentCoverage(
           ? 'تتيح باقة Expert التحليل التنفيذي ومحاكاة أدوار اللجنة والضغط والتفكير الاستراتيجي. يعرض هذا القسم فقط المحاور التي تثبت بيانات الجلسة أنها قِيست فعلياً.'
           : 'The Expert plan supports executive analysis, panel-role simulation, pressure testing, and strategic thinking. This section lists only dimensions verified as measured by the session data.'
 
+  const coverageIncompleteNote =
+    lang === 'ar'
+      ? ' ملاحظة: لم تكتمل هذه الجلسة حتى نهايتها المقررة، لذلك قد لا يغطي هذا التقييم كامل النطاق المخطط له. الدرجة والجاهزية المعروضتان مبنيتان على ما قُيس فعلاً في هذه الجلسة.'
+      : ' Note: this session did not reach its planned end, so this assessment may not cover the full intended scope. The score and readiness shown are based only on what was actually measured in this session.'
+  const finalSummary = coverageIncomplete ? `${summary}${coverageIncompleteNote}` : summary
+
   return {
     title,
-    summary,
+    summary: finalSummary,
     coveredAreaKeys: coveredAreas,
     coveredAreas: essentialLabels,
     recommendedForDeeperAssessment:
@@ -712,6 +723,19 @@ CORE EVIDENCE RULES:
 - Forbidden meanings include: deliberately evaded, tried to exaggerate, lacks transparency, claims expertise, dishonest, or not recommended for hiring.
 - Use evidence language instead, such as: the answer did not provide enough evidence, an inconsistency appeared, or the required technical depth was not demonstrated in this session.
 
+VOICE, ATTRIBUTION & FAIRNESS (additive — does not relax any rule above):
+- Do not narrate the interviewer's own actions in the first person. Forbidden forms include equivalents of "I faced", "I asked her", "I noticed", "I could not".
+- Do not refer to the user in the third person and do not narrate what "the candidate" did.
+- Address the user directly in the second person in every field, including barbarosAssessment.
+- Do not judge the user's intent or character. Describe only observable behavior and the evidence in the answers.
+- In replay[].stronger, never fabricate experiences, numbers, metrics, employers, projects, or credentials the user did not actually provide.
+- When the user gave no real example to build a stronger answer from, write replay[].stronger as a conditional training template (for example, framed as "if you had handled a situation like this, you could have...") instead of inventing facts.
+- A question that received no answer must not be scored and must not be interpreted as evasion or avoidance.
+- yearsExperience is the user's own years of experience, not the job's required experience. Never treat it as a hiring requirement or a threshold the user failed to meet.
+- Distinguish general professional experience from domain-specific experience, and do not conflate the two.
+- Do not use the user's name inside evaluative sentences; reserve the name for the report title only.
+- Preserve Barbaros's established evaluator personality: firm, direct, rigorous, professional, and improvement-oriented. These safeguards change attribution and evidence discipline only; they do not soften or replace Barbaros's voice.
+
 AUDIENCE & VOICE:
 ${audienceRule}
 
@@ -752,7 +776,7 @@ REPLAY:
 
 LENGTH:
 - verdict: 2-3 sentences describing the current session performance without an overall readiness label.
-- barbarosAssessment: 2-3 evidence-based sentences in Barbaros's voice without an overall readiness label.
+- barbarosAssessment: 2-3 evidence-based sentences in Barbaros's established firm evaluator voice, addressed directly to you as a direct evaluative judgment, without an overall readiness label.
 - hiddenWeakness: 2-3 sentences.
 - behavioralPatterns: 2-4 sentences.
 - recommendation: 2-3 direct next-step sentences based only on this session.
@@ -765,7 +789,7 @@ OUTPUT:
 Return ONLY one valid JSON object, with no markdown or text before or after:
 {
   "verdict": "<2-3 candidate-facing sentences about this session>",
-  "barbarosAssessment": "<2-3 first-person sentences in Barbaros's voice>",
+  "barbarosAssessment": "<2-3 evidence-based sentences in Barbaros's established firm evaluator voice, addressed directly to you as a direct evaluative judgment>",
   "competencies": ${competencyOutput},
   "hiddenWeakness": "<single most important recurring performance weakness>",
   "behavioralPatterns": "<2-4 sentences on recurring observable patterns>",
@@ -1048,11 +1072,15 @@ export async function generateReportData(
   const normalizedCoveredAreas = normalizeCoveredAreas(rawCoveredAreas)
   const coveredAreas = evidenceSufficient ? normalizedCoveredAreas : []
 
+  const coverageIncomplete =
+    config.coverageIncomplete === true || config.interviewIncomplete === true
+
   const assessmentCoverage = buildAssessmentCoverage(
     coveredAreas,
     config.language,
     config.plan,
-    evidenceSufficient
+    evidenceSufficient,
+    coverageIncomplete
   )
 
   if (!evidenceSufficient) {
@@ -1082,7 +1110,7 @@ export async function generateReportData(
     messages: [
       {
         role: 'user',
-        content: `Here is the full interview transcript. Produce the JSON hiring report now.\n\n${transcript}`,
+        content: `Here is the full interview transcript. Produce the JSON candidate-facing performance report now.\n\n${transcript}`,
       },
     ],
   })

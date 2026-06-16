@@ -1,0 +1,52 @@
+{
+  "session_id": "fixture-go-baseline",
+  "messages": [
+    {
+      "role": "assistant",
+      "content": "Welcome. To start, what attracted you to this customer support role?"
+    },
+    {
+      "role": "user",
+      "content": "I like solving problems for people and I stay calm when someone is frustrated. In my last job I worked the front desk, so I handled complaints every day and learned to listen first before responding."
+    },
+    {
+      "role": "assistant",
+      "content": "Tell me about a specific time you turned an unhappy customer into a satisfied one."
+    },
+    {
+      "role": "user",
+      "content": "A customer was upset that an order arrived late. I apologized without making excuses, checked the tracking, explained exactly what went wrong, and arranged a replacement with faster shipping. I followed up two days later to confirm it arrived, and he was satisfied in the end."
+    },
+    {
+      "role": "assistant",
+      "content": "This role uses a ticketing system and expects clear written updates. How do you keep your communication clear when the queue is heavy?"
+    },
+    {
+      "role": "user",
+      "content": "I write short, plain updates and confirm the next step at the end of every message. When the queue is heavy I group similar tickets and answer the time-sensitive ones first. I would rather send a quick honest status than leave someone waiting in silence."
+    },
+    {
+      "role": "assistant",
+      "content": "What part of support do you find most difficult, and how do you handle it?"
+    },
+    {
+      "role": "user",
+      "content": "Saying no to a request I cannot fulfill is hard for me. I handle it by being honest about the limit, explaining why, and offering the closest alternative I can. I have learned that a clear no with a reason lands better than a vague maybe."
+    },
+    {
+      "role": "assistant",
+      "content": "Thank you. That concludes the questions for this session."
+    }
+  ],
+  "config": {
+    "candidateName": "Omar Haddad",
+    "jobTitle": "Customer Support Specialist",
+    "institution": "Northwind SaaS",
+    "sector": "Technology",
+    "yearsExperience": "1-2 years",
+    "language": "en",
+    "plan": "go",
+    "coverageIncomplete": false
+  },
+  "covered_areas": ["role_fit", "communication_clarity", "ownership_level"]
+}

@@ -80,13 +80,14 @@ const AR_READINESS_LEVELS: Record<string, string> = {
   'Strong Readiness': 'جاهزية قوية',
   'Moderate Readiness': 'جاهزية متوسطة',
   'Developing Readiness': 'جاهزية قيد التطوير',
-  'Limited Readiness': 'جاهزية محدودة',
+  'Limited Readiness': 'غير جاهز حالياً',
   'Interview Incomplete': 'المقابلة غير مكتملة',
 
   // Legacy labels remain readable for previously generated reports.
   'Strong Hire': 'جاهز بقوة',
   'Maybe Hire': 'جاهزية متوسطة',
   'قابل للتوصية بحذر': 'جاهزية متوسطة',
+  'جاهزية محدودة': 'غير جاهز حالياً',
   'Risky Candidate': 'مخاطرة عالية',
   'Not Recommended': 'غير جاهز حالياً',
 }
@@ -1031,7 +1032,15 @@ function ReportCover({
                 {!incomplete && top && (
                   <GlanceCard
                     accent="#3F6B5E"
-                    label={isAr ? 'أقوى ميزة في أدائك' : 'Your Strongest Asset'}
+                    label={
+                      top.score < 65
+                        ? isAr
+                          ? 'أعلى جانب نسبي في هذه الجلسة'
+                          : 'Highest Relative Area This Session'
+                        : isAr
+                          ? 'أقوى ميزة في أدائك'
+                          : 'Your Strongest Asset'
+                    }
                     value={
                       <>
                         {isAr ? AR_COMPETENCY_NAMES[top.name] ?? top.name : top.name}

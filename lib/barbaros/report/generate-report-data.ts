@@ -664,6 +664,13 @@ function buildReportPrompt(
     ? 'Write ALL human-readable text fields in clear, professional Modern Standard Arabic. Keep JSON keys in English exactly as specified.'
     : 'Write ALL human-readable text fields in clear, professional English. Keep JSON keys in English exactly as specified.'
 
+  const arabicGenderRule = isArabic
+    ? `\n- Grammatical gender of address: use one consistent form for the user across every Arabic field. Never mix masculine and feminine forms for the same person.
+- Use the user's explicit self-reference in the transcript as the strongest signal.
+- Use the candidate name only when it is clearly and unambiguously gendered in context.
+- If no reliable signal exists, prefer neutral Arabic constructions that avoid gendered verbs and adjectives instead of guessing.`
+    : ''
+
   const coverageRule = isArabic
     ? `تم تحديد نطاق التقييم مسبقاً من بيانات الجلسة. لا تدّعِ قياس أي محور غير موجود في هذا الكائن:\n${JSON.stringify(assessmentCoverage, null, 2)}`
     : `Assessment coverage has already been resolved from the session data. Do not claim that any dimension was measured unless it appears in this object:\n${JSON.stringify(assessmentCoverage, null, 2)}`
@@ -730,6 +737,7 @@ VOICE, ATTRIBUTION & FAIRNESS (additive — does not relax any rule above):
 - Do not judge the user's intent or character. Describe only observable behavior and the evidence in the answers.
 - In replay[].stronger, never fabricate experiences, numbers, metrics, employers, projects, or credentials the user did not actually provide.
 - When the user gave no real example to build a stronger answer from, write replay[].stronger as a conditional training template (for example, framed as "if you had handled a situation like this, you could have...") instead of inventing facts.
+- Do not include any specific number, percentage, count, or amount inside replay[].stronger unless that exact figure appears in the interview transcript. When a figure would help, use a bracketed placeholder such as [نسبة النمو], [عدد الموردين], or [قيمة الميزانية]. This rule applies even when the example is hypothetical.
 - A question that received no answer must not be scored and must not be interpreted as evasion or avoidance.
 - yearsExperience is the user's own years of experience, not the job's required experience. Never treat it as a hiring requirement or a threshold the user failed to meet.
 - Distinguish general professional experience from domain-specific experience, and do not conflate the two.
@@ -783,7 +791,7 @@ LENGTH:
 - Do not add keys or repeat the same observation across fields.
 
 LANGUAGE:
-${languageRule}
+${languageRule}${arabicGenderRule}
 
 OUTPUT:
 Return ONLY one valid JSON object, with no markdown or text before or after:

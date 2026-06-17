@@ -146,6 +146,7 @@ function t(lang: string) {
     resume:          ar ? 'استئناف المقابلة'             : 'Resume Interview',
     sessionMissing:  ar ? 'تعذّر استئناف هذه الجلسة لأنها لم تعد متاحة. ابدأ مقابلة جديدة.' : 'This session is no longer available. Start a new interview.',
     focusLabel:      ar ? 'محور التقييم الحالي'          : 'Current Assessment Focus',
+    currentInterviewer: ar ? 'المقابِل الحالي'            : 'Current Interviewer',
     begin:           ar ? 'ابدأ المقابلة'              : 'Begin Interview',
     readyTitle:      ar ? 'الجلسة جاهزة'                : 'Interview Session Ready',
     transcript:      ar ? 'النصّ'                        : 'Transcript',
@@ -223,6 +224,9 @@ function InterviewRoom() {
   const [showTextInput, setShowTextInput]   = useState(false)
   const [showEndModal, setShowEndModal]     = useState(false)
   const [currentFocus, setCurrentFocus]     = useState<string | null>(null)
+  const [activeRoleId, setActiveRoleId]       = useState<string | null>(null)
+  const [activeRoleTitle, setActiveRoleTitle] = useState<string | null>(null)
+  const [roleTransition, setRoleTransition]   = useState<string | null>(null)
   const [isAwaitingFinalAnswer, setIsAwaitingFinalAnswer] = useState(false)
 
   const chatRef           = useRef<HTMLDivElement>(null)
@@ -240,6 +244,7 @@ function InterviewRoom() {
   const isPausedRef       = useRef(false)
   const pauseReasonRef     = useRef<'inactivity' | 'conduct' | null>(null)
   const isSpeakingRef     = useRef(false)
+  const activeRoleIdRef   = useRef<string | null>(null)
   const audioRef          = useRef<HTMLAudioElement | null>(null)
   const isMutedRef        = useRef(false)
   const audioReadyRef     = useRef(false)
@@ -870,6 +875,41 @@ function InterviewRoom() {
       setTimeLeft(Math.max(0, Math.floor(data.remainingSeconds)))
     }
 
+    // PANEL ROLE DISPLAY
+    // The engine response is the sole source of truth. This state is UI-only.
+    const incomingRoleId =
+      typeof data.activeRoleId === 'string' && data.activeRoleId.trim()
+        ? data.activeRoleId.trim()
+        : null
+    const incomingRoleTitle =
+      typeof data.activeRoleTitle === 'string' && data.activeRoleTitle.trim()
+        ? data.activeRoleTitle.trim()
+        : null
+
+    if (incomingRoleId) {
+      const previousRoleId = activeRoleIdRef.current
+
+      if (previousRoleId && previousRoleId !== incomingRoleId) {
+        const title = incomingRoleTitle ?? L.currentInterviewer
+        setRoleTransition(
+          CONFIG.language === 'ar'
+            ? `انتقلت المقابلة الآن إلى ${title}.`
+            : `The interview has now moved to ${title}.`
+        )
+      } else {
+        setRoleTransition(null)
+      }
+
+      activeRoleIdRef.current = incomingRoleId
+      setActiveRoleId(incomingRoleId)
+      setActiveRoleTitle(incomingRoleTitle)
+    } else {
+      activeRoleIdRef.current = null
+      setActiveRoleId(null)
+      setActiveRoleTitle(null)
+      setRoleTransition(null)
+    }
+
     let nextMessages = attemptedMessages
 
     if (data.excludeLastUserMessageFromAssessment === true) {
@@ -1399,6 +1439,21 @@ const goToReport = async () => {
                 </div>
               </div>
             </div>
+
+            {activeRoleId && (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+                <div style={{ padding: '5px 14px', border: '0.5px solid rgba(204,120,92,0.35)', borderRadius: 999, background: 'rgba(204,120,92,0.08)', maxWidth: 'min(80vw, 360px)', textAlign: 'center' }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: '#CC785C', lineHeight: 1.4 }}>
+                    {activeRoleTitle || L.currentInterviewer}
+                  </span>
+                </div>
+                {roleTransition && (
+                  <div aria-live="polite" style={{ fontSize: 11, color: 'rgba(240,237,232,0.5)', textAlign: 'center', maxWidth: 'min(80vw, 420px)', lineHeight: 1.5 }}>
+                    {roleTransition}
+                  </div>
+                )}
+              </div>
+            )}
 
             <div style={{ textAlign: 'center' }}>
               <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 0.6, textTransform: 'uppercase', color: glow === '#3A4252' ? 'rgba(240,237,232,0.65)' : glow, transition: 'color .3s' }}>{stateLabel}</div>

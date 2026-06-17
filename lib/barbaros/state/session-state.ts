@@ -133,6 +133,7 @@ export function createInitialState(
     recentTopics: [],
     askedQuestionFingerprints: [],
     contradictions: [],
+    sourceConsistencyIssues: [],
     candidateProfile: createInitialProfile(now),
     metrics: createInitialMetrics(now),
     scores: [],

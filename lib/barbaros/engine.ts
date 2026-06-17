@@ -27,6 +27,7 @@ import {
   getUnaddressedContradictions,
 } from './state/contradiction-tracker'
 import type { SemanticModelCall } from './state/contradiction-tracker'
+import { detectSourceConsistencyIssues } from './state/source-consistency'
 
 import { orchestrateBehavior } from './analysis/behavior/behavior-orchestrator'
 import type { OrchestratorSessionState } from './analysis/behavior/behavior-orchestrator'
@@ -382,12 +383,21 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
     console.error('[barbaros:contradiction] semantic detection failed, skipped:', err)
   }
 
+  // Source consistency (Group A: detect + persist ONLY — no probe, no prompt,
+  // no director, addressed never flipped). Deterministic + idempotent: re-runs
+  // merge by stable id, so issues never duplicate across turns.
+  const updatedSourceConsistencyIssues = detectSourceConsistencyIssues(
+    { config, phase: stateWithPhase.phase, now },
+    stateWithPhase.sourceConsistencyIssues ?? []
+  )
+
   const statePatch: Partial<SessionState> = {
     phase:              newPhase,
     phaseStartedAt:     phaseChanged ? now : state.phaseStartedAt,
     phaseQuestionCount: phaseChanged ? 1 : state.phaseQuestionCount + 1,
     config,
     contradictions:     updatedContradictions,
+    sourceConsistencyIssues: updatedSourceConsistencyIssues,
     recentTopics:       stateAfterCompetency.recentTopics,
     competencyCoverage: stateAfterCompetency.competencyCoverage,
     metrics: {

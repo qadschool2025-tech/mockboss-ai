@@ -7,6 +7,8 @@ import type {
   Message,
   CandidateProfile,
   SessionPauseReason,
+  SourceConsistencyIssue,
+  PendingSourceConsistency,
 } from './types'
 import type { SessionState } from './state/session-state'
 import type { WeaknessTrackerState } from './longitudinal/weakness-tracker'
@@ -28,6 +30,14 @@ import {
 } from './state/contradiction-tracker'
 import type { SemanticModelCall } from './state/contradiction-tracker'
 import { detectSourceConsistencyIssues } from './state/source-consistency'
+import {
+  assessmentExclusion,
+  buildSourceConsistencyContextMessages,
+  buildVerificationQuestion,
+  decideSourceConsistencyGate,
+  MAX_SOURCE_CONSISTENCY_PROMPTS,
+  selectNextSourceConsistencyIssue,
+} from './state/source-consistency-probe'
 
 import { orchestrateBehavior } from './analysis/behavior/behavior-orchestrator'
 import type { OrchestratorSessionState } from './analysis/behavior/behavior-orchestrator'
@@ -58,7 +68,10 @@ import {
 import type { PanelTurnState } from './panel/panel-rotation'
 
 import { buildPrompt } from './prompt/prompt-builder'
-import { buildClosingMessage } from './prompt/personality'
+import {
+  BARBAROS_CONDUCT_RULES,
+  buildClosingMessage,
+} from './prompt/personality'
 import {
   buildConductResponse,
   buildResumeResponse,
@@ -139,6 +152,18 @@ function stripScoreTag(content: string): string {
     .replace(/<score>[\s\S]*$/g, '')
     .replace(/<\/score>/g, '')
     .trim()
+}
+
+function clearResolvedConductTurn(
+  state: SessionState['conductState']
+): SessionState['conductState'] {
+  return {
+    ...normalizeConductState(state),
+    pendingQuestion: null,
+    lastViolationFingerprint: undefined,
+    lastViolationAction: undefined,
+    lastViolationSignal: undefined,
+  }
 }
 
 // Main Engine Function
@@ -277,11 +302,109 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
     ((stateWithPhase as any).directorBudget as InterventionBudget | undefined)
     ?? createInterventionBudget(config.plan)
 
-  // 3. Behavior pipeline
+  const lastUserMsg = [...assessmentMessages].reverse().find(m => m.role === 'user')
+
+  // 3. Source consistency verification gate. Group A detection stays pure and
+  // idempotent; Group B asks at most one deterministic verification question
+  // before Director/Panel/behavior/scoring/main LLM. Conduct preflight runs only
+  // when a source-consistency turn may happen, and reuses the same conduct rules.
+  const sourceConsistencyIssuesForGate = detectSourceConsistencyIssues(
+    { config, phase: stateWithPhase.phase, now },
+    stateWithPhase.sourceConsistencyIssues ?? []
+  )
+
+  const sourceConsistencyPromptCount =
+    stateWithPhase.sourceConsistencyPromptCount ?? 0
+  const hasSourceConsistencyPromptBudget =
+    sourceConsistencyPromptCount < MAX_SOURCE_CONSISTENCY_PROMPTS
+
+  const shouldRunSourceConsistencyGate =
+    stateWithPhase.pendingSourceConsistency != null ||
+    (hasSourceConsistencyPromptBudget &&
+      newPhase !== 'closing' &&
+      selectNextSourceConsistencyIssue(sourceConsistencyIssuesForGate) !== null)
+
+  if (shouldRunSourceConsistencyGate && lastUserMsg) {
+    const pendingSourceConsistencyIssue = stateWithPhase.pendingSourceConsistency
+      ? sourceConsistencyIssuesForGate.find(
+          issue => issue.id === stateWithPhase.pendingSourceConsistency?.issueId
+        ) ?? null
+      : null
+
+    const question = pendingSourceConsistencyIssue
+      ? buildVerificationQuestion(
+          pendingSourceConsistencyIssue.issueType ?? '',
+          config.language
+        )
+      : getCurrentAssessmentQuestion(assessmentMessages)
+
+    const conductPreflight = await classifySourceConsistencyConduct({
+      answer: lastUserMsg.content,
+      question,
+      now,
+    })
+
+    if (
+      conductPreflight.signal === 'off_topic_or_playful' ||
+      conductPreflight.signal === 'explicit_abuse'
+    ) {
+      const conductDecision = decideConduct(
+        conductPreflight.signal,
+        stateWithPhase.conductState,
+        question,
+        lastUserMsg.content,
+        lastUserMsg.clientMessageId
+      )
+
+      return buildConductDecisionOutput({
+        input,
+        decision: conductDecision,
+        question,
+        remainingSeconds,
+        promptCharCount: conductPreflight.promptCharCount,
+        truncated: false,
+      })
+    }
+  }
+
+  const sourceConsistencyGate = shouldRunSourceConsistencyGate
+    ? decideSourceConsistencyGate({
+        issues: sourceConsistencyIssuesForGate,
+        pending: stateWithPhase.pendingSourceConsistency ?? null,
+        lastUserMsg: lastUserMsg ?? null,
+        canAsk: newPhase !== 'closing',
+        promptCount: sourceConsistencyPromptCount,
+        now,
+      })
+    : null
+
+  if (sourceConsistencyGate?.action === 'ask') {
+    return buildSourceConsistencyOutput({
+      input,
+      issue: sourceConsistencyGate.issue,
+      issues: sourceConsistencyGate.issues,
+      pendingAfter: sourceConsistencyGate.pendingAfter,
+      promptCountAfter: sourceConsistencyGate.promptCountAfter,
+      exclusion: assessmentExclusion(sourceConsistencyGate),
+      remainingSeconds,
+    })
+  }
+
+  const verificationConsumedThisTurn =
+    sourceConsistencyGate?.verificationConsumedThisTurn === true
+
+  const evaluationMessages =
+    verificationConsumedThisTurn &&
+    assessmentMessages.length > 0 &&
+    assessmentMessages[assessmentMessages.length - 1]?.role === 'user'
+      ? assessmentMessages.slice(0, -1)
+      : assessmentMessages
+
+  // 4. Behavior pipeline
 
   const behaviorContext = {
     runtime: {
-      messages: assessmentMessages,
+      messages: evaluationMessages,
       currentPhase: stateWithPhase.phase,
       elapsedMinutes,
       now,
@@ -316,7 +439,7 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
     pendingTasks:     [],
   }
 
-  if (assessmentMessages.length > 0) {
+  if (evaluationMessages.length > 0) {
     behaviorResult = await orchestrateBehavior(behaviorContext, orchestratorState)
   }
 
@@ -325,23 +448,27 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
       ? (behaviorResult as any).activeRisks
       : []
 
-  // 4. State patches
+  // 5. State patches
 
-  const lastUserMsg = [...assessmentMessages].reverse().find(m => m.role === 'user')
-  const updatedTopics = lastUserMsg
-    ? recordTopicsFromText(stateWithPhase, lastUserMsg.content, now)
+  // When a verification reply is consumed, the preceding real interview answer
+  // remains the latest eligible user message and must still be processed once.
+  const evalLastUserMsg = [...evaluationMessages]
+    .reverse()
+    .find(message => message.role === 'user')
+  const updatedTopics = evalLastUserMsg
+    ? recordTopicsFromText(stateWithPhase, evalLastUserMsg.content, now)
     : stateWithPhase
 
   let stateAfterCompetency = updatedTopics
 
-  if (lastUserMsg) {
-    const matchedCompetencies = matchCompetenciesInText(stateWithPhase, lastUserMsg.content)
+  if (evalLastUserMsg) {
+    const matchedCompetencies = matchCompetenciesInText(stateWithPhase, evalLastUserMsg.content)
 
     for (const competency of matchedCompetencies) {
       stateAfterCompetency = applyEvidenceDelta(
         stateAfterCompetency,
         competency,
-        lastUserMsg.content,
+        evalLastUserMsg.content,
         now
       )
     }
@@ -349,7 +476,7 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
 
   const contradictionPatch = detectContradictions(
     {
-      messages: assessmentMessages,
+      messages: evaluationMessages,
       currentPhase: stateWithPhase.phase,
       now,
     },
@@ -370,7 +497,7 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
   try {
     const semanticPatch = await detectContradictionsSemantic(
       {
-        messages: assessmentMessages,
+        messages: evaluationMessages,
         currentPhase: stateWithPhase.phase,
         now,
       },
@@ -383,13 +510,8 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
     console.error('[barbaros:contradiction] semantic detection failed, skipped:', err)
   }
 
-  // Source consistency (Group A: detect + persist ONLY — no probe, no prompt,
-  // no director, addressed never flipped). Deterministic + idempotent: re-runs
-  // merge by stable id, so issues never duplicate across turns.
-  const updatedSourceConsistencyIssues = detectSourceConsistencyIssues(
-    { config, phase: stateWithPhase.phase, now },
-    stateWithPhase.sourceConsistencyIssues ?? []
-  )
+  const updatedSourceConsistencyIssues =
+    sourceConsistencyGate?.issues ?? sourceConsistencyIssuesForGate
 
   const statePatch: Partial<SessionState> = {
     phase:              newPhase,
@@ -398,6 +520,12 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
     config,
     contradictions:     updatedContradictions,
     sourceConsistencyIssues: updatedSourceConsistencyIssues,
+    pendingSourceConsistency: sourceConsistencyGate
+      ? sourceConsistencyGate.pendingAfter
+      : stateWithPhase.pendingSourceConsistency ?? null,
+    sourceConsistencyPromptCount: sourceConsistencyGate
+      ? sourceConsistencyGate.promptCountAfter
+      : stateWithPhase.sourceConsistencyPromptCount ?? 0,
     recentTopics:       stateAfterCompetency.recentTopics,
     competencyCoverage: stateAfterCompetency.competencyCoverage,
     metrics: {
@@ -424,13 +552,13 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
 
   const hasLiveSignal = confirmedSignals.length > 0 || insightCount > 0
 
-  if (lastUserMsg && hasLiveSignal) {
+  if (evalLastUserMsg && hasLiveSignal) {
     try {
       const rawScoreInput = buildRawScoreInput(
         behaviorResult,
         stateAfterCompetency.competencyCoverage,
         updatedContradictions,
-        assessmentMessages,
+        evaluationMessages,
         elapsedMinutes,
         now
       )
@@ -463,7 +591,7 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
       score = null
       console.error('[barbaros:profile] scoring failed, skipped this turn:', err)
     }
-  } else if (lastUserMsg) {
+  } else if (evalLastUserMsg) {
     console.log('[barbaros:profile] skipped, no confirmed signals this turn', JSON.stringify({
       turn:             assessmentMessages.filter(m => m.role === 'user').length,
       confirmedSignals: confirmedSignals.length,
@@ -477,8 +605,8 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
     .filter(([, cov]) => (cov as { coverage: number }).coverage < 50)
     .map(([key]) => key)
 
-  const answerSignals = lastUserMsg
-    ? quickAnswerSignals(lastUserMsg.content)
+  const answerSignals = evalLastUserMsg
+    ? quickAnswerSignals(evalLastUserMsg.content)
     : { vagueness: 'low' as const, hasExamples: true }
 
   const directorContext: DirectorContext = {
@@ -525,7 +653,7 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
       turnState: priorPanelTurnState,
       state: mergedStateForPanel,
       config,
-      messages: assessmentMessages,
+      messages: evaluationMessages,
       elapsedMinutes,
       totalMinutes,
     })
@@ -565,11 +693,22 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
 
   const built = buildPrompt(promptInput, false)
 
+  // Resolved verification exchanges remain available to the interview LLM as
+  // conversation context, while every evaluation path continues to use
+  // evaluationMessages. On the resolution turn, remove the current clarification
+  // from the assessment stream, then re-add it with its deterministic question so
+  // the LLM never sees an orphaned answer.
+  const promptMessages = buildSourceConsistencyContextMessages(
+    verificationConsumedThisTurn ? evaluationMessages : assessmentMessages,
+    updatedSourceConsistencyIssues,
+    config.language
+  )
+
   // 7. LLM call
 
   const rawContent = await callClaude({
     systemPrompt: built.systemPrompt,
-    messages: assessmentMessages,
+    messages: promptMessages,
   })
 
   const conductSignal = parseConductSignal(rawContent)
@@ -578,7 +717,7 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
     lastUserMsg &&
     (conductSignal === 'off_topic_or_playful' || conductSignal === 'explicit_abuse')
   ) {
-    const question = getCurrentAssessmentQuestion(assessmentMessages)
+    const question = getCurrentAssessmentQuestion(promptMessages)
     const conductDecision = decideConduct(
       conductSignal,
       stateWithPhase.conductState,
@@ -601,13 +740,9 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
 
   // A professional answer resolves the saved question. Escalation history stays
   // intact, but any future pause must resume from the then-current question.
-  statePatch.conductState = {
-    ...normalizeConductState(stateWithPhase.conductState),
-    pendingQuestion: null,
-    lastViolationFingerprint: undefined,
-    lastViolationAction: undefined,
-    lastViolationSignal: undefined,
-  }
+  statePatch.conductState = clearResolvedConductTurn(
+    stateWithPhase.conductState
+  )
 
   // 8. TTS
 
@@ -658,7 +793,9 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
     sessionPaused:   false,
     pauseReason:     null,
     responseKind:    'interview',
-    excludeLastUserMessageFromAssessment: false,
+    excludeLastUserMessageFromAssessment: sourceConsistencyGate
+      ? assessmentExclusion(sourceConsistencyGate).excludeLastUserMessageFromAssessment
+      : false,
     excludeResponseFromAssessment: false,
     remainingSeconds,
   }
@@ -727,6 +864,117 @@ async function buildConductDecisionOutput(
     responseKind: decision.action === 'none' ? 'interview' : decision.action,
     excludeLastUserMessageFromAssessment: true,
     excludeResponseFromAssessment: true,
+    remainingSeconds,
+  }
+}
+
+interface SourceConsistencyConductInput {
+  answer: string
+  question: string | null
+  now: number
+}
+
+async function classifySourceConsistencyConduct(
+  args: SourceConsistencyConductInput
+): Promise<{
+  signal: ReturnType<typeof parseConductSignal>
+  promptCharCount: number
+}> {
+  const { answer, question, now } = args
+
+  const systemPrompt = [
+    'Classify the candidate conduct for an interview turn.',
+    'Return exactly one internal conduct tag and no other text.',
+    ...BARBAROS_CONDUCT_RULES,
+  ].join('\n')
+
+  const userPrompt = [
+    `INTERVIEWER QUESTION:\n${question ?? '[none]'}`,
+    `CANDIDATE ANSWER:\n${answer}`,
+  ].join('\n\n')
+
+  const raw = await callClaude({
+    systemPrompt,
+    messages: [{ role: 'user', content: userPrompt, timestamp: now }],
+    maxTokens: 32,
+    temperature: 0,
+  })
+
+  return {
+    signal: parseConductSignal(raw),
+    promptCharCount: systemPrompt.length + userPrompt.length,
+  }
+}
+
+// Source Consistency — deterministic verification turn output. Short-circuits
+// before Director / Panel / behavior / scoring / main interview LLM.
+async function buildSourceConsistencyOutput(args: {
+  input: EngineInput
+  issue: SourceConsistencyIssue
+  issues: SourceConsistencyIssue[]
+  pendingAfter: PendingSourceConsistency
+  promptCountAfter: number
+  exclusion: {
+    excludeLastUserMessageFromAssessment: boolean
+    excludeResponseFromAssessment: boolean
+  }
+  remainingSeconds: number
+}): Promise<EngineOutput> {
+  const {
+    input,
+    issue,
+    issues,
+    pendingAfter,
+    promptCountAfter,
+    exclusion,
+    remainingSeconds,
+  } = args
+
+  const content = buildVerificationQuestion(
+    issue.issueType ?? '',
+    input.config.language
+  )
+
+  let audioBase64: string | null = null
+
+  try {
+    if (content.length > 0) {
+      audioBase64 = await synthesizeSpeech(content)
+    }
+  } catch {
+    audioBase64 = null
+  }
+
+  return {
+    content,
+    audioBase64,
+    score: null,
+    statePatch: {
+      config: input.config,
+      sourceConsistencyIssues: issues,
+      pendingSourceConsistency: pendingAfter,
+      sourceConsistencyPromptCount: promptCountAfter,
+      sessionPaused: false,
+      pauseReason: null,
+      conductState: clearResolvedConductTurn(input.state.conductState),
+    },
+    weaknessPatch: input.weaknessState,
+    growthPatch: input.growthState,
+    isEndOfSession: false,
+    phaseChanged: false,
+    snapshot: null,
+    promptCharCount: 0,
+    truncated: false,
+    coveredAreas: [],
+    activeRoleId: null,
+    activeRoleTitle: null,
+    sessionPaused: false,
+    pauseReason: null,
+    responseKind: 'interview',
+    excludeLastUserMessageFromAssessment:
+      exclusion.excludeLastUserMessageFromAssessment,
+    excludeResponseFromAssessment:
+      exclusion.excludeResponseFromAssessment,
     remainingSeconds,
   }
 }

@@ -134,6 +134,8 @@ export function createInitialState(
     askedQuestionFingerprints: [],
     contradictions: [],
     sourceConsistencyIssues: [],
+    pendingSourceConsistency: null,
+    sourceConsistencyPromptCount: 0,
     candidateProfile: createInitialProfile(now),
     metrics: createInitialMetrics(now),
     scores: [],

@@ -12,6 +12,7 @@ import {
 } from './source-consistency.ts'
 
 import type {
+  ConductSignal,
   Language,
   Message,
   PendingSourceConsistency,
@@ -19,6 +20,22 @@ import type {
 } from '../types'
 
 export const MAX_SOURCE_CONSISTENCY_PROMPTS = 2
+
+/**
+ * Pure. Decides whether a conduct signal observed on the verification turn may
+ * preempt a neutral source-consistency verification question.
+ *
+ * Only `explicit_abuse` (and equivalently serious, unsafe conduct) may block it.
+ * `off_topic_or_playful` must NOT suppress the verification question: the
+ * question is neutral and important, and a playful/short answer is not a reason
+ * to skip it. General conduct handling on ordinary interview turns is unaffected
+ * — this gate governs the source-consistency turn only.
+ */
+export function shouldConductBlockVerification(
+  signal: ConductSignal
+): boolean {
+  return signal === 'explicit_abuse'
+}
 
 const PRIORITY: readonly string[] = [
   'name_mismatch',

@@ -5,6 +5,7 @@ import {
   assessmentExclusion,
   buildSourceConsistencyContextMessages,
   buildVerificationQuestion,
+  shouldConductBlockVerification,
   MAX_SOURCE_CONSISTENCY_PROMPTS,
 } from '../lib/barbaros/state/source-consistency-probe.ts'
 
@@ -257,6 +258,13 @@ check('context: appends deterministic verification question', contextMessages.at
 check('context: appends resolved clarification as user context', contextMessages.at(-1)?.role === 'user' && contextMessages.at(-1)?.content === 'اسمي سارة خليل')
 check('context: unresolved/exhausted issues are not injected', buildSourceConsistencyContextMessages(contextBase, [expIssue({ verificationExhausted: true })], 'ar').length === contextBase.length)
 
+// Conduct preflight may only block a neutral verification question on serious
+// conduct (explicit_abuse). A playful/off-topic signal must NOT suppress it.
+check('preflight: explicit_abuse blocks verification', shouldConductBlockVerification('explicit_abuse') === true)
+check('preflight: off_topic_or_playful does NOT block verification', shouldConductBlockVerification('off_topic_or_playful') === false)
+check('preflight: professional does NOT block verification', shouldConductBlockVerification('professional') === false)
+check('preflight: uncertain does NOT block verification', shouldConductBlockVerification('uncertain') === false)
+
 const engineSource = await import('node:fs').then(({ readFileSync }) =>
   readFileSync(new URL('../lib/barbaros/engine.ts', import.meta.url), 'utf8')
 )
@@ -276,6 +284,11 @@ check('engine order: conduct preflight before source-consistency gate', prefligh
 check('engine order: verification return before behavior pipeline', verificationReturnIndex >= 0 && behaviorIndex > verificationReturnIndex)
 check('engine context: main LLM uses promptMessages', promptMessagesIndex >= 0)
 check('engine budget: no preflight starts after session cap', budgetGuardIndex >= 0)
+
+// Group B wiring: preflight gate uses the shared helper (not a hardcoded
+// off_topic check), and the readiness transition defers the gate one turn.
+check('engine wiring: preflight uses shouldConductBlockVerification', runEngineSource.includes('shouldConductBlockVerification(conductPreflight.signal)'))
+check('engine wiring: readiness transition defers source-consistency gate', runEngineSource.includes('!isReadinessTransition &&'))
 
 console.log(`\n${passed} checks passed, ${failed} failed`)
 console.log(failed > 0 ? 'SOME CHECKS FAILED' : 'ALL CHECKS PASSED')

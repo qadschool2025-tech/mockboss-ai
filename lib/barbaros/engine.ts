@@ -37,7 +37,9 @@ import {
   decideSourceConsistencyGate,
   MAX_SOURCE_CONSISTENCY_PROMPTS,
   selectNextSourceConsistencyIssue,
+  shouldConductBlockVerification,
 } from './state/source-consistency-probe'
+import { isReadinessAffirmation } from './state/readiness'
 
 import { orchestrateBehavior } from './analysis/behavior/behavior-orchestrator'
 import type { OrchestratorSessionState } from './analysis/behavior/behavior-orchestrator'
@@ -304,6 +306,18 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
 
   const lastUserMsg = [...assessmentMessages].reverse().find(m => m.role === 'user')
 
+  // 2c. Opening readiness transition. On the candidate's first turn, a bare
+  // readiness confirmation ("نعم مستعد", "yes", "ready") answers the opening
+  // "are you ready?" prompt — it is not a real interview answer. Treat it as a
+  // deterministic transition: advance to the first real question (do NOT re-ask
+  // readiness, do NOT run the source-consistency gate yet, do NOT redirect on
+  // conduct) and never score the confirmation.
+  const isReadinessTransition =
+    newPhase === 'opening' &&
+    messages.filter(m => m.role === 'user').length === 1 &&
+    lastUserMsg != null &&
+    isReadinessAffirmation(lastUserMsg.content)
+
   // 3. Source consistency verification gate. Group A detection stays pure and
   // idempotent; Group B asks at most one deterministic verification question
   // before Director/Panel/behavior/scoring/main LLM. Conduct preflight runs only
@@ -319,10 +333,11 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
     sourceConsistencyPromptCount < MAX_SOURCE_CONSISTENCY_PROMPTS
 
   const shouldRunSourceConsistencyGate =
-    stateWithPhase.pendingSourceConsistency != null ||
-    (hasSourceConsistencyPromptBudget &&
-      newPhase !== 'closing' &&
-      selectNextSourceConsistencyIssue(sourceConsistencyIssuesForGate) !== null)
+    !isReadinessTransition &&
+    (stateWithPhase.pendingSourceConsistency != null ||
+      (hasSourceConsistencyPromptBudget &&
+        newPhase !== 'closing' &&
+        selectNextSourceConsistencyIssue(sourceConsistencyIssuesForGate) !== null))
 
   if (shouldRunSourceConsistencyGate && lastUserMsg) {
     const pendingSourceConsistencyIssue = stateWithPhase.pendingSourceConsistency
@@ -344,10 +359,7 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
       now,
     })
 
-    if (
-      conductPreflight.signal === 'off_topic_or_playful' ||
-      conductPreflight.signal === 'explicit_abuse'
-    ) {
+    if (shouldConductBlockVerification(conductPreflight.signal)) {
       const conductDecision = decideConduct(
         conductPreflight.signal,
         stateWithPhase.conductState,
@@ -393,8 +405,14 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
   const verificationConsumedThisTurn =
     sourceConsistencyGate?.verificationConsumedThisTurn === true
 
+  // The readiness confirmation and a consumed verification reply are both
+  // non-interview answers: drop the trailing user message from evaluation so it
+  // is never scored or recorded as competency evidence.
+  const excludeTrailingUserFromEval =
+    verificationConsumedThisTurn || isReadinessTransition
+
   const evaluationMessages =
-    verificationConsumedThisTurn &&
+    excludeTrailingUserFromEval &&
     assessmentMessages.length > 0 &&
     assessmentMessages[assessmentMessages.length - 1]?.role === 'user'
       ? assessmentMessages.slice(0, -1)
@@ -714,6 +732,7 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
   const conductSignal = parseConductSignal(rawContent)
 
   if (
+    !isReadinessTransition &&
     lastUserMsg &&
     (conductSignal === 'off_topic_or_playful' || conductSignal === 'explicit_abuse')
   ) {
@@ -793,9 +812,11 @@ export async function runEngine(input: EngineInput): Promise<EngineOutput> {
     sessionPaused:   false,
     pauseReason:     null,
     responseKind:    'interview',
-    excludeLastUserMessageFromAssessment: sourceConsistencyGate
-      ? assessmentExclusion(sourceConsistencyGate).excludeLastUserMessageFromAssessment
-      : false,
+    excludeLastUserMessageFromAssessment: isReadinessTransition
+      ? true
+      : sourceConsistencyGate
+        ? assessmentExclusion(sourceConsistencyGate).excludeLastUserMessageFromAssessment
+        : false,
     excludeResponseFromAssessment: false,
     remainingSeconds,
   }

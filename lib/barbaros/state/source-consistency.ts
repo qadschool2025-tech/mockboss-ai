@@ -224,7 +224,7 @@ function extractNameFromCvText(text: unknown): string | null {
   return null
 }
 
-function isPlausibleNameLine(line: string): boolean {
+export function isPlausibleNameLine(line: string): boolean {
   if (!line) return false
   if (/[0-9٠-٩۰-۹]/.test(line)) return false // any digits
   if (line.includes('@')) return false                          // email
@@ -257,7 +257,7 @@ function extractExperiencePhrase(text: unknown): string | null {
 
 // ─── Helpers (deterministic) ────────────────────────────────────────────────────
 
-function normalizeName(value: unknown): string {
+export function normalizeName(value: unknown): string {
   if (typeof value !== 'string') return ''
   return value
     .replace(/[ً-ْـ]/g, '')      // tashkeel + tatweel
@@ -300,7 +300,7 @@ function extractNumbers(norm: string): number[] {
 }
 
 // Parses any experience text to an integer-year range [min, max].
-function parseExperienceRange(text: unknown): { min: number; max: number } | null {
+export function parseExperienceRange(text: unknown): { min: number; max: number } | null {
   if (typeof text !== 'string' || !text.trim()) return null
 
   const canon = text.trim().toLowerCase().replace(/\s+/g, ' ')

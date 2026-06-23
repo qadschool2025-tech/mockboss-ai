@@ -18,6 +18,7 @@ interface Message {
   voiceAnalysis?: VoiceAnalysis
   isQuestion?: boolean
   assessmentEligible?: boolean
+  responseKind?: string
   clientMessageId?: string
 }
 
@@ -937,6 +938,7 @@ function InterviewRoom() {
         score: data.excludeResponseFromAssessment === true ? undefined : data.score,
         isQuestion: isQuestionLike(content),
         assessmentEligible: data.excludeResponseFromAssessment !== true,
+        responseKind: typeof data.responseKind === 'string' ? data.responseKind : undefined,
       }
       nextMessages = [...nextMessages, newMsg]
     }
@@ -1204,10 +1206,15 @@ const goToReport = async () => {
   }, [isEnded])
 
   const started = messages.length > 0 || isLoading
+  // Show the latest assistant question. A source-consistency verification turn
+  // is responseKind 'interview' but excluded from assessment (assessmentEligible
+  // false) — it must still be shown and answered, so include it here. Conduct /
+  // pause / resume turns keep their own UI and are intentionally not shown here.
   const lastQuestion = [...messages]
     .reverse()
     .find(message =>
-      message.role === 'assistant' && message.assessmentEligible !== false
+      message.role === 'assistant' &&
+      (message.assessmentEligible !== false || message.responseKind === 'interview')
     )?.content || ''
 
   // Presence state

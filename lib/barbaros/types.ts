@@ -170,6 +170,21 @@ export interface SourceConsistencyIssue {
   addressed?: boolean
   detectedAt?: number
   phase?: InterviewPhase
+
+  // Group B — additive. cvEvidence / candidateStatement are never overwritten.
+  clarification?: string
+  clarifiedAt?: number
+
+  // Verification abandoned after the session prompt budget was spent. addressed
+  // stays false; this only stops re-selection. Not read by scoring/report.
+  verificationExhausted?: boolean
+}
+
+/** Group B: a verification question asked and awaiting the candidate's answer. */
+export interface PendingSourceConsistency {
+  issueId: string
+  askedAt: number
+  attempts?: number
 }
 
 /**
@@ -393,6 +408,12 @@ export interface InterviewState {
 
   // Source consistency issues (CV vs candidate claims)
   sourceConsistencyIssues?: SourceConsistencyIssue[]
+
+  // Group B verification probe in flight. null/undefined = nothing pending.
+  pendingSourceConsistency?: PendingSourceConsistency | null
+
+  // Group B: session-wide count of verification questions actually emitted.
+  sourceConsistencyPromptCount?: number
 
   // Aggregates
   candidateProfile: CandidateProfile

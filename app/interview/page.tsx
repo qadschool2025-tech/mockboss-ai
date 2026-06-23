@@ -260,7 +260,7 @@ function InterviewRoom() {
   const pendingClosingAudio    = useRef<string | null>(null)
 
   // FINAL ANSWER FLOW
-  // Once Barbaros has asked the final assessment question, the page waits for
+  // Once Rolevance has asked the final assessment question, the page waits for
   // the candidate's answer. It does not jump to the report at 0:00.
   const finalQuestionAskedRef   = useRef(false)
   const awaitingFinalAnswerRef  = useRef(false)
@@ -445,7 +445,7 @@ function InterviewRoom() {
   }, [beginClosing, genericClosingMessage])
 
   // CLOSING FLOW FIX
-  // Requests closing. If Barbaros is speaking, wait for audio to finish.
+  // Requests closing. If Rolevance is speaking, wait for audio to finish.
   // If forced, start immediately to avoid reaching 0:00 without farewell.
   const requestClosing = useCallback((message: string, audioBase64?: string | null, force = false) => {
     if (isClosingRef.current || isEndedRef.current) return
@@ -1262,9 +1262,9 @@ const goToReport = async () => {
 
   if (!mounted) {
     return (
-      <div style={{ fontFamily: 'system-ui, sans-serif', background: '#0B0D11', color: '#F0EDE8', minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
+      <div style={{ fontFamily: 'system-ui, sans-serif', background: '#0A0E21', color: '#F0EDE8', minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
         <div style={{ fontWeight: 900, fontSize: 22 }}>
-          <span style={{ color: '#F0EDE8' }}>Barbar</span><span style={{ color: '#CC785C' }}>os</span>
+          <span style={{ color: '#F0EDE8' }}>Role</span><span style={{ color: '#CC785C' }}>vance</span>
         </div>
         <div style={{ fontSize: 12, color: 'rgba(240,237,232,0.4)' }}>Preparing your interview…</div>
       </div>
@@ -1281,9 +1281,9 @@ const goToReport = async () => {
       )?.content || genericClosingMessage()
 
     return (
-      <div style={{ fontFamily: 'system-ui, sans-serif', background: '#0B0D11', color: '#F0EDE8', minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 24, textAlign: 'center' }}>
+      <div style={{ fontFamily: 'system-ui, sans-serif', background: '#0A0E21', color: '#F0EDE8', minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 24, textAlign: 'center' }}>
         <div style={{ fontWeight: 900, fontSize: 20, marginBottom: 28 }}>
-          <span style={{ color: '#F0EDE8' }}>Barbar</span><span style={{ color: '#CC785C' }}>os</span>
+          <span style={{ color: '#F0EDE8' }}>Role</span><span style={{ color: '#CC785C' }}>vance</span>
         </div>
 
         <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 28 }}>
@@ -1291,7 +1291,7 @@ const goToReport = async () => {
           <div className="ring ring2" style={{ borderColor: 'rgba(204,120,92,0.22)' }} />
           <div className="orb breathe" style={{ boxShadow: '0 0 70px rgba(204,120,92,0.45), inset 0 0 44px rgba(204,120,92,0.14)', borderColor: 'rgba(204,120,92,0.55)' }}>
             <div style={{ fontWeight: 900, fontSize: 28 }}>
-              <span style={{ color: '#F0EDE8' }}>B</span><span style={{ color: '#CC785C' }}>os</span>
+              <span style={{ color: '#F0EDE8' }}>R</span><span style={{ color: '#CC785C' }}>ol</span>
             </div>
           </div>
         </div>
@@ -1334,9 +1334,9 @@ const goToReport = async () => {
   // Ended → Generating report
   if (isEnded) {
     return (
-      <div style={{ fontFamily: 'system-ui, sans-serif', background: '#0B0D11', color: '#F0EDE8', minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 24, textAlign: 'center' }}>
+      <div style={{ fontFamily: 'system-ui, sans-serif', background: '#0A0E21', color: '#F0EDE8', minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 24, textAlign: 'center' }}>
         <div style={{ fontWeight: 900, fontSize: 20, marginBottom: 28 }}>
-          <span style={{ color: '#F0EDE8' }}>Barbar</span><span style={{ color: '#CC785C' }}>os</span>
+          <span style={{ color: '#F0EDE8' }}>Role</span><span style={{ color: '#CC785C' }}>vance</span>
         </div>
 
         {genError ? (
@@ -1381,7 +1381,7 @@ const goToReport = async () => {
   return (
     <div
       onClick={handleFirstInteraction}
-      style={{ fontFamily: 'system-ui, sans-serif', background: '#0B0D11', color: '#F0EDE8', minHeight: '100vh', display: 'flex', flexDirection: 'column', position: 'relative', overflow: 'hidden' }}
+      style={{ fontFamily: 'system-ui, sans-serif', background: '#0A0E21', color: '#F0EDE8', minHeight: '100vh', display: 'flex', flexDirection: 'column', position: 'relative', overflow: 'hidden' }}
     >
       {/* Top bar */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 18px', borderBottom: '0.5px solid rgba(255,255,255,0.07)', background: 'rgba(15,17,23,0.6)' }}>
@@ -1415,13 +1415,13 @@ const goToReport = async () => {
         </div>
       )}
 
-      {/* Center: Barbaros presence */}
+      {/* Center: Rolevance presence */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 26, padding: '20px 24px' }}>
         {!started ? (
           <>
             <div className="orb" style={{ boxShadow: `0 0 60px ${glow}55, inset 0 0 40px ${glow}22`, borderColor: `${glow}66` }}>
               <div style={{ fontWeight: 900, fontSize: 26 }}>
-                <span style={{ color: '#F0EDE8' }}>B</span><span style={{ color: '#CC785C' }}>os</span>
+                <span style={{ color: '#F0EDE8' }}>R</span><span style={{ color: '#CC785C' }}>ol</span>
               </div>
             </div>
 
@@ -1442,7 +1442,7 @@ const goToReport = async () => {
               {animated && <div className="ring ring2" style={{ borderColor: `${glow}33` }} />}
               <div className={animated ? 'orb breathe' : 'orb'} style={{ boxShadow: `0 0 70px ${glow}66, inset 0 0 44px ${glow}22`, borderColor: `${glow}77` }}>
                 <div style={{ fontWeight: 900, fontSize: 28 }}>
-                  <span style={{ color: '#F0EDE8' }}>B</span><span style={{ color: '#CC785C' }}>os</span>
+                  <span style={{ color: '#F0EDE8' }}>R</span><span style={{ color: '#CC785C' }}>ol</span>
                 </div>
               </div>
             </div>
@@ -1480,14 +1480,14 @@ const goToReport = async () => {
                 </div>
                 {conductNoticeKind === 'pause' && !sessionMissingError && (
                   <button type="button" onClick={() => void resumeInterview()} disabled={isLoading}
-                    style={{ marginTop: 12, padding: '10px 24px', background: isLoading ? '#1a1a22' : '#CC785C', border: 'none', borderRadius: 10, color: '#fff', fontSize: 13, fontWeight: 800, cursor: isLoading ? 'not-allowed' : 'pointer', fontFamily: 'inherit' }}>
+                    style={{ marginTop: 12, padding: '10px 24px', background: isLoading ? '#1A1D33' : '#CC785C', border: 'none', borderRadius: 10, color: '#fff', fontSize: 13, fontWeight: 800, cursor: isLoading ? 'not-allowed' : 'pointer', fontFamily: 'inherit' }}>
                     {L.resume}
                   </button>
                 )}
               </div>
             )}
 
-            {/* INTERVIEW CALL RESILIENCE — retry panel (not a Barbaros message) */}
+            {/* INTERVIEW CALL RESILIENCE — retry panel (not a Rolevance message) */}
             {callError && (
               <div style={{ maxWidth: 420, width: '100%', textAlign: 'center', padding: '14px 16px', background: 'rgba(239,68,68,0.06)', border: '0.5px solid rgba(239,68,68,0.28)', borderRadius: 14 }}>
                 <div style={{ fontSize: 12, fontWeight: 800, color: '#F87171', marginBottom: 6 }}>
@@ -1497,7 +1497,7 @@ const goToReport = async () => {
                   {callError}
                 </div>
                 <button type="button" onClick={sessionMissingError ? () => { window.location.href = '/onboarding' } : retryLastCall} disabled={isLoading}
-                  style={{ padding: '9px 26px', background: isLoading ? '#1a1a22' : '#CC785C', border: 'none', borderRadius: 10, color: '#fff', fontSize: 13, fontWeight: 800, cursor: isLoading ? 'not-allowed' : 'pointer', fontFamily: 'inherit' }}>
+                  style={{ padding: '9px 26px', background: isLoading ? '#1A1D33' : '#CC785C', border: 'none', borderRadius: 10, color: '#fff', fontSize: 13, fontWeight: 800, cursor: isLoading ? 'not-allowed' : 'pointer', fontFamily: 'inherit' }}>
                   {sessionMissingError ? L.newInterview : L.retry}
                 </button>
               </div>
@@ -1572,10 +1572,10 @@ const goToReport = async () => {
 
               return (
                 <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: msg.role === 'assistant' ? 'flex-start' : 'flex-end', maxWidth: '88%', alignSelf: msg.role === 'assistant' ? 'flex-start' : 'flex-end' }}>
-                  <div style={{ background: msg.role === 'assistant' ? '#1a1f2e' : '#1E3A8A', borderRadius: 10, padding: '10px 13px', fontSize: 13, lineHeight: 1.7 }}>
+                  <div style={{ background: msg.role === 'assistant' ? '#161E3C' : '#1E3A8A', borderRadius: 10, padding: '10px 13px', fontSize: 13, lineHeight: 1.7 }}>
                     <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: 0.5, marginBottom: 4, textTransform: 'uppercase', color: msg.role === 'assistant' ? '#8B96FF' : 'rgba(255,255,255,0.5)' }}>
                       {msg.role === 'assistant'
-                        ? <><span style={{ color: '#F0EDE8' }}>Barbar</span><span style={{ color: '#CC785C' }}>os</span></>
+                        ? <><span style={{ color: '#F0EDE8' }}>Role</span><span style={{ color: '#CC785C' }}>vance</span></>
                         : CONFIG.candidateName}
                     </div>
                     {msg.content}
@@ -1592,7 +1592,7 @@ const goToReport = async () => {
 
       {/* Text input panel */}
       {showTextInput && pauseReason !== 'conduct' && (
-        <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, background: '#0F1117', borderTop: '0.5px solid rgba(255,255,255,0.1)', padding: '14px 16px', zIndex: 25, boxShadow: '0 -10px 30px rgba(0,0,0,0.4)' }}>
+        <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, background: '#0E1430', borderTop: '0.5px solid rgba(255,255,255,0.1)', padding: '14px 16px', zIndex: 25, boxShadow: '0 -10px 30px rgba(0,0,0,0.4)' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
             <span style={{ fontSize: 11, color: 'rgba(240,237,232,0.5)' }}>{L.typeHere}</span>
             <button type="button" onClick={() => setShowTextInput(false)}
@@ -1602,10 +1602,10 @@ const goToReport = async () => {
           <div style={{ display: 'flex', gap: 8 }}>
             <textarea ref={inputRef} value={input} onChange={e => setInput(e.target.value)} onKeyDown={handleKey}
               placeholder={L.typeHere} disabled={isLoading || isClosing} rows={1}
-              style={{ flex: 1, background: '#16181F', border: '0.5px solid rgba(255,255,255,0.08)', color: '#F0EDE8', fontFamily: 'inherit', fontSize: 13, padding: '10px 12px', borderRadius: 8, outline: 'none', resize: 'none' }} />
+              style={{ flex: 1, background: '#141A33', border: '0.5px solid rgba(255,255,255,0.08)', color: '#F0EDE8', fontFamily: 'inherit', fontSize: 13, padding: '10px 12px', borderRadius: 8, outline: 'none', resize: 'none' }} />
 
             <button type="button" onClick={sendMessage} disabled={isLoading || isClosing || !input.trim()}
-              style={{ width: 46, background: (isLoading || isClosing || !input.trim()) ? '#1a1a22' : '#2563EB', border: 'none', borderRadius: 8, cursor: (isLoading || isClosing || !input.trim()) ? 'not-allowed' : 'pointer', color: '#fff', fontSize: 18, flexShrink: 0 }}>→</button>
+              style={{ width: 46, background: (isLoading || isClosing || !input.trim()) ? '#1A1D33' : '#2563EB', border: 'none', borderRadius: 8, cursor: (isLoading || isClosing || !input.trim()) ? 'not-allowed' : 'pointer', color: '#fff', fontSize: 18, flexShrink: 0 }}>→</button>
           </div>
         </div>
       )}
@@ -1613,7 +1613,7 @@ const goToReport = async () => {
       {/* End Interview modal */}
       {showEndModal && (
         <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 30, padding: 24 }}>
-          <div style={{ background: '#12151C', border: '0.5px solid rgba(255,255,255,0.1)', borderRadius: 16, padding: '26px 22px', maxWidth: 360, width: '100%', textAlign: 'center' }}>
+          <div style={{ background: '#101630', border: '0.5px solid rgba(255,255,255,0.1)', borderRadius: 16, padding: '26px 22px', maxWidth: 360, width: '100%', textAlign: 'center' }}>
             <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 12 }}>{L.endTitle}</div>
             <div style={{ fontSize: 13, color: 'rgba(240,237,232,0.6)', lineHeight: 1.6, marginBottom: 22 }}>{L.endBody}</div>
 

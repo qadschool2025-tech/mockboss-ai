@@ -48,7 +48,7 @@ export default function LandingPage() {
 
         {/* Quote 1 */}
         <div style={{ width: '100%', maxWidth: 600, marginBottom: 32, background: 'linear-gradient(135deg, rgba(204,120,92,0.08), rgba(204,120,92,0.03))', border: '0.5px solid rgba(204,120,92,0.25)', borderRadius: 16, padding: '24px' }}>
-          <div style={{ fontSize: 11, color: '#CC785C', fontWeight: 700, letterSpacing: 2, marginBottom: 12, textTransform: 'uppercase' }}>Why Barbaros?</div>
+          <div style={{ fontSize: 11, color: '#CC785C', fontWeight: 700, letterSpacing: 2, marginBottom: 12, textTransform: 'uppercase' }}>Why Rolevance?</div>
           <div style={{ fontSize: 'clamp(16px, 2.5vw, 22px)', fontWeight: 900, lineHeight: 1.5, letterSpacing: -0.5, color: '#1A1A1A' }}>
             ChatGPT will <span style={{ color: 'rgba(26,26,26,0.35)', textDecoration: 'line-through' }}>chat</span> with you.
             <br />
@@ -146,7 +146,7 @@ export default function LandingPage() {
         <div style={{ fontWeight: 900, fontSize: 14 }}>
           <span style={{ color: '#1A1A1A' }}>Barbar</span><span style={{ color: '#CC785C' }}>os</span>
         </div>
-        <div style={{ fontSize: 11, color: 'rgba(26,26,26,0.4)' }}>© 2026 Barbaros. All rights reserved.</div>
+        <div style={{ fontSize: 11, color: 'rgba(26,26,26,0.4)' }}>© 2026 Rolevance. All rights reserved.</div>
         <div style={{ fontSize: 11, color: 'rgba(26,26,26,0.4)' }}>Powered by AI</div>
       </footer>
 

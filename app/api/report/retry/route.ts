@@ -1,5 +1,5 @@
 // app/api/report/retry/route.ts
-// Barbaros report recovery: re-runs report generation for an existing
+// Rolevance report recovery: re-runs report generation for an existing
 // reportJobId WITHOUT re-running the interview. The job's saved messages,
 // config, and covered_areas are reused as-is.
 //

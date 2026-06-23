@@ -269,7 +269,7 @@ export default function PackagesPage() {
         <div style={{ fontWeight: 900, fontSize: 14 }}>
           <span style={{ color: '#1A1A1A' }}>Barbar</span><span style={{ color: '#CC785C' }}>os</span>
         </div>
-        <div style={{ fontSize: 11, color: 'rgba(26,26,26,0.4)' }}>© 2026 Barbaros. All rights reserved.</div>
+        <div style={{ fontSize: 11, color: 'rgba(26,26,26,0.4)' }}>© 2026 Rolevance. All rights reserved.</div>
       </footer>
 
     </div>

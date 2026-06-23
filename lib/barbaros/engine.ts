@@ -1240,10 +1240,10 @@ function buildCoverageStateForEnd(
 
 function defaultOpening(config: InterviewConfig): string {
   if (config.language === 'ar') {
-    return `مرحباً ${config.candidateName}، أنا Barbaros. نحن هنا اليوم لمقابلة وظيفة ${config.jobTitle} في ${config.institution}. هل أنت مستعد للبدء؟`
+    return `مرحباً ${config.candidateName}، أهلاً بك. نحن هنا اليوم لمقابلة وظيفة ${config.jobTitle} في ${config.institution}. هل أنت مستعد للبدء؟`
   }
 
-  return `Hello ${config.candidateName}, I'm Barbaros. We're here today for the ${config.jobTitle} position at ${config.institution}. Are you ready to begin?`
+  return `Hello ${config.candidateName}, welcome. We're here today for the ${config.jobTitle} position at ${config.institution}. Are you ready to begin?`
 }
 
 function buildRawScoreInput(

@@ -1,5 +1,5 @@
 // hooks/useSpeech.ts
-// Web Speech API — Free TTS for Barbaros Interview
+// Web Speech API — Free TTS for Rolevance Interview
 // Supports: Arabic, English, Mixed
 
 import { useCallback, useEffect, useRef, useState } from "react";

@@ -63,10 +63,10 @@ type Lang = 'en' | 'ar'
 
 const SERIF = 'Georgia, "Times New Roman", "Noto Serif", serif'
 
-const Barbaros = ({ size = 22 }: { size?: number }) => (
+const Rolevance = ({ size = 22 }: { size?: number }) => (
   <span style={{ fontWeight: 900, fontSize: size, letterSpacing: 0.2 }}>
-    <span style={{ color: '#1A1A1A' }}>Barbar</span>
-    <span style={{ color: '#CC785C' }}>os</span>
+    <span style={{ color: '#1A1A1A' }}>Role</span>
+    <span style={{ color: '#CC785C' }}>vance</span>
   </span>
 )
 
@@ -223,7 +223,7 @@ function ScoreRing({ score }: { score: number }) {
   )
 }
 
-/* ---------- Section: every section carries the Barbaros wordmark ---------- */
+/* ---------- Section: every section carries the Rolevance wordmark ---------- */
 
 const Section = ({
   children,
@@ -258,7 +258,7 @@ const Section = ({
         borderBottom: '0.5px solid rgba(26,26,26,0.08)',
       }}
     >
-      <Barbaros size={12} />
+      <Rolevance size={12} />
       <span
         style={{
           fontSize: 8.5,
@@ -604,7 +604,7 @@ function displayPlanName(plan: string) {
   if (key.includes('professional') || key.includes('pro')) return 'Professional Interview'
   if (key.includes('essential') || key.includes('basic') || key.includes('free')) return 'Essential Interview'
   if (key.includes('go')) return 'Go Interview'
-  return 'Barbaros Interview'
+  return 'Rolevance Interview'
 }
 
 /* Plan tier resolution (client-safe mirror of the server resolver in
@@ -716,7 +716,7 @@ function ReportCover({
           }}
         >
           <div>
-            <Barbaros size={26} />
+            <Rolevance size={26} />
             <div
               style={{
                 marginTop: 8,
@@ -1187,7 +1187,7 @@ function GeneratingScreen({ lang, tier }: { lang: Lang; tier: PlanTier }) {
         }}
       >
         <div style={{ animation: 'barbarosPulse 2.4s ease-in-out infinite', display: 'inline-block' }}>
-          <Barbaros size={26} />
+          <Rolevance size={26} />
         </div>
 
         <div
@@ -1423,7 +1423,7 @@ function ReportView({ data }: { data: Stored }) {
           borderBottom: '1px solid #E5DDD0',
         }}
       >
-        <Barbaros size={20} />
+        <Rolevance size={20} />
         <div style={{ fontSize: 12, color: 'rgba(26,26,26,0.45)' }}>
           {isAr ? 'تقرير المقابلة' : 'Interview Report'}
         </div>
@@ -1439,7 +1439,7 @@ function ReportView({ data }: { data: Stored }) {
           alignItems: 'center',
         }}
       >
-        <Barbaros size={20} />
+        <Rolevance size={20} />
 
         <div
           style={{
@@ -2234,7 +2234,7 @@ function ReportView({ data }: { data: Stored }) {
               borderTop: '0.5px solid rgba(26,26,26,0.10)',
             }}
           >
-            <Barbaros size={11} />
+            <Rolevance size={11} />
 
             <div
               style={{
@@ -2364,7 +2364,7 @@ function ReportContent() {
   if (!reportJobId) {
     return (
       <CenteredScreen>
-        <Barbaros size={20} />
+        <Rolevance size={20} />
         <div style={{ marginTop: 16, fontSize: 15, fontWeight: 700, color: '#1A1A1A' }}>
           {lang === 'ar' ? 'رابط التقرير غير مكتمل' : 'Incomplete report link'}
         </div>
@@ -2434,7 +2434,7 @@ function ReportContent() {
             textAlign: 'center',
           }}
         >
-          <Barbaros size={24} />
+          <Rolevance size={24} />
 
           <div
             style={{
@@ -2558,7 +2558,7 @@ export default function ReportPage() {
     <Suspense
       fallback={
         <CenteredScreen>
-          <Barbaros size={20} />
+          <Rolevance size={20} />
         </CenteredScreen>
       }
     >

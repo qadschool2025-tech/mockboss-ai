@@ -342,11 +342,11 @@ const S = {
 
 // ─── Logo ─────────────────────────────────────────────────────────────────────
 
-function BarbarosLogo() {
+function RolevanceLogo() {
   return (
     <div style={S.logo}>
-      <span style={{ color: '#1A1A1A' }}>Barbar</span>
-      <span style={{ color: '#CC785C' }}>os</span>
+      <span style={{ color: '#1A1A1A' }}>Role</span>
+      <span style={{ color: '#CC785C' }}>vance</span>
     </div>
   )
 }
@@ -411,7 +411,7 @@ function Step1({
     <>
       <StepLabel text="Step 1 of 2 · Candidate Profile" />
       <div style={S.heading}>Tell us about yourself</div>
-      <div style={S.subtext}>Barbaros uses this to align every question with your exact role.</div>
+      <div style={S.subtext}>Rolevance uses this to align every question with your exact role.</div>
 
       <div style={S.row}>
         <div>
@@ -517,9 +517,9 @@ function Step2({
   return (
     <>
       <StepLabel text="Step 2 of 2 · Interview Intelligence" />
-      <div style={S.heading}>Give Barbaros your context</div>
+      <div style={S.heading}>Give Rolevance your context</div>
       <div style={S.subtext}>
-        The more Barbaros knows, the closer the interview gets to a real hiring panel.
+        The more Rolevance knows, the closer the interview gets to a real hiring panel.
         This is where a generic interview becomes a tailored assessment.
       </div>
 
@@ -591,12 +591,12 @@ function Step2({
           value={data.jobRequirements}
           onChange={e => onChange('jobRequirements', e.target.value)}
         />
-        <div style={S.hint}>Barbaros maps your profile against these requirements during the interview.</div>
+        <div style={S.hint}>Rolevance maps your profile against these requirements during the interview.</div>
       </div>
 
       {/* Value box */}
       <div style={S.valueBox}>
-        <div style={S.valueTitle}>Barbaros uses your CV and job requirements to:</div>
+        <div style={S.valueTitle}>Rolevance uses your CV and job requirements to:</div>
         {[
           'Generate role-specific questions',
           'Detect skill gaps',
@@ -832,7 +832,7 @@ export default function OnboardingPage() {
   return (
     <div style={S.page}>
       <div style={S.nav}>
-        <BarbarosLogo />
+        <RolevanceLogo />
         <StepDots current={step} />
       </div>
 

@@ -38,10 +38,10 @@ export default function SessionEndPage() {
   }
 
   return (
-    <div style={{ fontFamily: 'system-ui, sans-serif', background: '#0B0D11', color: '#F0EDE8', minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+    <div style={{ fontFamily: 'system-ui, sans-serif', background: '#0A0E21', color: '#F0EDE8', minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
 
       {/* Nav */}
-      <nav style={{ background: '#0F1117', borderBottom: '0.5px solid rgba(255,255,255,0.07)', padding: '14px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <nav style={{ background: '#0E1430', borderBottom: '0.5px solid rgba(255,255,255,0.07)', padding: '14px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div onClick={() => router.push('/')} style={{ fontWeight: 900, fontSize: 22, letterSpacing: -0.5, cursor: 'pointer' }}>
           Barbar<span style={{ color: '#E85D2F' }}>os</span>
         </div>
@@ -65,7 +65,7 @@ export default function SessionEndPage() {
 
         {/* Score Card */}
         {score !== null ? (
-          <div style={{ background: '#111318', border: `1px solid ${getScoreColor(score)}30`, borderRadius: 16, padding: '32px 40px', marginBottom: 32, minWidth: 280 }}>
+          <div style={{ background: '#121A38', border: `1px solid ${getScoreColor(score)}30`, borderRadius: 16, padding: '32px 40px', marginBottom: 32, minWidth: 280 }}>
             <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 1.5, textTransform: 'uppercase', color: 'rgba(240,237,232,0.4)', marginBottom: 12 }}>
               Overall Score
             </div>
@@ -81,14 +81,14 @@ export default function SessionEndPage() {
             </p>
           </div>
         ) : (
-          <div style={{ background: '#111318', border: '0.5px solid rgba(255,255,255,0.08)', borderRadius: 16, padding: '32px 40px', marginBottom: 32 }}>
+          <div style={{ background: '#121A38', border: '0.5px solid rgba(255,255,255,0.08)', borderRadius: 16, padding: '32px 40px', marginBottom: 32 }}>
             <div style={{ fontSize: 13, color: 'rgba(240,237,232,0.4)' }}>Session completed successfully.</div>
           </div>
         )}
 
         {/* Session Info */}
         {config && (
-          <div style={{ background: '#0F1117', border: '0.5px solid rgba(255,255,255,0.07)', borderRadius: 10, padding: '14px 20px', marginBottom: 32, width: '100%', maxWidth: 320 }}>
+          <div style={{ background: '#0E1430', border: '0.5px solid rgba(255,255,255,0.07)', borderRadius: 10, padding: '14px 20px', marginBottom: 32, width: '100%', maxWidth: 320 }}>
             {[
               ['Role', config.jobTitle],
               ['Institution', config.institution],
@@ -123,15 +123,15 @@ export default function SessionEndPage() {
 
         {/* Motivational Quote */}
         <div style={{ marginTop: 48, fontSize: 13, color: 'rgba(240,237,232,0.25)', fontStyle: 'italic' }}>
-          "Anyone can practice. Barbaros makes you ready."
+          "Anyone can practice. Rolevance makes you ready."
         </div>
 
       </main>
 
       {/* Footer */}
-      <footer style={{ background: '#0D0F14', borderTop: '0.5px solid rgba(255,255,255,0.04)', padding: '16px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+      <footer style={{ background: '#080B1C', borderTop: '0.5px solid rgba(255,255,255,0.04)', padding: '16px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
         <div style={{ fontWeight: 900, fontSize: 14 }}>Barbar<span style={{ color: '#E85D2F' }}>os</span></div>
-        <div style={{ fontSize: 11, color: 'rgba(240,237,232,0.2)' }}>© 2026 Barbaros. All rights reserved.</div>
+        <div style={{ fontSize: 11, color: 'rgba(240,237,232,0.2)' }}>© 2026 Rolevance. All rights reserved.</div>
         <div style={{ fontSize: 11, color: 'rgba(240,237,232,0.2)' }}>Powered by AI</div>
       </footer>
 

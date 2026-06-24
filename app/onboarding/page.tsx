@@ -1,8 +1,23 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import type { ParsedCv } from '@/lib/barbaros/types'
+
+// ─── Live CV-analysis animation (keyframes + rotating status copy) ─────────────
+const BRB_KEYFRAMES = `
+@keyframes brbSpin { to { transform: rotate(360deg); } }
+@keyframes brbSlide { 0% { left: -42%; } 100% { left: 100%; } }
+@keyframes brbPulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.55; transform: scale(0.94); } }
+`
+
+const ANALYSING_STEPS = [
+  'Uploading your CV…',
+  'Extracting text…',
+  'Reading experience & skills…',
+  'Building your profile…',
+  'Almost there…',
+]
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -282,6 +297,35 @@ const S = {
     fontWeight: 700,
     fontFamily: "'Georgia', serif",
   },
+  cvAnalyzing: { marginTop: 10 },
+  cvAnalyzingRow: { display: 'flex', alignItems: 'center', gap: 8 },
+  cvAnalyzingText: { fontSize: 12.5, color: '#CC785C', fontWeight: 700, fontFamily: "'Georgia', serif" },
+  cvSpinner: {
+    width: 15,
+    height: 15,
+    flexShrink: 0,
+    borderRadius: '50%',
+    border: '2px solid #EBD9CD',
+    borderTopColor: '#CC785C',
+    animation: 'brbSpin 0.7s linear infinite',
+  },
+  cvProgressTrack: {
+    position: 'relative' as const,
+    overflow: 'hidden',
+    height: 4,
+    borderRadius: 4,
+    marginTop: 8,
+    background: '#EFE3D9',
+  },
+  cvProgressBar: {
+    position: 'absolute' as const,
+    top: 0,
+    height: '100%',
+    width: '42%',
+    borderRadius: 4,
+    background: 'linear-gradient(90deg, rgba(204,120,92,0), #CC785C 50%, rgba(204,120,92,0))',
+    animation: 'brbSlide 1.15s ease-in-out infinite',
+  },
   errorText: { fontSize: 12, color: '#C0392B', marginTop: 8, fontFamily: "'Georgia', serif" },
   valueBox: { background: '#1A1A1A', borderRadius: 14, padding: '20px 22px', marginTop: 26 },
   valueTitle: { fontSize: 12.5, fontWeight: 700, color: '#F5F1EB', marginBottom: 12, fontFamily: "'Georgia', serif", lineHeight: 1.5 },
@@ -514,8 +558,18 @@ function Step2({
   const ext = data.cvFileName.split('.').pop()?.toUpperCase() || 'CV'
   const cvReady = !hasCv || (!cvParsing)
 
+  // Rotating status copy so the analysing state is visibly alive, not frozen.
+  const [analyseTick, setAnalyseTick] = useState(0)
+  useEffect(() => {
+    if (!cvParsing) { setAnalyseTick(0); return }
+    const id = setInterval(() => setAnalyseTick(t => t + 1), 1400)
+    return () => clearInterval(id)
+  }, [cvParsing])
+  const analysingMsg = ANALYSING_STEPS[Math.min(analyseTick, ANALYSING_STEPS.length - 1)]
+
   return (
     <>
+      <style dangerouslySetInnerHTML={{ __html: BRB_KEYFRAMES }} />
       <StepLabel text="Step 2 of 2 · Interview Intelligence" />
       <div style={S.heading}>Give Barbaros your context</div>
       <div style={S.subtext}>
@@ -552,7 +606,7 @@ function Step2({
           <div style={S.dropzone(true)}>
             <div style={S.fileCard}>
               <div style={S.fileInfo}>
-                <div style={S.fileGlyph}>{ext}</div>
+                <div style={cvParsing ? { ...S.fileGlyph, animation: 'brbPulse 1s ease-in-out infinite' } : S.fileGlyph}>{ext}</div>
                 <div style={{ minWidth: 0 }}>
                   <div style={S.fileName}>{data.cvFileName}</div>
                   <div style={S.fileSize}>{formatSize(data.cvSize)} · attached</div>
@@ -566,8 +620,14 @@ function Step2({
         )}
 
         {cvParsing && (
-          <div style={S.cvParsing}>
-            <span>⟳</span> Analysing CV…
+          <div style={S.cvAnalyzing} role="status" aria-live="polite">
+            <div style={S.cvAnalyzingRow}>
+              <span style={S.cvSpinner} aria-hidden="true" />
+              <span style={S.cvAnalyzingText}>{analysingMsg}</span>
+            </div>
+            <div style={S.cvProgressTrack}>
+              <div style={S.cvProgressBar} />
+            </div>
           </div>
         )}
         {!cvParsing && hasCv && data.parsedCv && (
